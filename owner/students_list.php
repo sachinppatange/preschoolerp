@@ -313,7 +313,7 @@ require_once __DIR__ . '/../includes/header.php';
 ?>
 
 <div class="d-flex justify-content-end gap-2 mb-3">
-<button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addStudentModal">Add Student</button>
+      <a class="btn btn-success" href="<?php echo e(function_exists('site_url') ? site_url('/reception/admission.php') : '../reception/admission.php'); ?>">New Admission</a>
       <a class="btn btn-outline-secondary" href="?">Refresh</a>
     </div>
 
@@ -378,8 +378,9 @@ require_once __DIR__ . '/../includes/header.php';
               <td><?php echo $s['admission_date'] ? e(date('d M Y', strtotime($s['admission_date']))) : '—'; ?></td>
               <td><span class="badge <?php echo ($s['status']==='active' ? 'bg-success' : ($s['status']==='pending' ? 'bg-warning text-dark' : 'bg-secondary')); ?>"><?php echo $esc(ucfirst($s['status'])); ?></span></td>
               <td>
-                <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#viewStudentModal" data-id="<?php echo (int)$s['id']; ?>">View</button>
-                <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#editStudentModal" data-id="<?php echo (int)$s['id']; ?>">Edit</button>
+                <a class="btn btn-sm btn-outline-info" href="<?php echo e(function_exists('site_url') ? site_url('/owner/students_view.php?id=' . (int)$s['id']) : ('students_view.php?id=' . (int)$s['id'])); ?>">View</a>
+                <a class="btn btn-sm btn-outline-warning" href="<?php echo e(function_exists('site_url') ? site_url('/owner/students_edit.php?id=' . (int)$s['id']) : ('students_edit.php?id=' . (int)$s['id'])); ?>">Edit</a>
+                <a class="btn btn-sm btn-outline-success" href="<?php echo e(function_exists('site_url') ? site_url('/reception/students_form_print.php?id=' . (int)$s['id']) : ('../reception/students_form_print.php?id=' . (int)$s['id'])); ?>" target="_blank">PDF</a>
                 <?php echo render_secure_delete_button((int)$s['id'], 'Delete', 'Delete student?'); ?>
               </td>
             </tr>
@@ -402,147 +403,6 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
   </div>
 </div>
-
-<!-- Add Student Modal -->
-<div class="modal fade" id="addStudentModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <form method="post" action="?action=add" id="addStudentForm">
-        <div class="modal-header"><h5 class="modal-title">Add Student</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-        <div class="modal-body">
-          <div class="row g-2">
-            <div class="col-md-6"><label class="form-label">First Name *</label><input name="first_name" class="form-control" required></div>
-            <div class="col-md-6"><label class="form-label">Last Name</label><input name="last_name" class="form-control"></div>
-            <div class="col-md-4"><label class="form-label">DOB</label><input type="date" name="dob" class="form-control"></div>
-            <div class="col-md-4"><label class="form-label">Class</label>
-              <select name="class_id" class="form-select">
-                <option value="">Select class</option>
-                <?php foreach ($classList as $c): ?><option value="<?php echo (int)$c['id']; ?>"><?php echo $esc($c['name']); ?></option><?php endforeach; ?>
-              </select>
-            </div>
-            <div class="col-md-4"><label class="form-label">Parent</label>
-              <select name="parent_id" class="form-select">
-                <option value="">Select parent</option>
-                <?php foreach ($parentList as $p): ?><option value="<?php echo (int)$p['id']; ?>"><?php echo $esc($p['name']); ?></option><?php endforeach; ?>
-              </select>
-            </div>
-            <div class="col-md-6"><label class="form-label">Photo URL / Path</label><input name="photo_path" class="form-control" placeholder="/assets/uploads/photo.jpg"></div>
-            <div class="col-md-6"><label class="form-label">Admission Date</label><input type="date" name="admission_date" class="form-control"></div>
-            <div class="col-md-6"><label class="form-label">Status</label>
-              <select name="status" class="form-select">
-                <?php foreach ($statusOptions as $st): ?><option value="<?php echo $esc($st); ?>"><?php echo $esc(ucfirst($st)); ?></option><?php endforeach; ?>
-              </select>
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Cancel</button><button class="btn btn-success" type="submit">Add Student</button></div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<!-- Edit Student Modal -->
-<div class="modal fade" id="editStudentModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <form method="post" action="?action=edit" id="editStudentForm">
-        <div class="modal-header"><h5 class="modal-title">Edit Student</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-        <div class="modal-body">
-          <input type="hidden" name="id" id="edit_id">
-          <div class="row g-2">
-            <div class="col-md-6"><label class="form-label">First Name *</label><input name="first_name" id="edit_first_name" class="form-control" required></div>
-            <div class="col-md-6"><label class="form-label">Last Name</label><input name="last_name" id="edit_last_name" class="form-control"></div>
-            <div class="col-md-4"><label class="form-label">DOB</label><input type="date" name="dob" id="edit_dob" class="form-control"></div>
-            <div class="col-md-4"><label class="form-label">Class</label>
-              <select name="class_id" id="edit_class_id" class="form-select">
-                <option value="">Select class</option>
-                <?php foreach ($classList as $c): ?><option value="<?php echo (int)$c['id']; ?>"><?php echo $esc($c['name']); ?></option><?php endforeach; ?>
-              </select>
-            </div>
-            <div class="col-md-4"><label class="form-label">Parent</label>
-              <select name="parent_id" id="edit_parent_id" class="form-select">
-                <option value="">Select parent</option>
-                <?php foreach ($parentList as $p): ?><option value="<?php echo (int)$p['id']; ?>"><?php echo $esc($p['name']); ?></option><?php endforeach; ?>
-              </select>
-            </div>
-            <div class="col-md-6"><label class="form-label">Photo URL / Path</label><input name="photo_path" id="edit_photo_path" class="form-control"></div>
-            <div class="col-md-6"><label class="form-label">Admission Date</label><input type="date" name="admission_date" id="edit_admission_date" class="form-control"></div>
-            <div class="col-md-6"><label class="form-label">Status</label>
-              <select name="status" id="edit_status" class="form-select">
-                <?php foreach ($statusOptions as $st): ?><option value="<?php echo $esc($st); ?>"><?php echo $esc(ucfirst($st)); ?></option><?php endforeach; ?>
-              </select>
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Cancel</button><button class="btn btn-primary" type="submit">Save Changes</button></div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<!-- View modal -->
-<div class="modal fade" id="viewStudentModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Student details</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-      <div class="modal-body" id="viewStudentBody"><div class="text-center text-muted">Loading…</div></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
-    </div>
-  </div>
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  // Edit modal: fetch JSON and populate
-  var editModal = document.getElementById('editStudentModal');
-  if (editModal) {
-    editModal.addEventListener('show.bs.modal', function(event){
-      var id = event.relatedTarget.getAttribute('data-id');
-      // clear
-      ['edit_id','edit_first_name','edit_last_name','edit_dob','edit_class_id','edit_parent_id','edit_photo_path','edit_admission_date','edit_status'].forEach(function(idn){ var el = document.getElementById(idn); if (el) el.value = ''; });
-      fetch('?action=get&id=' + encodeURIComponent(id), { credentials:'same-origin' })
-        .then(function(resp){ return resp.ok ? resp.json() : Promise.reject(); })
-        .then(function(json){
-          if (json && json.ok && json.data) {
-            var d = json.data;
-            document.getElementById('edit_id').value = d.id || '';
-            document.getElementById('edit_first_name').value = d.first_name || '';
-            document.getElementById('edit_last_name').value = d.last_name || '';
-            document.getElementById('edit_dob').value = d.dob || '';
-            document.getElementById('edit_class_id').value = d.class_id || '';
-            document.getElementById('edit_parent_id').value = d.parent_id || '';
-            document.getElementById('edit_photo_path').value = d.photo_path || '';
-            document.getElementById('edit_admission_date').value = d.admission_date || '';
-            document.getElementById('edit_status').value = d.status || '';
-          } else {
-            alert(json.error || 'Failed to load student for edit.');
-            var mdl = bootstrap.Modal.getInstance(editModal);
-            if (mdl) mdl.hide();
-          }
-        })
-        .catch(function(){
-          alert('Failed to load student for edit.');
-          var mdl = bootstrap.Modal.getInstance(editModal);
-          if (mdl) mdl.hide();
-        });
-    });
-  }
-
-  // View modal: load fragment
-  var viewModal = document.getElementById('viewStudentModal');
-  if (viewModal) {
-    viewModal.addEventListener('show.bs.modal', function(event){
-      var id = event.relatedTarget.getAttribute('data-id');
-      var body = document.getElementById('viewStudentBody');
-      body.innerHTML = '<div class="text-center text-muted">Loading…</div>';
-      fetch('?action=view&id=' + encodeURIComponent(id), { credentials:'same-origin' })
-        .then(function(resp){ return resp.ok ? resp.text() : Promise.reject(); })
-        .then(function(html){ body.innerHTML = html; })
-        .catch(function(){ body.innerHTML = '<div class="text-danger">Failed to load details.</div>'; });
-    });
-  }
-});
-</script>
 
 <?php
 require_once __DIR__ . '/../includes/footer.php';

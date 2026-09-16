@@ -298,9 +298,8 @@ require_once __DIR__ . '/../includes/header.php';
 ?>
 
 <div class="d-flex gap-2 flex-wrap justify-content-end mb-3">
+  <a class="btn btn-success" href="admission.php">New Admission</a>
   <a class="btn btn-outline-secondary" href="?">Refresh</a>
-  <a class="btn btn-outline-primary" href="../reception/students_list_view.php">Students List View</a>
-  <a class="btn btn-outline-warning" href="../reception/students_list_edit.php">Students List Edit</a>
 </div>
 
 <?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo $esc($m); ?></div><?php endforeach; ?>
@@ -396,23 +395,11 @@ require_once __DIR__ . '/../includes/header.php';
                 </span>
               </td>
 
-              <!-- UPDATED: Actions are now links -->
               <td>
-                <a class="btn btn-sm btn-outline-info"
-                   href="../reception/students_list_view.php?id=<?php echo (int)$s['id']; ?>">
-                   View
-                </a>
-
-                <a class="btn btn-sm btn-outline-warning"
-                   href="../reception/students_list_edit.php?id=<?php echo (int)$s['id']; ?>">
-                   Edit
-                </a>
-
-                <a class="btn btn-sm btn-danger"
-                   href="?action=delete&id=<?php echo (int)$s['id']; ?>"
-                   onclick="return confirm('Delete student?');">
-                   Delete
-                </a>
+                <a class="btn btn-sm btn-outline-info" href="students_view.php?id=<?php echo (int)$s['id']; ?>">View</a>
+                <a class="btn btn-sm btn-outline-warning" href="students_list_edit.php?id=<?php echo (int)$s['id']; ?>">Edit</a>
+                <a class="btn btn-sm btn-outline-success" href="students_form_print.php?id=<?php echo (int)$s['id']; ?>" target="_blank">PDF</a>
+                <?php echo function_exists('render_secure_delete_button') ? render_secure_delete_button((int)$s['id'], 'Delete', 'Delete student?') : ''; ?>
               </td>
             </tr>
           <?php endforeach; else: ?>

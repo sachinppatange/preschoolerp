@@ -37,6 +37,9 @@ function panel_bootstrap(?string $role = null, array $options = []): void
     if (file_exists($includesDir . '/parent_account.php')) {
         require_once $includesDir . '/parent_account.php';
     }
+    if (file_exists($includesDir . '/student_record.php')) {
+        require_once $includesDir . '/student_record.php';
+    }
 
     require_once $includesDir . '/auth.php';
     require_once __DIR__ . '/helpers.php';

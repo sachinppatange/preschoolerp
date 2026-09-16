@@ -267,6 +267,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                         'academic_year' => $in['academic_year'],
 
                         'place_of_birth' => $in['place_of_birth'],
+                        'gender' => $in['gender'],
                         'nationality' => $in['nationality'],
                         'caste' => $in['caste'],
                         'languages' => $in['languages'],
