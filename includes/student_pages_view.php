@@ -65,6 +65,47 @@ $viewUrl = function_exists('student_view_url') ? student_view_url($id) : ('?id='
 $editUrl = function_exists('student_edit_url') ? student_edit_url($id) : ('../reception/students_list_edit.php?id=' . $id);
 $listUrl = function_exists('student_list_url') ? student_list_url() : '../reception/students_list.php';
 $printUrl = function_exists('student_print_url') ? student_print_url($id) : ('../reception/students_form_print.php?id=' . $id);
+$collectUrl = function_exists('site_url')
+    ? site_url('/accounts/fees_collection.php?student_id=' . $id)
+    : '../accounts/fees_collection.php?student_id=' . $id;
+
+$fees = function_exists('student_fee_summary') ? student_fee_summary($student) : ['total' => 0.0, 'paid' => 0.0, 'remaining' => 0.0];
+$payments = function_exists('student_fee_payments') ? student_fee_payments($id) : [];
+$money = static function (float $n): string {
+    return function_exists('format_money') ? format_money($n) : ('₹ ' . number_format($n, 2));
+};
+
+$siblings = [];
+if (!empty($student['parent_id'])) {
+    $siblings = safe_db_get_all(
+        "SELECT id, first_name, last_name, class_id, status FROM students WHERE parent_id = :p AND id <> :id ORDER BY first_name ASC",
+        [':p' => (int) $student['parent_id'], ':id' => $id]
+    ) ?: [];
+}
+
+$attendance = ['present' => 0, 'absent' => 0, 'leave' => 0, 'total' => 0];
+if (table_exists('attendance')) {
+    $attRows = safe_db_get_all(
+        "SELECT status, COUNT(*) AS c FROM attendance WHERE student_id = :id GROUP BY status",
+        [':id' => $id]
+    ) ?: [];
+    foreach ($attRows as $ar) {
+        $st = strtolower((string) ($ar['status'] ?? ''));
+        $c = (int) ($ar['c'] ?? 0);
+        if (isset($attendance[$st])) {
+            $attendance[$st] = $c;
+        }
+        $attendance['total'] += $c;
+    }
+}
+
+$remarks = [];
+if (table_exists('student_remarks')) {
+    $remarks = safe_db_get_all(
+        "SELECT remark, type, `date`, created_at FROM student_remarks WHERE student_id = :id ORDER BY created_at DESC LIMIT 8",
+        [':id' => $id]
+    ) ?: [];
+}
 
 $pageTitle = 'Student: ' . ($fullName !== '' ? $fullName : ('#' . $id));
 require_once __DIR__ . '/header.php';
@@ -72,6 +113,7 @@ require_once __DIR__ . '/header.php';
 <div class="d-flex flex-wrap justify-content-end gap-2 mb-3 no-print">
   <a class="btn btn-outline-secondary" href="<?php echo e($listUrl); ?>">Students</a>
   <a class="btn btn-outline-warning" href="<?php echo e($editUrl); ?>">Edit</a>
+  <a class="btn btn-outline-primary" href="<?php echo e($collectUrl); ?>">Collect Fees</a>
   <a class="btn btn-success" href="<?php echo e($printUrl); ?>" target="_blank">Download PDF</a>
 </div>
 
@@ -179,12 +221,103 @@ require_once __DIR__ . '/header.php';
       </div>
 
       <div class="card p-3 mb-3">
-        <h6 class="fw-bold">Fees &amp; office</h6>
+        <h6 class="fw-bold">Fees setup (admission)</h6>
         <div>Total fees: <?php echo e($dash($student['total_fees'] ?? '')); ?></div>
         <div class="small">Inst. 1: <?php echo e($dash($student['installment1'] ?? '')); ?> · Inst. 2: <?php echo e($dash($student['installment2'] ?? '')); ?> · Inst. 3: <?php echo e($dash($student['installment3'] ?? '')); ?></div>
         <div class="small">Remark: <?php echo e($dash($student['remark'] ?? '')); ?></div>
         <div class="small">Stamp: <?php echo e($dash($student['stamp'] ?? '')); ?></div>
         <div class="small">Parent signature: <?php echo e($dash($student['parent_signature'] ?? '')); ?></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card p-3 mt-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <h6 class="fw-bold mb-0">Payment records</h6>
+      <a class="btn btn-sm btn-primary no-print" href="<?php echo e($collectUrl); ?>">Add payment</a>
+    </div>
+    <div class="row g-2 mb-3">
+      <div class="col-md-4"><div class="border rounded p-2 text-center">Total fee<br><strong><?php echo e($money((float) $fees['total'])); ?></strong></div></div>
+      <div class="col-md-4"><div class="border rounded p-2 text-center text-success">Paid<br><strong><?php echo e($money((float) $fees['paid'])); ?></strong></div></div>
+      <div class="col-md-4"><div class="border rounded p-2 text-center text-danger">Remaining / pending<br><strong><?php echo e($money((float) $fees['remaining'])); ?></strong></div></div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-striped mb-0">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Receipt</th>
+            <th>Type</th>
+            <th class="text-end">Amount</th>
+            <th>Note</th>
+            <th>Collected by</th>
+            <th class="no-print"></th>
+          </tr>
+        </thead>
+        <tbody>
+        <?php if (!$payments): ?>
+          <tr><td colspan="7" class="text-muted">No payment recorded yet.</td></tr>
+        <?php else: foreach ($payments as $p):
+            $rid = (int) ($p['id'] ?? 0);
+            $receiptUrl = function_exists('site_url')
+                ? site_url('/accounts/receipt_print.php?id=' . $rid)
+                : '../accounts/receipt_print.php?id=' . $rid;
+            ?>
+          <tr>
+            <td><?php echo e((string) ($p['collected_at'] ?? $p['created_at'] ?? '')); ?></td>
+            <td><?php echo e((string) ($p['receipt_display'] ?? '')); ?></td>
+            <td><?php echo e((string) ($p['payment_type'] ?? '')); ?></td>
+            <td class="text-end"><?php echo e($money((float) ($p['paid_amount'] ?? 0))); ?></td>
+            <td><?php echo e((string) ($p['payment_note'] ?? '')); ?></td>
+            <td><?php echo e((string) ($p['collector_name'] ?? '')); ?></td>
+            <td class="no-print"><?php if ($rid > 0): ?><a class="btn btn-sm btn-outline-secondary" href="<?php echo e($receiptUrl); ?>" target="_blank">Receipt</a><?php endif; ?></td>
+          </tr>
+        <?php endforeach; endif; ?>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-md-4">
+      <div class="card p-3 h-100">
+        <h6 class="fw-bold">Attendance</h6>
+        <?php if ($attendance['total'] <= 0): ?>
+          <div class="text-muted">No attendance marked yet.</div>
+        <?php else: ?>
+          <div>Present: <strong><?php echo (int) $attendance['present']; ?></strong></div>
+          <div>Absent: <strong><?php echo (int) $attendance['absent']; ?></strong></div>
+          <div>Leave: <strong><?php echo (int) $attendance['leave']; ?></strong></div>
+          <div class="small text-muted">Total days: <?php echo (int) $attendance['total']; ?></div>
+        <?php endif; ?>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card p-3 h-100">
+        <h6 class="fw-bold">Siblings (same parent login)</h6>
+        <?php if (!$siblings): ?>
+          <div class="text-muted">No sibling linked.</div>
+        <?php else: foreach ($siblings as $sib):
+            $sid = (int) ($sib['id'] ?? 0);
+            $sname = trim((string) ($sib['first_name'] ?? '') . ' ' . (string) ($sib['last_name'] ?? ''));
+            $surl = function_exists('student_view_url') ? student_view_url($sid) : ('?id=' . $sid);
+            ?>
+          <div><a href="<?php echo e($surl); ?>"><?php echo e($sname !== '' ? $sname : ('Student #' . $sid)); ?></a>
+            <span class="small text-muted"><?php echo e((string) ($sib['status'] ?? '')); ?></span></div>
+        <?php endforeach; endif; ?>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card p-3 h-100">
+        <h6 class="fw-bold">Teacher remarks</h6>
+        <?php if (!$remarks): ?>
+          <div class="text-muted">No remarks yet.</div>
+        <?php else: foreach ($remarks as $rm): ?>
+          <div class="mb-2">
+            <div class="small text-muted"><?php echo e((string) ($rm['date'] ?? $rm['created_at'] ?? '')); ?> · <?php echo e((string) ($rm['type'] ?? 'note')); ?></div>
+            <div><?php echo e((string) ($rm['remark'] ?? '')); ?></div>
+          </div>
+        <?php endforeach; endif; ?>
       </div>
     </div>
   </div>
