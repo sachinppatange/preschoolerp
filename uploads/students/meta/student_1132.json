@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260811-6940",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "Anay",
+        "middle": "Ram",
+        "last": "Chigure",
+        "dob": "2022-05-02",
+        "gender": "male"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "NTC",
+    "languages": "Marathi",
+    "address": {
+        "address": "MIDC, 4no.",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Ram",
+        "phone": "9766060073"
+    },
+    "mother": {
+        "first": "Suchita",
+        "phone": "8180850073"
+    },
+    "guardian": {
+        "name": "Vaibhav chigure",
+        "email": "No",
+        "phone": "8180815887",
+        "relation": "Nephew"
+    },
+    "previous_school": "Pioneer play school",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "Vrinda",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "19000.00",
+        "installments": [
+            "6500",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-11 07:36:04"
+}

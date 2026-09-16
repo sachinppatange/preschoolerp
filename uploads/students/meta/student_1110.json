@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260727-4918",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 15,
+    "student": {
+        "first": "Swaranjali",
+        "middle": "Kailash",
+        "last": "Bhagnure",
+        "dob": "2023-05-21",
+        "gender": "female"
+    },
+    "place_of_birth": "Nanded",
+    "nationality": "Indian",
+    "caste": "Maratha",
+    "languages": "Marathi",
+    "address": {
+        "address": "Shashkiy colony",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Kailash",
+        "phone": "9766530698"
+    },
+    "mother": {
+        "first": "Pooja",
+        "phone": "8329899182"
+    },
+    "guardian": {
+        "name": "Nandkumar bhagnure",
+        "email": "No",
+        "phone": "8432017377",
+        "relation": "Grandfather"
+    },
+    "previous_school": "No",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "19000.00",
+        "installments": [
+            "9000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-07-27 08:26:37"
+}

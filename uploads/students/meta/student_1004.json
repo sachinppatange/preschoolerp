@@ -1,0 +1,74 @@
+{
+    "form_no": "FORM-20260222-4827",
+    "location": "",
+    "admission_seeking_in": 14,
+    "student": {
+        "first": "Shivaji",
+        "middle": "A",
+        "last": "Patil",
+        "dob": "2026-02-25",
+        "gender": "male"
+    },
+    "place_of_birth": "A",
+    "nationality": "A",
+    "caste": "A",
+    "languages": "A",
+    "address": {
+        "address": "A",
+        "city": "A",
+        "state": "A",
+        "country": "A",
+        "pin": "A"
+    },
+    "father": {
+        "first": "B",
+        "middle": "B",
+        "last": "B",
+        "email": "info@spdesign.in",
+        "edu": "B",
+        "profession": "B",
+        "designation": "B",
+        "phone": ""
+    },
+    "mother": {
+        "first": "B",
+        "middle": "B",
+        "last": "B",
+        "email": "info@spdesign.in",
+        "edu": "B",
+        "profession": "B",
+        "designation": "B",
+        "phone": "09096463943"
+    },
+    "guardian": {
+        "name": "Sachin Patange",
+        "email": "info@spdesign.in",
+        "relation": "AAA",
+        "phone": "09096463943"
+    },
+    "previous_school": "AAA",
+    "medical": {
+        "allergies": "AA",
+        "health_conditions": "A",
+        "current_medications": "A",
+        "immunization_records": "A"
+    },
+    "siblings": {
+        "1": "A",
+        "2": "A"
+    },
+    "additional_info": "A",
+    "application_date": "2026-02-22",
+    "parent_signature": "sasas",
+    "fees": {
+        "total": "18000.00",
+        "installments": [
+            "",
+            "",
+            ""
+        ],
+        "remark": "ddasd",
+        "stamp": ""
+    },
+    "created_at": "2026-02-22T20:19:21+01:00"
+}

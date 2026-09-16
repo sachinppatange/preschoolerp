@@ -1,0 +1,12 @@
+# Allow direct access to static assets (CSS, JS, images, uploads).
+<IfModule mod_rewrite.c>
+    RewriteEngine Off
+</IfModule>
+
+Options -Indexes
+
+<IfModule mod_headers.c>
+    <FilesMatch "\.(png|jpe?g|gif|webp|svg|ico|css|js|woff2?)$">
+        Header set Cache-Control "public, max-age=604800"
+    </FilesMatch>
+</IfModule>

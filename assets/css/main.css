@@ -1,0 +1,51 @@
+/* assets/css/main.css — legacy + shared utilities (loads after Bootstrap) */
+@import url('tokens.css');
+
+body {
+  font-family: var(--ps-font-body);
+  color: var(--ps-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Header / nav */
+.site-header { background: #fff; }
+.navbar-brand .fw-bold { font-size: 1rem; }
+.navbar .btn-primary { border-radius: 10px; padding: .45rem .85rem; font-weight: 700; }
+
+/* Breadcrumbs */
+.breadcrumb { background: transparent; padding-left: 0; margin-bottom: 0.5rem; }
+.breadcrumb .breadcrumb-item + .breadcrumb-item::before { color: #cbd5e1; }
+
+/* Flash messages container margin already in header; small adjustments */
+.alert { border-radius: .6rem; }
+
+/* Card styling overrides */
+.card { border-radius: 12px; }
+
+/* Role-pill used in some pages */
+.role-pill {
+  display: inline-block;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #e6edf3;
+  color: #0b1220;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* Enquiry card specifics */
+.enquiry-card .form-control { border-radius: 10px; padding: .55rem .75rem; }
+
+/* Small utilities */
+.small-muted { color: #6b7280; }
+
+/* Footer */
+.site-footer { background: linear-gradient(90deg,#002775,#750000); color: #fff; }
+
+/* Responsive helpers for small screens */
+@media (max-width: 575.98px) {
+  .navbar .d-none.d-md-block { display: none !important; }
+  .navbar-brand img { height:48px; width:48px; }
+  .hero-title { font-size: 1.35rem; }
+}

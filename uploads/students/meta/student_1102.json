@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260629-1475",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 14,
+    "student": {
+        "first": "Avidnya",
+        "middle": "Sunil",
+        "last": "Bhalerao",
+        "dob": "2022-03-04",
+        "gender": "female"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "Sc",
+    "languages": "Marathi",
+    "address": {
+        "address": "Rajwadi, harangul, latur",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Sunil",
+        "phone": "7820179639"
+    },
+    "mother": {
+        "first": "Arti",
+        "phone": "7020202467"
+    },
+    "guardian": {
+        "name": "Vandana landge",
+        "email": "sunilbhalerao1993@gmail.com",
+        "phone": "9356897332",
+        "relation": "Grandmother"
+    },
+    "previous_school": "No",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": "No"
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "18000.00",
+        "installments": [
+            "5000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-06-29 07:16:02"
+}

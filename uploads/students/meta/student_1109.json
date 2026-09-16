@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260727-1827",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 17,
+    "student": {
+        "first": "Anshika",
+        "middle": "Yuvraj",
+        "last": "Sonkamble",
+        "dob": "2022-03-07",
+        "gender": "female"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "Sc",
+    "languages": "Marathi,hindi, english",
+    "address": {
+        "address": "Hadco colony",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Yuvraj",
+        "phone": "7028338383"
+    },
+    "mother": {
+        "first": "Sanghmitra",
+        "phone": "8888693383"
+    },
+    "guardian": {
+        "name": "Kalpna bhagwan sonkamble",
+        "email": "No",
+        "phone": "9307111014",
+        "relation": "Grandmother"
+    },
+    "previous_school": "Lkg",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "18000.00",
+        "installments": [
+            "5000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-07-27 07:42:56"
+}

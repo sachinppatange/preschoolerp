@@ -1,0 +1,60 @@
+{
+    "form_no": "FORM-20260225-9570",
+    "location": "Latur",
+    "admission_seeking_in": 15,
+    "student": {
+        "first": "Mukesh",
+        "middle": "A",
+        "last": "A",
+        "dob": "2026-02-17",
+        "gender": "male"
+    },
+    "place_of_birth": "",
+    "nationality": "India",
+    "caste": "OBC",
+    "languages": "Marathi",
+    "address": {
+        "address": "Atharv Media, Hanuman Nagar, Near MIT Medical Collage,",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Mukesh",
+        "phone": "09096463943"
+    },
+    "mother": {
+        "first": "Sachin",
+        "phone": "09096463943"
+    },
+    "guardian": {
+        "name": "Sachin Patange",
+        "email": "info@spdesign.in",
+        "phone": "09096463943",
+        "relation": "AAA"
+    },
+    "previous_school": "AAA",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "No",
+        "current_medications": "No",
+        "immunization_records": "No"
+    },
+    "siblings": {
+        "1": "No",
+        "2": ""
+    },
+    "additional_info": "gfgfg",
+    "fees": {
+        "total": "19000.00",
+        "installments": [
+            "",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-02-25 13:42:52"
+}

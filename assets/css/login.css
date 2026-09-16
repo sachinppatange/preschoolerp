@@ -1,0 +1,158 @@
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700&family=Nunito:wght@400;600;700;800&display=swap');
+@import url('tokens.css');
+
+body.login-page {
+  font-family: var(--ps-font-body);
+  min-height: 100vh;
+  background: linear-gradient(160deg, #fff0f3 0%, #e8f4ff 45%, #fff8e8 100%);
+  color: var(--ps-ink);
+}
+
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--ps-surface);
+  border-radius: var(--ps-radius-lg);
+  box-shadow: var(--ps-shadow);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  overflow: hidden;
+}
+.login-card-header {
+  padding: 1.75rem 1.75rem 0;
+  text-align: center;
+}
+.login-card-header .logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  object-fit: cover;
+  box-shadow: var(--ps-shadow-sm);
+  margin-bottom: 0.75rem;
+}
+.login-card-header h1 {
+  font-family: var(--ps-font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin: 0 0 0.25rem;
+}
+.login-card-header p {
+  color: var(--ps-ink-muted);
+  font-size: 0.9rem;
+  margin: 0;
+}
+.login-card-body {
+  padding: 1.5rem 1.75rem 1.75rem;
+}
+
+.login-role-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+.login-role-badge.owner     { background: #ffe8ee; color: #be185d; }
+.login-role-badge.accounts { background: #e0f2fe; color: #0369a1; }
+.login-role-badge.teacher  { background: #d1fae5; color: #047857; }
+.login-role-badge.reception{ background: #fef3c7; color: #b45309; }
+.login-role-badge.parent   { background: #ede9fe; color: #6d28d9; }
+
+.login-card .form-control,
+.login-card .input-group-text {
+  border-radius: var(--ps-radius-sm);
+  border-color: var(--ps-border);
+  padding: 0.65rem 0.9rem;
+}
+.login-card .btn-primary {
+  background: linear-gradient(135deg, var(--ps-coral), var(--ps-coral-dark));
+  border: none;
+  font-weight: 700;
+  border-radius: var(--ps-radius-sm);
+  padding: 0.7rem;
+}
+.login-card .btn-success {
+  background: linear-gradient(135deg, #10b981, #059669);
+  border: none;
+  font-weight: 700;
+  border-radius: var(--ps-radius-sm);
+}
+.login-card .otp-sent-box {
+  background: var(--ps-bg);
+  border-radius: var(--ps-radius-sm);
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--ps-border);
+}
+
+.login-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--ps-ink-muted);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+.login-back:hover { color: var(--ps-coral-dark); }
+
+/* Hub page (login.php) */
+.login-hub {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+.login-hub-card {
+  background: var(--ps-surface);
+  border-radius: var(--ps-radius-lg);
+  box-shadow: var(--ps-shadow);
+  padding: 2rem;
+  border: 1px solid var(--ps-border);
+}
+.login-hub .btn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-top: 1.25rem;
+}
+.login-hub .ps-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1rem 1.1rem;
+  border-radius: var(--ps-radius);
+  font-weight: 800;
+  text-decoration: none;
+  box-shadow: var(--ps-shadow-sm);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  border: none;
+  font-size: 0.95rem;
+}
+.login-hub .ps-btn:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--ps-shadow);
+  text-decoration: none;
+  color: inherit;
+}
+.login-hub .ps-pink   { background: linear-gradient(135deg, #ffb3c6, #ff95b8); color: #3b1b2b; }
+.login-hub .ps-blue   { background: linear-gradient(135deg, #a7d8ff, #7fc8ff); color: #07304a; }
+.login-hub .ps-yellow { background: linear-gradient(135deg, #fff2a6, #ffe67a); color: #4a3b00; }
+.login-hub .ps-green  { background: linear-gradient(135deg, #b7f3c6, #8ff0a6); color: #05321a; }
+.login-hub .ps-purple { background: linear-gradient(135deg, #d6b3ff, #c99bff); color: #2e0f44; }
+.login-hub .ps-orange { background: linear-gradient(135deg, #ffd8b3, #ffc27a); color: #3b2300; }
+
+@media (max-width: 520px) {
+  .login-card-body { padding: 1.25rem; }
+  .login-hub-card { padding: 1.25rem; }
+}

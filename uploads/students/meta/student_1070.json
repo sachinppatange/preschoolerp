@@ -1,0 +1,17 @@
+{
+    "student": {
+        "first": "Utkarsh",
+        "middle": "Pravin",
+        "last": "Gharnikar",
+        "dob": "2021-01-01",
+        "gender": "male"
+    },
+    "class_id": null,
+    "school_id": 1,
+    "academic_year": "2025-26",
+    "parent_id": 1125,
+    "parent_name": "Pravin Gharnikar",
+    "total_fees": "16500",
+    "meta": "{\"notes\"}",
+    "created_at": "2026-03-22T17:56:05+00:00"
+}

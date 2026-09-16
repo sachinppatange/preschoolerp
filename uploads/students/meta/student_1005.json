@@ -1,0 +1,74 @@
+{
+    "form_no": "FORM-20260222-3067",
+    "location": "Latur",
+    "admission_seeking_in": 15,
+    "student": {
+        "first": "Shayam",
+        "middle": "A",
+        "last": "Tete",
+        "dob": "2026-02-19",
+        "gender": "male"
+    },
+    "place_of_birth": "A",
+    "nationality": "A",
+    "caste": "A",
+    "languages": "A",
+    "address": {
+        "address": "A",
+        "city": "A",
+        "state": "A",
+        "country": "A",
+        "pin": "A"
+    },
+    "father": {
+        "first": "A",
+        "middle": "A",
+        "last": "Patange",
+        "email": "info@spdesign.in",
+        "edu": "A",
+        "profession": "A",
+        "designation": "A",
+        "phone": "09096463943"
+    },
+    "mother": {
+        "first": "A",
+        "middle": "A",
+        "last": "Patange",
+        "email": "info@spdesign.in",
+        "edu": "A",
+        "profession": "A",
+        "designation": "A",
+        "phone": "09096463943"
+    },
+    "guardian": {
+        "name": "A",
+        "email": "info@spdesign.in",
+        "relation": "A",
+        "phone": ""
+    },
+    "previous_school": "AAA",
+    "medical": {
+        "allergies": "AA",
+        "health_conditions": "A",
+        "current_medications": "A",
+        "immunization_records": "A"
+    },
+    "siblings": {
+        "1": "A",
+        "2": "A"
+    },
+    "additional_info": "A",
+    "application_date": "2026-02-22",
+    "parent_signature": "sdasdsad",
+    "fees": {
+        "total": "19000.00",
+        "installments": [
+            "",
+            "",
+            ""
+        ],
+        "remark": "sdsad",
+        "stamp": "sdsad"
+    },
+    "created_at": "2026-02-22T20:28:36+01:00"
+}

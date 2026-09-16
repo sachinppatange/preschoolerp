@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260717-5166",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 14,
+    "student": {
+        "first": "Shriraj",
+        "middle": "Tukaram",
+        "last": "Sawant",
+        "dob": "2023-08-17",
+        "gender": "male"
+    },
+    "place_of_birth": "Pune",
+    "nationality": "Indian",
+    "caste": "OBC",
+    "languages": "Marathi, hindi",
+    "address": {
+        "address": "Sawant industrial and product c-14 additional MIDC",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Tukaram",
+        "phone": "9579999914"
+    },
+    "mother": {
+        "first": "Snehal",
+        "phone": "9371999914"
+    },
+    "guardian": {
+        "name": "Keshavrao ganpati sawant",
+        "email": "No",
+        "phone": "8390999914",
+        "relation": "Grandfather"
+    },
+    "previous_school": "No",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": "No"
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "18000.00",
+        "installments": [
+            "1000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-07-17 07:32:05"
+}

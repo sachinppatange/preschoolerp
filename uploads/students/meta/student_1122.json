@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260805-4809",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "Brija",
+        "middle": "Dnyaneshwar",
+        "last": "Lakhadive",
+        "dob": "2023-07-23",
+        "gender": "female"
+    },
+    "place_of_birth": "Omerga",
+    "nationality": "Indian",
+    "caste": "No",
+    "languages": "Marathi",
+    "address": {
+        "address": "Pakharsangavi",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Dnyaneshwar",
+        "phone": "7776913364"
+    },
+    "mother": {
+        "first": "Aasha",
+        "phone": "9970591416"
+    },
+    "guardian": {
+        "name": "Ishwar mannat lakhadive",
+        "email": "No",
+        "phone": "9604269207",
+        "relation": "Grandfather"
+    },
+    "previous_school": "Kidzee preschool",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "18000.00",
+        "installments": [
+            "1000",
+            "16000",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-05 06:30:01"
+}

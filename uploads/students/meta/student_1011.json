@@ -1,0 +1,60 @@
+{
+    "form_no": "FORM-20260223-9221",
+    "location": "",
+    "admission_seeking_in": 15,
+    "student": {
+        "first": "Shriya",
+        "middle": "Santosh",
+        "last": "Patange",
+        "dob": "2026-02-16",
+        "gender": "male"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "India",
+    "caste": "OBC",
+    "languages": "Marathi",
+    "address": {
+        "address": "697\/1A nalwade plot, kalika mandir",
+        "city": "BARSHI",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413301"
+    },
+    "father": {
+        "first": "Sachin",
+        "phone": "09096463943"
+    },
+    "mother": {
+        "first": "Pallavi",
+        "phone": "08446881383"
+    },
+    "guardian": {
+        "name": "Sachin Patange",
+        "email": "info@spdesign.in",
+        "phone": "09096463943",
+        "relation": "Father"
+    },
+    "previous_school": "No",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "No",
+        "current_medications": "No",
+        "immunization_records": "No"
+    },
+    "siblings": {
+        "1": "No",
+        "2": "No"
+    },
+    "additional_info": "No",
+    "fees": {
+        "total": "19000.00",
+        "installments": [
+            "",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-02-23 13:42:57"
+}

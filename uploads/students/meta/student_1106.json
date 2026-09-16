@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260717-6255",
+    "location": "",
+    "academic_year": "2026-27",
+    "admission_seeking_in": null,
+    "student": {
+        "first": "Advik",
+        "middle": "Ajay Kumar",
+        "last": "Dalve",
+        "dob": "2022-01-01",
+        "gender": "male"
+    },
+    "place_of_birth": "Nilanga",
+    "nationality": "Indian",
+    "caste": "Maratha",
+    "languages": "Marathi Hindi",
+    "address": {
+        "address": "Old MIDC",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Ajay Kumar",
+        "phone": "8888204801"
+    },
+    "mother": {
+        "first": "Pallavi",
+        "phone": "9503687314"
+    },
+    "guardian": {
+        "name": "Chandrakala dalve",
+        "email": "No",
+        "phone": "7066636285",
+        "relation": "Grandmother"
+    },
+    "previous_school": "Pioneer play school",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "Athang",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "17000",
+        "installments": [
+            "8000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-07-17 07:23:45"
+}

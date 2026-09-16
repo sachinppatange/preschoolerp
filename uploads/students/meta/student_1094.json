@@ -1,0 +1,17 @@
+{
+    "student": {
+        "first": "anay",
+        "middle": "ram",
+        "last": "chigure",
+        "dob": "2021-01-01",
+        "gender": "male"
+    },
+    "class_id": null,
+    "school_id": 1,
+    "academic_year": "2025-26",
+    "parent_id": 1106,
+    "parent_name": "Ram Chigure",
+    "total_fees": "8000",
+    "meta": "{\"notes\"}",
+    "created_at": "2026-03-22T17:56:05+00:00"
+}

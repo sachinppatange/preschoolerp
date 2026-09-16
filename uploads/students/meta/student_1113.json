@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260804-2933",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 15,
+    "student": {
+        "first": "Vedika",
+        "middle": "Ravikumar",
+        "last": "Chire",
+        "dob": "2022-11-01",
+        "gender": "female"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "Open",
+    "languages": "Marathi, hindi",
+    "address": {
+        "address": "Basatapur nsgar",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Ravikumar",
+        "phone": "9158018600"
+    },
+    "mother": {
+        "first": "Swati",
+        "phone": "9975284819"
+    },
+    "guardian": {
+        "name": "Ravikumar chire",
+        "email": "No",
+        "phone": "8407916666",
+        "relation": "Father"
+    },
+    "previous_school": "No",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "Alok chire",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "18500.00",
+        "installments": [
+            "1000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-04 06:46:06"
+}

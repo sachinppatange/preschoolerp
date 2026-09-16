@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260811-4492",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "Avani",
+        "middle": "Vasant",
+        "last": "Gaikwad",
+        "dob": "2022-03-23",
+        "gender": "female"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "Sc",
+    "languages": "Marathi, hindi",
+    "address": {
+        "address": "Govt.colony, barshi road,",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Vasant",
+        "phone": "9834137548"
+    },
+    "mother": {
+        "first": "Varsha",
+        "phone": "9175280972"
+    },
+    "guardian": {
+        "name": "Atharv gaikwad",
+        "email": "No",
+        "phone": "8080355809",
+        "relation": "Brother"
+    },
+    "previous_school": "Pioneer play school",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "Atharv",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "6000.00",
+        "installments": [
+            "2000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-11 06:43:16"
+}

@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260709-3544",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": null,
+    "student": {
+        "first": "Adyansh",
+        "middle": "Anirudha",
+        "last": "Behera",
+        "dob": "2023-06-26",
+        "gender": "male"
+    },
+    "place_of_birth": "Odisha",
+    "nationality": "India",
+    "caste": "Odisha",
+    "languages": "Hindi, English",
+    "address": {
+        "address": "Sona Nagar, near devidas nivas",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Anirudha",
+        "phone": "9932564143"
+    },
+    "mother": {
+        "first": "Suman",
+        "phone": "9337099593"
+    },
+    "guardian": {
+        "name": "Suman Behera",
+        "email": "anirudhabehera123@gmail.com",
+        "phone": "9337099593",
+        "relation": "Mother"
+    },
+    "previous_school": "No",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "No",
+        "current_medications": "No",
+        "immunization_records": "No"
+    },
+    "siblings": {
+        "1": "No",
+        "2": "No"
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "18000",
+        "installments": [
+            "1000",
+            "9000",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-07-09 07:32:42"
+}

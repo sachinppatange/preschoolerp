@@ -1,0 +1,267 @@
+pioneerplayschool/
+├─ index.php                         # Single landing page (School Name, Logo, About, Classes, Facilities, Gallery, Enquiry form, Contact + Map, Login buttons)
+├─ assets/
+│  ├─ css/
+│  │  ├─ main.css
+│  │  └─ responsive.css
+│  ├─ js/
+│  │  ├─ main.js
+│  │  └─ whatsapp-auth.js            # JS for WhatsApp OTP flows (trigger send/verify)
+│  └─ images/
+│     ├─ logo.png
+│     └─ placeholders/
+├─ uploads/
+│  ├─ students/                       # student profile photos, per-id folders
+│  ├─ staff/
+│  ├─ gallery/                         # school gallery images
+│  ├─ receipts/                        # generated receipt PDFs (or HTML)
+│  └─ class_photos/
+├─ includes/
+│  ├─ header.php
+│  ├─ footer.php
+│  ├─ config.php                       # DB config, app config (non-public)
+      includes/config.php मध्ये: DB_HOST, DB_USER, DB_PASS, DB_NAME, BASE_URL, WHATSAPP_PROVIDER_KEY, OTP_EXPIRY_SEC, SESSION_TIMEOUT_SEC.
+      या पेज चा पूर्ण डिटेल मध्ये कोड द्या 
+│  ├─ db.php                           # DB connection helper
+      includes/db.php तयार करा: DB कनेक्शन आणि PDO किंवा mysqli connection wrapper वापरा (prepared statements सुलभ करण्यासाठी PDO सुचवतो).
+│  ├─ functions.php                    # common helper functions
+      includes/functions.php मध्ये सामान्य helper फंक्शन्स (sanitize_input(), redirect(), flash_message()).
+│  └─ whatsapp_integration.md          # docs: how to configure WhatsApp Cloud API / provider
+├─ whatsapp/                           # WhatsApp integration endpoints and docs (no code here, just files to implement)
+│  ├─ send_otp.php                     # endpoint to trigger OTP via WhatsApp (one per role calls same service)
+│  ├─ verify_otp.php                   # endpoint to verify OTP and create session
+│  └─ webhook.php                       # optional: message/delivery webhook handler
+├─ api/                                # JSON endpoints used by mobile app + website
+│  ├─ auth.php                         # token/session APIs
+│  ├─ students.php
+│  ├─ attendance.php
+│  ├─ fees.php
+│  └─ enquiries.php
+├─ owner/
+│  ├─ login.php                        # /pioneerplayschool/owner/login.php (WhatsApp login page for Owner)
+│  ├─ dashboard.php
+│  ├─ profile.php                      # School profile (Website + App) edit
+│  ├─ content_about.php
+│  ├─ content_facilities.php
+│  ├─ content_photos.php
+│  ├─ contact_details.php
+│  ├─ class_setup.php
+│  ├─ staff_manage.php
+│  ├─ fees_setup.php
+│  ├─ students_list.php
+│  ├─ reports_simple.php               # Total students, fees summary
+│  ├─ notices_publish.php
+│  └─ app_settings.php                 # Login permissions, WhatsApp config, etc.
+├─ accounts/
+│  ├─ login.php                        # /pioneerplayschool/accounts/login.php (Accounts login)
+│  ├─ dashboard.php
+│  ├─ fees_collection.php
+│  ├─ receipt_print.php
+│  ├─ pending_fees.php
+│  ├─ expense_entry.php
+│  ├─ daily_collection.php
+│  └─ monthly_summary.php
+├─ teacher/
+│  ├─ login.php                        # /pioneerplayschool/teacher/login.php
+│  ├─ dashboard.php
+│  ├─ my_class.php                     # student list
+│  ├─ attendance_daily.php
+│  ├─ homework_upload.php
+│  ├─ student_remarks.php
+│  ├─ class_photo_upload.php
+│  └─ notices_view.php
+├─ reception/
+│  ├─ login.php                        # /pioneerplayschool/reception/login.php
+│  ├─ dashboard.php
+│  ├─ enquiry_entry.php                # website + walk-in enquiries appear here
+│  ├─ admission_form.php
+│  ├─ student_edit.php
+│  ├─ parent_contact.php
+│  ├─ admission_status.php
+│  └─ notices_view.php
+├─ parent/
+│  ├─ login.php                        # /pioneerplayschool/parent/login.php
+│  ├─ dashboard.php
+│  ├─ child_profile.php
+│  ├─ attendance_view.php
+│  ├─ fees_status.php
+│  ├─ receipts_list.php
+│  ├─ homework_view.php
+│  ├─ notices.php
+│  └─ gallery.php
+├─ templates/
+│  ├─ email/                           # optional emails for notifications (if used)
+│  └─ receipts/                         # receipt HTML templates
+├─ processes/                          # simple non‑MVC handlers (form POST handlers)
+│  ├─ handle_enquiry.php
+│  ├─ handle_admission.php
+│  └─ upload_handler.php
+├─ docs/
+│  ├─ README.md
+│  ├─ INSTALL.md                        # installation steps, DB import, WhatsApp setup notes
+│  └─ SECURITY.md
+├─ sql/
+│  └─ pioneer_schema.sql                # DB schema export (tables described below)
+├─ logs/
+│  └─ app.log
+├─ backups/
+│  └─ db_backup_YYYYMMDD.sql
+└─ maintenance/
+   └─ cron_daily.php                    # daily jobs (e.g., send pending fee reminders via WhatsApp)
+
+
+
+
+
+
+
+
+
+
+
+
+छान — आता तुमच्याकडे फोल्डर‑रचना तयार आहे, पुढे कोडिंग सुरू करण्यासाठी एक स्पष्ट, चरणबद्ध योजना खाली आहे. प्रत्येक स्टेप साधा आणि प्राधान्याने आहे — हे फॉलो केल्यानंतर तुम्ही लवकरच काम करणारी प्रणाली तयार करू शकता.
+महत्वाचे प्राथमिक तत्त्वे (अगोदर लक्षात ठेवा)
+
+   Non‑MVC साधी रचना: includes/ मध्ये कॉमन फंक्शन्स, प्रत्येक रोलच्या फोल्डरमध्ये UI+handler फाइल्स.
+   सुरक्षेसाठी: prepared statements (SQL injection पासून), input validation, CSRF tokens, secure sessions, file upload checks.
+   सर्व external credentials (DB, WhatsApp token इ.) includes/config.php मध्ये आणि VERSION CONTROL मध्ये secrets ठेवू नका (.env/सेक्रेटसह ठेवा).
+   Incremental development — छोट्या, चालणार्‍या भागांपासून पुढे वाढवा.
+   स्टेप-बाय-स्टेप योजना (क्रमवार)
+
+   विकास वातावरण तयार करा
+   XAMPP / WAMP / LAMP किंवा Docker वापरा; PHP >=7.4/8.x आणि MySQL/MariaDB ठेवा.
+   php.ini मध्ये error_reporting विकासासाठी चालू ठेवा, परंतु प्रॉडक्शनमध्ये बंद करा.
+   Git initialize करा आणि .gitignore मध्ये uploads/, config with secrets, logs/ घाला.
+   Tools: phpMyAdmin / MySQL Workbench, Postman, browser devtools.
+
+   कॉन्फिग आणि बेस कनेक्शन
+   includes/config.php मध्ये: DB_HOST, DB_USER, DB_PASS, DB_NAME, BASE_URL, WHATSAPP_PROVIDER_KEY, OTP_EXPIRY_SEC, SESSION_TIMEOUT_SEC.
+   includes/db.php तयार करा: DB कनेक्शन आणि PDO किंवा mysqli connection wrapper वापरा (prepared statements सुलभ करण्यासाठी PDO सुचवतो).
+   includes/functions.php मध्ये सामान्य helper फंक्शन्स (sanitize_input(), redirect(), flash_message()).
+
+      डेटाबेस इम्पोर्ट व बेस टेबल्स
+      sql/pioneer_schema.sql इम्पोर्ट करा (तुम्ही आधी तयार केलेली).
+
+      प्राथमिक डेटा टेबल्स: schools, users, classes, students, enquiries, otp_verifications, fees_records, attendance, notices.
+
+      DB मध्ये sample seed data: एक school, एक owner user, एक reception user, एक parent user — लॉगिन तपासण्यासाठी.
+
+      सत्र व authentication बेस
+      includes/session_start.php: secure session settings (cookie params, HttpOnly, SameSite).
+      निर्णय: Session‑based auth for website; API endpoints साठी session cookie किंवा token (app use-case).
+      Login flow scaffolding: प्रत्येक रोलसाठी login.php फॉर्म → POST to whatsapp/send_otp.php.
+
+      WhatsApp OTP Integration (प्राथमिक आणि सुरक्षित)
+      निवडा provider: Meta WhatsApp Cloud API (मुक्त) किंवा Twilio/Gupshup (सोपे परंतु पेइड). एक निवडा आधी.
+      includes/whatsapp_config.php: provider-specific settings.
+      Implement flow (no code here, परंतु अंमलबजावणी स्टेप्स):
+      send_otp.php: validate phone format, check phone exists with correct role in users table → generate numeric OTP (6-digit) → hash and save to otp_verifications with expiry and attempts → call provider API to send WhatsApp message containing OTP (message template as per provider) → return JSON success/error.
+      verify_otp.php: compare hashed OTP, expiry and attempts, mark verified → create session and set role-based session variables (user_id, role, school_id) → redirect to dashboard.
+      webhook.php (optional): handle delivery/read callbacks.
+      सुरक्षा टिप्स: OTP हॅश करा (HMAC or bcrypt-equivalent), expiry 3–5 मिनिटे, attempts limit 3, rate limiting per phone. Log OTP sends but never store OTP in plain text.
+
+      Landing page (index.php) आणि Enquiry flow
+      index.php: responsive layout, enquiry form posts to processes/handle_enquiry.php.
+      handle_enquiry.php: sanitize inputs, insert into enquiries table, assign to reception (auto or manual), show success message, optionally send WhatsApp notification to reception.
+      बेस UI टेम्पलेट्स आणि includes
+      includes/header.php आणि footer.php मध्ये nav, login buttons for each role (links to /owner/login.php etc.).
+      assets/css/main.css व responsive.css मध्ये mobile-friendly design.
+      Universal flash message system आणि breadcrumbs.
+
+Role Dashboards — प्राथमिक क्रम (Owner → Reception → Accounts → Teacher → Parent) प्रत्येक रोलसाठी आधी authentication चेक (session + role), नंतर फंक्शनलिटी incremental जोडायची:
+A. Owner (प्राथमिक)
+dashboard.php: totals (students, staff), shortcuts.
+profile.php: edit school info (short_about, contact, map_embed).
+class_setup.php: CRUD classes.
+staff_manage.php: create staff users (phone), assign class.
+fees_setup.php: set default fees per class.
+students_list.php: view/search students.
+notices_publish.php: publish notices (audience), store in notices table.
+app_settings.php: WhatsApp provider config, OTP expiry, login permissions.
+
+B. Reception (महत्त्वाचे)
+
+enquiry_entry.php: see website + walk-in enquiries, convert enquiry → admission.
+admission_form.php: create student user + parent user (phone), upload photo, assign class.
+student_edit.php: basic student info edit, parent contact.
+admission_status.php: list pending/confirmed.
+C. Accounts
+
+fees_collection.php: select student → create fees_records (collect payment) → generate receipt (HTML/PDF saved to uploads/receipts).
+pending_fees.php: list overdue.
+expense_entry.php: add expenses.
+reports: daily_collection.php, monthly_summary.php.
+D. Teacher
+
+my_class.php: list students by assigned_class.
+attendance_daily.php: mark present/absent (save to attendance table).
+homework_upload.php: upload file/photo + description (stored and visible to parent).
+student_remarks.php: quick notes per student.
+notices_view.php, class_photo_upload.php.
+E. Parent
+
+child_profile.php: display student details.
+attendance_view.php: list attendance.
+fees_status.php & receipts_list.php.
+homework_view.php, gallery.php, message_to_school (simple contact form → creates a message record).
+APIs for App + Website reuse
+api/auth.php: endpoints for OTP verify for mobile (return token) and session verify.
+api/students.php, attendance.php, fees.php, enquiries.php: JSON responses with authentication.
+Secure APIs using session cookie or Bearer token and role-based access control.
+File uploads & media handling
+uploads/ with subfolders and .htaccess deny direct listing if Apache.
+Validate MIME type and size, store with unique filenames, create thumbnails.
+Set proper folder permissions; disable execution in uploads.
+Forms, Validation & Security checks
+Server-side validation for all forms.
+Use prepared statements for all DB writes.
+CSRF tokens on state-changing forms.
+Escape output in HTML to prevent XSS.
+Input phone numbers in E.164 or normalized format.
+Receipts & Printing
+receipts templates in templates/receipts/ with placeholders.
+Generate printable HTML (or use wkhtmltopdf if PDF needed) and save copy under uploads/receipts.
+Background jobs and cron
+maintenance/cron_daily.php: pending fee reminders (WhatsApp), birthday messages, backup DB.
+Set system cron to hit /maintenance/cron_daily.php or run via CLI.
+Logging, error handling & backups
+logs/app.log for important events (login attempts, OTP sends, payments).
+Daily DB backup to backups/ with rotation.
+Error reporting for dev vs prod.
+Testing & QA
+Manual test cases for each role (happy path + edge cases).
+Use Postman to test API endpoints.
+Test WhatsApp OTP flow thoroughly (delivery, failures).
+Security scan: check for SQLi, XSS, file upload flaws.
+Deployment & production checklist
+Use HTTPS (Let's Encrypt).
+Move config secrets to .env or server env variables.
+Set proper file permissions and disable directory listing.
+Disable verbose PHP errors in production.
+Database credentials strong; backup scheduled.
+Monitor logs, enable basic analytics.
+Incremental milestones (recommended)
+Milestone 1 (1–3 days): DB + config + basic landing page + enquiry flow + reception can add admission and create parent/student.
+Milestone 2 (2–5 days): WhatsApp OTP working (send+verify) + Owner login + Owner can edit school/profile + class/staff setup.
+Milestone 3 (2–4 days): Accounts module: collect fees + generate receipt + pending list.
+Milestone 4 (2–4 days): Teacher + Parent features (attendance + homework + view).
+Milestone 5 (2–3 days): Reports, cron jobs, production hardening.
+चेकलिस्ट (तुम्ही सुरू करताना लगेच करा)
+
+ Git repository चालू आणि .gitignore सेट.
+ includes/config.php template तयार पण secrets न ठेवा.
+ DB schema इम्पोर्ट करुन sample users रुजू करा.
+ includes/db.php आणि session_start सेटअप करा.
+ WhatsApp provider account तयार करा (token, phone_number_id) — testing mode.
+ Landing page आणि owner/reception/parent login पेज basic UI तयार करा.
+ send_otp.php आणि verify_otp.php ची logic implement करा (पहिला बळकट टेस्ट).
+ Reception → admission → student+parent create flow पूर्ण करा (end-to-end test).
+अधिक मदत हवी असेल तर मी पुढे हे देऊ शकतो (कोडिंगपूर्वी)
+
+DB DDL (पूर्ण pioneer_schema.sql) — लगेच वापरता येईल.
+includes/config.php चे recommended variables list (काही उदाहरण व्हॅल्यू नाहीत).
+OTP flow चं sequence diagram / API contract (input/output JSON).
+एक sample step-by-step checklist तुम्ही Git commit message नुसार.
+तुम्हाला काय आधी पाहिजे — DB DDL, config variables list, किंवा WhatsApp provider कसा निवडायचा हे? मी पुढचा योग्य पुढाकार देऊन सुरुवात करण्यास मदत करेन.
+

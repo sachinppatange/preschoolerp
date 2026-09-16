@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260807-4396",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "Vishwa",
+        "middle": "Nilkant",
+        "last": "Adsule",
+        "dob": "2022-03-04",
+        "gender": "male"
+    },
+    "place_of_birth": "Dharashiv",
+    "nationality": "Indian",
+    "caste": "NTC",
+    "languages": "Marathi",
+    "address": {
+        "address": "Krushnai niwas, kanerigaon",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Nilkant",
+        "phone": "9096993158"
+    },
+    "mother": {
+        "first": "Manisha",
+        "phone": "8275462447"
+    },
+    "guardian": {
+        "name": "Nilkant Adsule",
+        "email": "No",
+        "phone": "9096993158",
+        "relation": "Father"
+    },
+    "previous_school": "Pioneer play school",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "20000.00",
+        "installments": [
+            "10000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-07 09:09:44"
+}

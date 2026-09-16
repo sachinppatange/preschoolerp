@@ -1,0 +1,60 @@
+{
+    "form_no": "FORM-20260222-2707",
+    "location": "dsdsd",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "dsds",
+        "middle": "sdsd",
+        "last": "sdsd",
+        "dob": "2026-02-13",
+        "gender": "male"
+    },
+    "place_of_birth": "sdsd",
+    "nationality": "sds",
+    "caste": "sdsd",
+    "languages": "sds",
+    "address": {
+        "address": "sdsd",
+        "city": "sds",
+        "state": "sds",
+        "country": "sdsd",
+        "pin": "sds"
+    },
+    "father": {
+        "first": "sdsd",
+        "phone": ""
+    },
+    "mother": {
+        "first": "ssds",
+        "phone": "09096463943"
+    },
+    "guardian": {
+        "name": "sdsd",
+        "email": "info@spdesign.in",
+        "phone": "",
+        "relation": "sdsd"
+    },
+    "previous_school": "sdsd",
+    "medical": {
+        "allergies": "AA",
+        "health_conditions": "sds",
+        "current_medications": "sds",
+        "immunization_records": "sds"
+    },
+    "siblings": {
+        "1": "dsd",
+        "2": "sds"
+    },
+    "additional_info": "sdsd",
+    "fees": {
+        "total": "20000.00",
+        "installments": [
+            "",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-02-22 21:45:00"
+}

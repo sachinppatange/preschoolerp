@@ -1,0 +1,17 @@
+{
+    "student": {
+        "first": "Adhiraj",
+        "middle": "Pradeep",
+        "last": "Gapat",
+        "dob": "2021-01-01",
+        "gender": "male"
+    },
+    "class_id": null,
+    "school_id": 1,
+    "academic_year": "2025-26",
+    "parent_id": 1120,
+    "parent_name": "Pradeep Gapat",
+    "total_fees": "18000",
+    "meta": "{\"notes\"}",
+    "created_at": "2026-03-22T17:56:05+00:00"
+}

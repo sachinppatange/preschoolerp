@@ -1,0 +1,60 @@
+{
+    "form_no": "FORM-20260310-3752",
+    "location": "",
+    "admission_seeking_in": null,
+    "student": {
+        "first": "Riddhi",
+        "middle": "Siddhaji",
+        "last": "Phatale",
+        "dob": "2020-08-30",
+        "gender": "female"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "Hindu-Rangari",
+    "languages": "Marathi",
+    "address": {
+        "address": "Phatale sadan, inside deepjyoti nagar, latur",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Siddhaji",
+        "phone": "9823168666"
+    },
+    "mother": {
+        "first": "Renuka",
+        "phone": "8669080658"
+    },
+    "guardian": {
+        "name": "Shobha phatale",
+        "email": "sphatale1981@gmail.com",
+        "phone": "7588908056",
+        "relation": "Grandmother"
+    },
+    "previous_school": "No",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "No",
+        "current_medications": "No",
+        "immunization_records": "No"
+    },
+    "siblings": {
+        "1": "Leena",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "Nursery",
+        "installments": [
+            "10100",
+            "7900",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-03-10 07:33:12"
+}

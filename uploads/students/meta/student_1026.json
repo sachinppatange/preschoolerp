@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260316-1166",
+    "location": "",
+    "academic_year": "2024-25",
+    "admission_seeking_in": null,
+    "student": {
+        "first": "Veer",
+        "middle": "Rupesh",
+        "last": "Borgavkar",
+        "dob": "2020-01-01",
+        "gender": "male"
+    },
+    "place_of_birth": "",
+    "nationality": "",
+    "caste": "",
+    "languages": "",
+    "address": {
+        "address": "",
+        "city": "",
+        "state": "",
+        "country": "",
+        "pin": ""
+    },
+    "father": {
+        "first": "",
+        "phone": ""
+    },
+    "mother": {
+        "first": "",
+        "phone": ""
+    },
+    "guardian": {
+        "name": "",
+        "email": "",
+        "phone": "",
+        "relation": ""
+    },
+    "previous_school": "",
+    "medical": {
+        "allergies": "",
+        "health_conditions": "",
+        "current_medications": "",
+        "immunization_records": ""
+    },
+    "siblings": {
+        "1": "",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "17000",
+        "installments": [
+            "",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-03-16 03:50:49"
+}

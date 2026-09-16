@@ -1,0 +1,20 @@
+<?php
+/**
+ * includes/config.local.php.example
+ *
+ * Copy to includes/config.local.php and fill in your local/production secrets.
+ * config.local.php is gitignored and must NOT be committed.
+ */
+
+if (!defined('WHATSAPP_PROVIDER_KEY')) {
+    define('WHATSAPP_PROVIDER_KEY', ''); // Meta WhatsApp Cloud API token
+}
+if (!defined('WHATSAPP_PHONE_NUMBER_ID')) {
+    define('WHATSAPP_PHONE_NUMBER_ID', ''); // Phone number ID from Meta Business
+}
+
+/* Production site URL (images & links). Omit to auto-detect from request host. */
+// define('BASE_URL', 'https://demo.preschoolapp.in/');
+
+/* Optional: override database credentials on this machine */
+// if (!defined('DB_PASS')) define('DB_PASS', 'your_password');

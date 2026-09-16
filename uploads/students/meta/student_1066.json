@@ -1,0 +1,17 @@
+{
+    "student": {
+        "first": "Sai",
+        "middle": "Akash",
+        "last": "Gade",
+        "dob": "2021-01-01",
+        "gender": "male"
+    },
+    "class_id": null,
+    "school_id": 1,
+    "academic_year": "2025-26",
+    "parent_id": 1121,
+    "parent_name": "Akash Gade",
+    "total_fees": "15000",
+    "meta": "{\"notes\"}",
+    "created_at": "2026-03-22T17:56:05+00:00"
+}

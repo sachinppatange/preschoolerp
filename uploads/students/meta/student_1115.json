@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260804-9082",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "Aditi",
+        "middle": "Govind",
+        "last": "Chavan",
+        "dob": "2021-10-29",
+        "gender": "female"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "Open",
+    "languages": "Marathi",
+    "address": {
+        "address": "Barshi road, bajaj showroom",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Govind",
+        "phone": "9588492814"
+    },
+    "mother": {
+        "first": "Shital",
+        "phone": "7775005564"
+    },
+    "guardian": {
+        "name": "Om shelke",
+        "email": "No",
+        "phone": "9922265722",
+        "relation": "Mama"
+    },
+    "previous_school": "Pioneer play school",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "Vikram govind chavan",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "10000.00",
+        "installments": [
+            "",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-04 07:23:11"
+}

@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260811-9280",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "Adhiraj",
+        "middle": "Pradeep",
+        "last": "Gapat",
+        "dob": "2022-04-15",
+        "gender": "male"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "Maratha",
+    "languages": "Marathi",
+    "address": {
+        "address": "Raje shivaji nagar",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Pradeep",
+        "phone": "9422320050"
+    },
+    "mother": {
+        "first": "Priyanka",
+        "phone": "9011320050"
+    },
+    "guardian": {
+        "name": "Vishnu Nivrutti gapat",
+        "email": "No",
+        "phone": "9518952030",
+        "relation": "Grandfather"
+    },
+    "previous_school": "Pioneer play school",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "20000.00",
+        "installments": [
+            "7000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-11 07:30:46"
+}

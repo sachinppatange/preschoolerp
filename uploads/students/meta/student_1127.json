@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260807-2505",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 17,
+    "student": {
+        "first": "Mahira",
+        "middle": "Mahesh",
+        "last": "Koli",
+        "dob": "2021-04-08",
+        "gender": "female"
+    },
+    "place_of_birth": "No",
+    "nationality": "Indian",
+    "caste": "ST",
+    "languages": "Marathi,hindi, english",
+    "address": {
+        "address": "Shashkiy colony",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Mahesh",
+        "phone": "8600543292"
+    },
+    "mother": {
+        "first": "Dnyaneshwari",
+        "phone": "9307583886"
+    },
+    "guardian": {
+        "name": "No",
+        "email": "No",
+        "phone": "1",
+        "relation": "No"
+    },
+    "previous_school": "Pioneer play school",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "21000.00",
+        "installments": [
+            "1000",
+            "3000",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-07 08:38:08"
+}

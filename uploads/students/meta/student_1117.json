@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260804-5609",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "Shivika",
+        "middle": "Manish",
+        "last": "Singh",
+        "dob": "2022-01-10",
+        "gender": "female"
+    },
+    "place_of_birth": "Kolkata",
+    "nationality": "Indian",
+    "caste": "No",
+    "languages": "hindi, English",
+    "address": {
+        "address": "Shivalaya height, Barshi road",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Manish",
+        "phone": "8335884100"
+    },
+    "mother": {
+        "first": "Sweta",
+        "phone": "7008891695"
+    },
+    "guardian": {
+        "name": "Manish singh",
+        "email": "No",
+        "phone": "8335884160",
+        "relation": "Father"
+    },
+    "previous_school": "Kidzee",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "Reyansh singh",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "20000.00",
+        "installments": [
+            "7000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-04 07:38:25"
+}

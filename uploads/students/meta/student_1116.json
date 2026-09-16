@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260804-7897",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "Dakshit",
+        "middle": "Dnyaneshwar",
+        "last": "Thombare",
+        "dob": "2021-12-24",
+        "gender": "male"
+    },
+    "place_of_birth": "Pune",
+    "nationality": "Indian",
+    "caste": "Open",
+    "languages": "Marathi, hindi",
+    "address": {
+        "address": "Dwarka nagari, MIDC",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Dnyaneshwar",
+        "phone": "9579814358"
+    },
+    "mother": {
+        "first": "Shital",
+        "phone": "8888825663"
+    },
+    "guardian": {
+        "name": "Manisha Thombare",
+        "email": "No",
+        "phone": "9421546183",
+        "relation": "Aunty"
+    },
+    "previous_school": "Pioneer",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "Shivam Dnyaneshwar Thombare",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "10000.00",
+        "installments": [
+            "",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-04 07:29:37"
+}

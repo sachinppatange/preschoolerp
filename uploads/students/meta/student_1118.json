@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260804-4853",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "Soham",
+        "middle": "Dnyaneshwar",
+        "last": "Malile",
+        "dob": "2022-03-19",
+        "gender": "male"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "OBC",
+    "languages": "Marathi, hindi",
+    "address": {
+        "address": "Sona nagar",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Dnyaneshwar",
+        "phone": "7030309007"
+    },
+    "mother": {
+        "first": "Sonali",
+        "phone": "8788189322"
+    },
+    "guardian": {
+        "name": "No",
+        "email": "No",
+        "phone": "8188189322",
+        "relation": "No"
+    },
+    "previous_school": "No",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "20000.00",
+        "installments": [
+            "10000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-04 07:47:40"
+}

@@ -1,0 +1,9 @@
+student_id,school_id,class_id,amount,payment_date,payment_type,note
+1016,1,,1000,01/01/25,Cash,Partial payment
+1016,1,,10000,01/01/25,Cash,Partial payment
+1016,1,,4000,01/01/25,Cash,Partial payment
+1017,1,,3000,01/01/25,Online,Partial payment
+1017,1,,5000,01/01/25,Online,Partial payment
+1017,1,,10000,01/01/25,Online,Partial payment
+1018,1,,10000,01/01/25,Online,Partial payment
+1018,1,,2500,01/01/25,Cash,Partial payment

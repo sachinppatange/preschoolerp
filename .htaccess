@@ -1,0 +1,14 @@
+# Pioneer Play School — Hostinger / Apache
+DirectoryIndex index.php index.html
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Force HTTPS
+    RewriteCond %{HTTPS} off
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Redirect bare domain to www (site is served on www subdomain)
+    RewriteCond %{HTTP_HOST} ^pioneerplayschool\.preschoolapp\.in$ [NC]
+    RewriteRule ^ https://www.pioneerplayschool.preschoolapp.in%{REQUEST_URI} [L,R=301]
+</IfModule>

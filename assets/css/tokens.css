@@ -1,0 +1,39 @@
+/**
+ * Design tokens — shared across public site, panels, and login.
+ */
+:root {
+  /* Brand */
+  --ps-coral: #ff6b8a;
+  --ps-coral-dark: #e84d6f;
+  --ps-sky: #6bcbff;
+  --ps-sky-dark: #3aa8f0;
+  --ps-mint: #5eead4;
+  --ps-sun: #ffe066;
+  --ps-lavender: #b8a9ff;
+  --ps-peach: #ffc9a8;
+
+  /* Neutrals */
+  --ps-ink: #0f172a;
+  --ps-ink-muted: #64748b;
+  --ps-border: #e2e8f0;
+  --ps-surface: #ffffff;
+  --ps-bg: #f8fafc;
+  --ps-bg-warm: #fff9f6;
+
+  /* Panel */
+  --panel-sidebar: #1e293b;
+  --panel-sidebar-hover: #334155;
+  --panel-sidebar-active: var(--ps-coral);
+  --panel-topbar: #ffffff;
+
+  /* Radius & shadow */
+  --ps-radius: 14px;
+  --ps-radius-sm: 10px;
+  --ps-radius-lg: 20px;
+  --ps-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  --ps-shadow-sm: 0 6px 18px rgba(15, 23, 42, 0.06);
+
+  /* Typography */
+  --ps-font-display: "Baloo 2", "Nunito", system-ui, sans-serif;
+  --ps-font-body: "Nunito", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}

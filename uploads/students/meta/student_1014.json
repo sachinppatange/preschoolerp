@@ -1,0 +1,60 @@
+{
+    "form_no": "FORM-20260314-3754",
+    "location": "Latur",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "Sachin",
+        "middle": "DESIGN MEDIA",
+        "last": "Patange",
+        "dob": "2026-03-26",
+        "gender": "male"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "dsd",
+    "caste": "sdsd",
+    "languages": "Marathi",
+    "address": {
+        "address": "NIRMAL HEIGHTS, SHOPE NO B205, 1 ST FLOOR, AUSA ROAD",
+        "city": "LATUR",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Pallavi",
+        "phone": "08446881383"
+    },
+    "mother": {
+        "first": "Sachin",
+        "phone": "09096463943"
+    },
+    "guardian": {
+        "name": "Sachin Patange",
+        "email": "info@spdesign.in",
+        "phone": "09096463943",
+        "relation": ""
+    },
+    "previous_school": "AAA",
+    "medical": {
+        "allergies": "AA",
+        "health_conditions": "No",
+        "current_medications": "No",
+        "immunization_records": "No"
+    },
+    "siblings": {
+        "1": "A",
+        "2": "No"
+    },
+    "additional_info": "ffdfs",
+    "fees": {
+        "total": "1000.00",
+        "installments": [
+            "",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-03-14 13:01:45"
+}

@@ -1,0 +1,34 @@
+/* assets/css/responsive.css
+ * Additional responsive tweaks
+ */
+
+/* Make nav items wrap elegantly on small screens */
+@media (max-width: 767.98px) {
+  .navbar-nav { margin-top: .5rem; }
+  .navbar .btn { width: 100%; text-align: center; }
+}
+
+/* Stack footer small elements on very small screens */
+@media (max-width: 479.98px) {
+  .site-footer .row { text-align: center; }
+  .small-flex-column { display:block; text-align:center; }
+}
+
+/* Make program cards more compact on small devices */
+@media (max-width: 420px) {
+  .program-card img { height: 110px !important; }
+  .img-thumb { height: 120px !important; }
+}
+
+/* Utility: floating CTA on mobile (optional) */
+@media (max-width: 768px) {
+  .mobile-cta {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 16px;
+    z-index: 1080;
+    box-shadow: 0 8px 24px rgba(2,6,23,0.12);
+    border-radius: 999px;
+  }
+}

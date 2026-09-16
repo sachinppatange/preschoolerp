@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260805-3413",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 15,
+    "student": {
+        "first": "Dhanishka",
+        "middle": "Nagesh",
+        "last": "Chole",
+        "dob": "2022-11-18",
+        "gender": "female"
+    },
+    "place_of_birth": "Parali vaidyanath",
+    "nationality": "Indian",
+    "caste": "OBC",
+    "languages": "Marathi",
+    "address": {
+        "address": "Shashkiy colony, Barshi road",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Nagesh",
+        "phone": "8999231576"
+    },
+    "mother": {
+        "first": "Kalinda",
+        "phone": "8999231576"
+    },
+    "guardian": {
+        "name": "Kalinda chole",
+        "email": "8999231576",
+        "phone": "8007747695",
+        "relation": "No"
+    },
+    "previous_school": "Pioneer play school",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "18500.00",
+        "installments": [
+            "1000",
+            "5000",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-05 06:11:51"
+}

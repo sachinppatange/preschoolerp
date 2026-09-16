@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260727-3872",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 17,
+    "student": {
+        "first": "Shantanu",
+        "middle": "Sham",
+        "last": "Lakal",
+        "dob": "2020-04-23",
+        "gender": "male"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "Open",
+    "languages": "Marathi",
+    "address": {
+        "address": "Raje shivaji nagar",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Sham",
+        "phone": "9765061999"
+    },
+    "mother": {
+        "first": "Tanvi",
+        "phone": "9766740991"
+    },
+    "guardian": {
+        "name": "Surshti sachin mendekar",
+        "email": "No",
+        "phone": "9834095690",
+        "relation": "No"
+    },
+    "previous_school": "Global knowledge latur",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "Janvi sham lakal",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "21000.00",
+        "installments": [
+            "10000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-07-27 08:33:49"
+}

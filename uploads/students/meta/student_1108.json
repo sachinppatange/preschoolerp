@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260727-4126",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "Rajdeep",
+        "middle": "Vitthal",
+        "last": "Ekunde",
+        "dob": "2021-10-04",
+        "gender": "male"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "Maratha",
+    "languages": "Marathi, hindi",
+    "address": {
+        "address": "MIDC",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Vitthal",
+        "phone": "8999688449"
+    },
+    "mother": {
+        "first": "Vijaya",
+        "phone": "9890176499"
+    },
+    "guardian": {
+        "name": "Rohit ekunde",
+        "email": "No",
+        "phone": "7261927050",
+        "relation": "Uncle"
+    },
+    "previous_school": "Nursery",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "Swaraj",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "17000.00",
+        "installments": [
+            "8000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-07-27 07:34:09"
+}

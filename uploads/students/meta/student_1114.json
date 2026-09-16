@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260804-9815",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 14,
+    "student": {
+        "first": "Akshit",
+        "middle": "Atish",
+        "last": "Bacchewar",
+        "dob": "2024-01-15",
+        "gender": "male"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "Komti",
+    "languages": "Marathi",
+    "address": {
+        "address": "Ganesh dall mill, MIDC",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Atish",
+        "phone": "9823666831"
+    },
+    "mother": {
+        "first": "Shraddha",
+        "phone": "9890082098"
+    },
+    "guardian": {
+        "name": "Madhuri Bacchewar",
+        "email": "",
+        "phone": "8275099999",
+        "relation": "Unty"
+    },
+    "previous_school": "No",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "Aayush",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "18000.00",
+        "installments": [
+            "17000",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-04 07:00:57"
+}

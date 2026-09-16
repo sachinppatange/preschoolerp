@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260805-4992",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 15,
+    "student": {
+        "first": "Tasmay",
+        "middle": "Aniket",
+        "last": "Joshi",
+        "dob": "2023-03-18",
+        "gender": "male"
+    },
+    "place_of_birth": "Latur",
+    "nationality": "Indian",
+    "caste": "Brahmin",
+    "languages": "Marathi,hindi, english",
+    "address": {
+        "address": "Walmiki nagar",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Aniket",
+        "phone": "9960205021"
+    },
+    "mother": {
+        "first": "Pruthvi",
+        "phone": "9307369109"
+    },
+    "guardian": {
+        "name": "No",
+        "email": "No",
+        "phone": "1",
+        "relation": "No"
+    },
+    "previous_school": "Pioneer play school",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "18500.00",
+        "installments": [
+            "1000",
+            "5000",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-05 06:46:40"
+}

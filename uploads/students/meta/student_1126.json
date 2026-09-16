@@ -1,0 +1,61 @@
+{
+    "form_no": "FORM-20260807-1422",
+    "location": "Latur",
+    "academic_year": "2026-27",
+    "admission_seeking_in": 17,
+    "student": {
+        "first": "Ruhaan",
+        "middle": "Raju",
+        "last": "Shaikh",
+        "dob": "2021-09-07",
+        "gender": "male"
+    },
+    "place_of_birth": "Majalgav",
+    "nationality": "Indian",
+    "caste": "Muslim",
+    "languages": "Marathi,hindi, english",
+    "address": {
+        "address": "Near water tank, prakash nagar",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Raju",
+        "phone": "8087161534"
+    },
+    "mother": {
+        "first": "Ashana",
+        "phone": "8308114305"
+    },
+    "guardian": {
+        "name": "No",
+        "email": "No",
+        "phone": "1",
+        "relation": "No"
+    },
+    "previous_school": "Kit zee",
+    "medical": {
+        "allergies": "No",
+        "health_conditions": "Well",
+        "current_medications": "No",
+        "immunization_records": "Done"
+    },
+    "siblings": {
+        "1": "No",
+        "2": ""
+    },
+    "additional_info": "",
+    "fees": {
+        "total": "21000.00",
+        "installments": [
+            "4600",
+            "",
+            ""
+        ],
+        "remark": "",
+        "stamp": ""
+    },
+    "created_at": "2026-08-07 08:30:59"
+}

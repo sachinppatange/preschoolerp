@@ -1,0 +1,60 @@
+{
+    "form_no": "FORM-20260222-8032",
+    "location": "dsd",
+    "admission_seeking_in": 16,
+    "student": {
+        "first": "eeeeee",
+        "middle": "ee",
+        "last": "e",
+        "dob": "2026-03-05",
+        "gender": "male"
+    },
+    "place_of_birth": "ddsd",
+    "nationality": "dsd",
+    "caste": "sds",
+    "languages": "sds",
+    "address": {
+        "address": "sds",
+        "city": "ds",
+        "state": "sdsd",
+        "country": "sd",
+        "pin": "sds"
+    },
+    "father": {
+        "first": "sds",
+        "phone": "09096463943"
+    },
+    "mother": {
+        "first": "sds",
+        "phone": "222"
+    },
+    "guardian": {
+        "name": "dsd",
+        "email": "sachinppatange@gmail.com",
+        "phone": "23223",
+        "relation": "asas"
+    },
+    "previous_school": "sdsd",
+    "medical": {
+        "allergies": "sdsd",
+        "health_conditions": "sds",
+        "current_medications": "sds",
+        "immunization_records": "sdsd"
+    },
+    "siblings": {
+        "1": "sds",
+        "2": "dsd"
+    },
+    "additional_info": "sd",
+    "fees": {
+        "total": "20000.00",
+        "installments": [
+            "",
+            "",
+            ""
+        ],
+        "remark": "sds",
+        "stamp": "ds"
+    },
+    "created_at": "2026-02-22 20:56:46"
+}

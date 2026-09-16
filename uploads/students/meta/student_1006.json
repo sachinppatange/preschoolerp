@@ -1,0 +1,74 @@
+{
+    "form_no": "FORM-20260222-8827",
+    "location": "Latur",
+    "admission_seeking_in": 15,
+    "student": {
+        "first": "Chaya",
+        "middle": "A",
+        "last": "B",
+        "dob": "2026-02-17",
+        "gender": "male"
+    },
+    "place_of_birth": "",
+    "nationality": "A",
+    "caste": "A",
+    "languages": "A",
+    "address": {
+        "address": "Atharv Media, Hanuman Nagar, Near MIT Medical Collage,",
+        "city": "Latur",
+        "state": "Maharashtra",
+        "country": "India",
+        "pin": "413512"
+    },
+    "father": {
+        "first": "Pallavi",
+        "middle": "DESIGN MEDIA",
+        "last": "Maindarkar",
+        "email": "info@spdesign.in",
+        "edu": "B",
+        "profession": "",
+        "designation": "B",
+        "phone": "08446881383"
+    },
+    "mother": {
+        "first": "Pallavi",
+        "middle": "DESIGN MEDIA",
+        "last": "Maindarkar",
+        "email": "sachinppatange@gmail.com",
+        "edu": "A",
+        "profession": "A",
+        "designation": "A",
+        "phone": "08446881383"
+    },
+    "guardian": {
+        "name": "Pallavi Maindarkar",
+        "email": "info@spdesign.in",
+        "relation": "AAA",
+        "phone": "08446881383"
+    },
+    "previous_school": "AAA",
+    "medical": {
+        "allergies": "AA",
+        "health_conditions": "sd",
+        "current_medications": "",
+        "immunization_records": "asdas"
+    },
+    "siblings": {
+        "1": "A",
+        "2": "asdasd"
+    },
+    "additional_info": "sdsdsa",
+    "application_date": "2026-02-22",
+    "parent_signature": "sdasd",
+    "fees": {
+        "total": "19000.00",
+        "installments": [
+            "sads",
+            "sdsd",
+            "sdsad"
+        ],
+        "remark": "dsadsad",
+        "stamp": "sadsad"
+    },
+    "created_at": "2026-02-22T20:47:08+01:00"
+}
