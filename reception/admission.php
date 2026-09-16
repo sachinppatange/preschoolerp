@@ -453,7 +453,6 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
     <div class="adm-toolbar-actions">
       <a href="students_list.php" class="btn btn-sm btn-outline-secondary"><i class="bi bi-people me-1"></i>Students</a>
-      <a href="admissionbulk.php" class="btn btn-sm btn-outline-primary"><i class="bi bi-upload me-1"></i>Bulk</a>
     </div>
   </div>
 

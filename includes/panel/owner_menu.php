@@ -30,7 +30,6 @@ function owner_panel_menu(): array
                 ['url' => $reception . '/admission.php', 'icon' => 'bi-person-plus-fill', 'label' => 'New Admission', 'match' => 'admission'],
                 ['url' => $owner . '/students_list.php', 'icon' => 'bi-people-fill', 'label' => 'Students', 'match' => 'students_list'],
                 ['url' => $owner . '/enquiry_list.php', 'icon' => 'bi-chat-left-text', 'label' => 'Enquiries', 'match' => 'enquiry'],
-                ['url' => $reception . '/admissionbulk.php', 'icon' => 'bi-file-earmark-spreadsheet', 'label' => 'Bulk Admission', 'match' => 'admissionbulk'],
                 ['url' => $owner . '/pending_tasks.php', 'icon' => 'bi-list-check', 'label' => 'Reception Tasks', 'match' => 'pending_tasks'],
             ],
         ],
