@@ -302,7 +302,7 @@ $printUrl = function_exists('student_print_url') ? student_print_url($id) : ('..
 
       <!-- Photo -->
       <div class="d-flex gap-3 align-items-center mb-3">
-        <?php $src = function_exists('resolve_image_url') ? resolve_image_url((string)$val('photo_path',''), '') : (string)$val('photo_path',''); ?>
+        <?php $src = function_exists('student_photo_url') ? student_photo_url((string)$val('photo_path','')) : (string)$val('photo_path',''); ?>
         <?php if ($src !== ''): ?>
           <img class="photo-preview" src="<?php echo e($src); ?>" alt="Student Photo">
         <?php else: ?>

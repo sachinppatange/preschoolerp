@@ -56,9 +56,11 @@ $dash = static function ($v): string {
     $s = trim((string) ($v ?? ''));
     return $s === '' ? '—' : $s;
 };
-$photoUrl = function_exists('resolve_image_url')
-    ? resolve_image_url((string) ($student['photo_path'] ?? ''), '')
-    : (string) ($student['photo_path'] ?? '');
+$photoUrl = function_exists('student_photo_url')
+    ? student_photo_url((string) ($student['photo_path'] ?? ''))
+    : (function_exists('resolve_image_url')
+        ? resolve_image_url((string) ($student['photo_path'] ?? ''), '')
+        : (string) ($student['photo_path'] ?? ''));
 $viewUrl = function_exists('student_view_url') ? student_view_url($id) : ('?id=' . $id);
 $editUrl = function_exists('student_edit_url') ? student_edit_url($id) : ('../reception/students_list_edit.php?id=' . $id);
 $listUrl = function_exists('student_list_url') ? student_list_url() : '../reception/students_list.php';

@@ -277,6 +277,30 @@ function student_print_url(int $id): string
 }
 
 /**
+ * Absolute photo URL. Stored paths like uploads/students/x.jpg must not resolve as /owner/uploads/...
+ */
+function student_photo_url(?string $path): string
+{
+    $p = trim((string) $path);
+    if ($p === '') {
+        return '';
+    }
+    if (function_exists('site_url')) {
+        if (preg_match('#^https?://#i', $p)) {
+            return site_url($p);
+        }
+        $rel = function_exists('normalize_media_path') ? normalize_media_path($p) : ltrim($p, '/');
+        $rel = preg_replace('#^(owner|reception|teacher|parent|accounts)/+#', '', $rel) ?? $rel;
+        $rel = ltrim((string) $rel, '/');
+        if ($rel === '') {
+            return '';
+        }
+        return site_url('/' . $rel);
+    }
+    return '/' . ltrim($p, '/');
+}
+
+/**
  * @return array{receipt: string, method: string, note: string}
  */
 function student_parse_receipt_meta(?string $receiptNo): array

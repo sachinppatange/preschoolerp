@@ -349,7 +349,8 @@ require_once __DIR__ . '/../includes/header.php';
               <td><?php echo (int)$s['id']; ?></td>
               <td>
                 <div class="d-flex align-items-center gap-3">
-                  <?php if (!empty($s['photo_path'])): ?><img src="<?php echo $esc($s['photo_path']); ?>" class="student-photo" alt="photo"><?php else: ?><div style="width:56px;height:56px;border-radius:8px;background:#eef2ff"></div><?php endif; ?>
+                  <?php $photoUrl = function_exists('student_photo_url') ? student_photo_url((string) ($s['photo_path'] ?? '')) : ''; ?>
+                  <?php if ($photoUrl !== ''): ?><img src="<?php echo $esc($photoUrl); ?>" class="student-photo" alt="photo"><?php else: ?><div style="width:56px;height:56px;border-radius:8px;background:#eef2ff"></div><?php endif; ?>
                   <div>
                     <div class="fw-semibold"><?php echo $esc($s['first_name'] . ($s['last_name'] ? ' ' . $s['last_name'] : '')); ?></div>
                     <div class="small text-muted"><?php echo $s['dob'] ? e(date('d M Y', strtotime($s['dob']))) : '—'; ?></div>

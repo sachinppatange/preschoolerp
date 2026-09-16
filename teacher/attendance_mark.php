@@ -247,7 +247,7 @@ require_once __DIR__ . '/../includes/header.php';
                 ?>
                   <tr>
                     <td><?php echo $i++; ?></td>
-                    <td><?php if (!empty($s['photo_path'])): ?><img src="<?php echo e($s['photo_path']); ?>" class="student-photo" alt="photo"><?php else: ?><div style="width:40px;height:40px;background:#f1f1f1;border-radius:4px"></div><?php endif; ?></td>
+                    <td><?php $photoUrl = function_exists('student_photo_url') ? student_photo_url((string) ($s['photo_path'] ?? '')) : (string) ($s['photo_path'] ?? ''); if ($photoUrl !== ''): ?><img src="<?php echo e($photoUrl); ?>" class="student-photo" alt="photo"><?php else: ?><div style="width:40px;height:40px;background:#f1f1f1;border-radius:4px"></div><?php endif; ?></td>
                     <td><?php echo e($s['form_no'] ?? '—'); ?></td>
                     <td><?php echo e($fullname ?: ('Student #' . $sid)); ?><br><small class="small-muted">Admitted: <?php echo e(substr($s['admission_date'] ?? '',0,10) ?: '—'); ?></small></td>
                     <td><?php echo e(substr($s['dob'] ?? '',0,10) ?: '—'); ?></td>

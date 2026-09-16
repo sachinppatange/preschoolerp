@@ -270,7 +270,7 @@ echo panel_owner_parent_gate_html();
                 <div class="d-flex align-items-center">
                   <div class="me-2">
                     <?php if (!empty($c['photo_path'])): ?>
-                      <img src="<?php echo e($c['photo_path']); ?>" alt="" class="child-photo">
+                      <img src="<?php echo e(function_exists('student_photo_url') ? student_photo_url((string) ($c['photo_path'] ?? '')) : (string) ($c['photo_path'] ?? '')); ?>" alt="" class="child-photo">
                     <?php else: ?>
                       <div class="child-photo" style="background:#f1f1f1"></div>
                     <?php endif; ?>

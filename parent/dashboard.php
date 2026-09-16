@@ -305,7 +305,7 @@ echo panel_owner_parent_gate_html();
                 <div class="list-group-item d-flex align-items-center <?php if ($cid === $selectedChildId) echo 'active text-white'; ?>">
                   <div class="me-3">
                     <?php if (!empty($ch['photo_path'])): ?>
-                      <img src="<?php echo e($ch['photo_path']); ?>" alt="" class="child-photo">
+                      <img src="<?php echo e(function_exists('student_photo_url') ? student_photo_url((string) ($ch['photo_path'] ?? '')) : (string) ($ch['photo_path'] ?? '')); ?>" alt="" class="child-photo">
                     <?php else: ?>
                       <div class="child-photo" style="background:#f1f1f1;display:inline-block"></div>
                     <?php endif; ?>

@@ -38,7 +38,7 @@ if (table_exists('schools')) {
 }
 
 $fullName = function_exists('student_full_name') ? student_full_name($student) : trim(($student['first_name'] ?? '') . ' ' . ($student['last_name'] ?? ''));
-$photo = function_exists('resolve_image_url') ? resolve_image_url((string) ($student['photo_path'] ?? ''), '') : '';
+$photo = function_exists('student_photo_url') ? student_photo_url((string) ($student['photo_path'] ?? '')) : '';
 $logo = function_exists('resolve_image_url')
     ? resolve_image_url((string) ($school['logo_path'] ?? ''), function_exists('asset_url') ? asset_url('assets/images/logo.png') : '')
     : '';

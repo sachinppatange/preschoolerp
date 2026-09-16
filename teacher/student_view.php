@@ -106,7 +106,7 @@ require_once __DIR__ . '/../includes/header.php';
     <div class="card shadow-sm">
       <div class="card-body text-center">
         <?php if (!empty($student['photo_path'])): ?>
-          <img src="<?php echo e($student['photo_path']); ?>" alt="photo" class="student-photo mb-3">
+          <img src="<?php echo e(function_exists('student_photo_url') ? student_photo_url((string) ($student['photo_path'] ?? '')) : (string) ($student['photo_path'] ?? '')); ?>" alt="photo" class="student-photo mb-3">
         <?php else: ?>
           <div class="student-photo mb-3" style="display:inline-block;background:#f6f6f6;line-height:96px;">&nbsp;</div>
         <?php endif; ?>

@@ -74,7 +74,7 @@ if ($action === 'view_student' && !empty($_GET['id'])) {
     echo '<div class="p-3">';
     echo '<div class="d-flex gap-3 mb-3">';
     if (!empty($student['photo_path'])) {
-        echo '<img src="'.e($student['photo_path']).'" alt="" style="width:120px;height:120px;object-fit:cover;border-radius:6px">';
+        echo '<img src="'.e(function_exists('student_photo_url') ? student_photo_url((string) ($student['photo_path'] ?? '')) : (string) ($student['photo_path'] ?? '')).'" alt="" style="width:120px;height:120px;object-fit:cover;border-radius:6px">';
     } else {
         echo '<div style="width:120px;height:120px;background:#f1f1f1;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#777">No Photo</div>';
     }
@@ -312,7 +312,7 @@ echo panel_owner_parent_gate_html();
                   <div class="d-flex align-items-center">
                     <div class="me-2">
                       <?php if (!empty($c['photo_path'])): ?>
-                        <img src="<?php echo e($c['photo_path']); ?>" alt="" class="child-photo">
+                        <img src="<?php echo e(function_exists('student_photo_url') ? student_photo_url((string) ($c['photo_path'] ?? '')) : (string) ($c['photo_path'] ?? '')); ?>" alt="" class="child-photo">
                       <?php else: ?>
                         <div class="child-photo" style="background:#f1f1f1"></div>
                       <?php endif; ?>

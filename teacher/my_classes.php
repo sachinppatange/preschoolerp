@@ -185,7 +185,7 @@ require_once __DIR__ . '/../includes/header.php';
                   <?php $i = 1; foreach ($students as $s): 
                     $sid = (int)$s['id'];
                     $fullname = trim((($s['first_name'] ?? '') . ' ' . ($s['middle_name'] ?? '') . ' ' . ($s['last_name'] ?? '')));
-                    $photo = !empty($s['photo_path']) ? $s['photo_path'] : '';
+                    $photo = function_exists('student_photo_url') ? student_photo_url((string) ($s['photo_path'] ?? '')) : (string) ($s['photo_path'] ?? '');
                   ?>
                     <tr>
                       <td><?php echo $i++; ?></td>

@@ -355,8 +355,9 @@ require_once __DIR__ . '/../includes/header.php';
 
               <td>
                 <div class="d-flex align-items-center gap-3">
-                  <?php if (!empty($s['photo_path'])): ?>
-                    <img src="<?php echo $esc($s['photo_path']); ?>" class="student-photo" alt="photo">
+                  <?php $photoUrl = function_exists('student_photo_url') ? student_photo_url((string) ($s['photo_path'] ?? '')) : ''; ?>
+                  <?php if ($photoUrl !== ''): ?>
+                    <img src="<?php echo $esc($photoUrl); ?>" class="student-photo" alt="photo">
                   <?php else: ?>
                     <div style="width:56px;height:56px;border-radius:8px;background:#eef2ff"></div>
                   <?php endif; ?>
