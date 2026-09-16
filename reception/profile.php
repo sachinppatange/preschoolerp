@@ -11,5 +11,8 @@ require_once __DIR__ . '/../includes/features/feature_run.php';
 
 feature_run('profile', [
     'panel' => 'reception',
-    'page_title' => 'Reception - My Profile',
+    'page_title' => 'My Profile',
+    'show_teacher_fields' => false,
+    'avatar_subdir' => 'staff',
+    'default_role_label' => 'reception',
 ]);

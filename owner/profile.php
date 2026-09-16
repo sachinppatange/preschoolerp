@@ -1,6 +1,6 @@
 <?php
 /**
- * owner/profile.php — thin wrapper for shared feature module.
+ * owner/profile.php — logged-in owner's personal profile.
  */
 declare(strict_types=1);
 
@@ -11,5 +11,8 @@ require_once __DIR__ . '/../includes/features/feature_run.php';
 
 feature_run('profile', [
     'panel' => 'owner',
-    'page_title' => 'School Profile',
+    'page_title' => 'My Profile',
+    'show_teacher_fields' => false,
+    'avatar_subdir' => 'owners',
+    'default_role_label' => 'owner',
 ]);
