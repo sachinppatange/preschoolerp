@@ -12,7 +12,7 @@ $DEBUG = function_exists('panel_debug') ? panel_debug() : false;
 /* Ensure table exists */
 if (!table_exists('students')) {
     require_once __DIR__ . '/header.php';
-echo '<div class="container py-4"><div class="alert alert-danger">The <strong>students</strong> table does not exist. कृपया डेटाबेस तपासा.</div></div>';
+echo '<div class="container py-4"><div class="alert alert-danger">The <strong>students</strong> table does not exist. Please check the database.</div></div>';
     require_once __DIR__ . '/footer.php';
     exit;
 }
@@ -156,8 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $data['remark'] = trim((string)($_POST['remark'] ?? ''));
         $data['stamp'] = trim((string)($_POST['stamp'] ?? ''));
 
-        // Photo path from text input (fallback)
-        $photo_path = trim((string)($_POST['photo_path'] ?? ''));
+        $photo_path = (string) ($student['photo_path'] ?? '');
 
         // Upload option (overrides text input if file uploaded successfully)
         if (!empty($_FILES['photo_upload']) && ($_FILES['photo_upload']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
@@ -309,16 +308,9 @@ $printUrl = function_exists('student_print_url') ? student_print_url($id) : ('..
           <div class="photo-preview d-flex align-items-center justify-content-center text-muted">No Photo</div>
         <?php endif; ?>
         <div class="flex-grow-1">
-          <div class="mb-2">
-            <label class="form-label">Photo Path / URL</label>
-            <input name="photo_path" class="form-control" value="<?php echo e((string)$val('photo_path','')); ?>" placeholder="uploads/students/xyz.jpg OR https://...">
-            <div class="form-text">Tip: जर value `uploads/...` अशी असेल तर view page साठी path योग्य असणे गरजेचे आहे.</div>
-          </div>
-          <div>
-            <label class="form-label">Upload New Photo (optional)</label>
-            <input type="file" name="photo_upload" class="form-control" accept="image/*">
-            <div class="form-text">Upload केल्यावर `Photo Path` auto update होईल.</div>
-          </div>
+          <label class="form-label">Photo</label>
+          <input type="file" name="photo_upload" class="form-control" accept="image/*">
+          <div class="form-text">Upload a new photo to replace the current one. JPG, PNG, GIF or WEBP.</div>
         </div>
       </div>
 
@@ -539,10 +531,6 @@ $printUrl = function_exists('student_print_url') ? student_print_url($id) : ('..
 
     </div>
   </form>
-
-  <div class="small-muted mt-3">
-    Note: जर फोटो अजूनही view page वर दिसत नसेल तर `photo_path` value आणि actual file path (server वर) verify करा.
-  </div>
 
 <?php
 require_once __DIR__ . '/footer.php';
