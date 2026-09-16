@@ -11,39 +11,48 @@
  */
 
 /* ---------------------------
- *  EDIT THESE VALUES DIRECTLY
+ *  Local vs production (auto)
+ *  localhost  → XAMPP / https://localhost/apppreschool/
+ *  live site  → https://app.preschoolapp.in/
  * --------------------------- */
+$httpHost = strtolower((string) ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? ''));
+$httpHost = preg_replace('/:\d+$/', '', $httpHost) ?: '';
+$isLocalHost = ($httpHost === 'localhost' || $httpHost === '127.0.0.1' || str_ends_with($httpHost, '.localhost'));
+$isLiveHost = ($httpHost === 'app.preschoolapp.in' || $httpHost === 'www.app.preschoolapp.in');
+/* CLI / cron: Mac XAMPP path = local, otherwise live */
+if ($httpHost === '') {
+    $isLocalHost = (PHP_OS_FAMILY === 'Darwin' || stripos(__DIR__, 'xampp') !== false);
+    $isLiveHost = !$isLocalHost;
+}
+$isLocal = $isLocalHost && !$isLiveHost;
 
 /* Application */
-define('APP_ENV', 'development');           // 'development' or 'production'
-define('APP_DEBUG', true);                  // true only for development
+define('APP_ENV', $isLocal ? 'development' : 'production');
+define('APP_DEBUG', $isLocal);              // true only on localhost
 define('APP_NAME', 'Pioneer Play School');
-define('BASE_URL', 'https://pioneerplayschool.preschoolapp.in/');
+define('BASE_URL', $isLocal ? 'https://localhost/apppreschool/' : 'https://app.preschoolapp.in/');
 define('TIMEZONE', 'Asia/Kolkata');
 
 /* Session / cookie */
 define('SESSION_COOKIE_NAME', 'pps_session');
 define('SESSION_TIMEOUT_SEC', 28800);      // 8 hours
-define('SESSION_SECURE', false);           // true in production with HTTPS
+define('SESSION_SECURE', !$isLocal);       // true in production with HTTPS
 define('SESSION_HTTPONLY', true);
 define('SESSION_SAMESITE', 'Lax');         // Lax | Strict | None
 
-/* Database (optional) 
+/* Database */
 define('DB_HOST', '127.0.0.1');
 define('DB_PORT', '3306');
-define('DB_USER', 'root');
-define('DB_PASS', '');
-define('DB_NAME', 'apppreschoolapp');
-define('DB_CHARSET', 'utf8mb4'); 
-
-
-* Database (optional) */
-define('DB_HOST', '127.0.0.1');
-define('DB_PORT', '3306');
-define('DB_USER', 'u750208840_apppreyser');
-define('DB_PASS', 'Sachin@1078#');
-define('DB_NAME', 'u750208840_apppredbnew');
 define('DB_CHARSET', 'utf8mb4');
+if ($isLocal) {
+    define('DB_USER', 'root');
+    define('DB_PASS', '');
+    define('DB_NAME', 'apppreschoolapp');
+} else {
+    define('DB_USER', 'u750208840_apppreyser');
+    define('DB_PASS', 'Sachin@1078#');
+    define('DB_NAME', 'u750208840_apppredbnew');
+}
 
 
 /* Paths */
