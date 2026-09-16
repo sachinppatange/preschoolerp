@@ -139,9 +139,8 @@ require_once __DIR__ . '/../includes/header.php';
         <?php
         $actions = [
           ['/reception/admission.php','bi-person-plus','Add Student Admission'], // also included in quick list
-          ['../reception/students_list.php','bi-people','Student List'],
           ['../reception/enquiry_list.php','bi-chat-left-text','Enquiries'],
-          ['../reception/add_parents.php','bi-person-lines-fill','Parents'],
+          ['../reception/students_list.php','bi-people','Student List'],
           ['../reception/notices_publish.php','bi-megaphone','Notices'],
           ['../reception/news_events.php','bi-newspaper','News & Events'],
           ['../reception/students_list.php?filter=this_month','bi-person-plus','Admissions']

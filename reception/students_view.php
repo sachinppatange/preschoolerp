@@ -384,7 +384,7 @@ require_once __DIR__ . '/../includes/header.php';
           <?php if ($parent): ?>
             <div><strong><?php echo e($parent['name']); ?></strong> <?php if ((int)($parent['is_active'] ?? 1) === 0) echo '<span class="badge bg-secondary ms-2">Inactive</span>'; ?></div>
             <div><small>Phone: <?php echo e($parent['phone'] ?? ''); ?></small></div>
-            <div class="mt-2"><a href="/reception/add_parents.php?action=view&id=<?php echo (int)$parent['id']; ?>" target="_blank" class="btn btn-sm btn-outline-secondary no-print">Open Parent</a></div>
+            <div class="form-text">This number is used for Parent Portal login. To add a sibling, use the same mobile on a new admission.</div>
           <?php else: ?>
             <div class="text-muted">No parent user linked (parent_id empty)</div>
           <?php endif; ?>

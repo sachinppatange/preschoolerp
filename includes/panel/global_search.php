@@ -41,7 +41,7 @@ function panel_search_urls(): array
     if (function_exists('auth_is_owner_super') && auth_is_owner_super()) {
         return [
             'students' => $owner . '/students_list.php',
-            'parents' => $owner . '/parents_children.php',
+            'parents' => $owner . '/students_list.php',
             'fees' => $owner . '/daily_collection.php',
             'enquiries' => $owner . '/enquiry_list.php',
         ];
@@ -53,7 +53,7 @@ function panel_search_urls(): array
     if ($role === 'reception') {
         return [
             'students' => $base . '/students_list.php',
-            'parents' => $base . '/parents_children.php',
+            'parents' => $base . '/students_list.php',
             'fees' => panel_base_url('accounts') . '/fees_collection.php',
             'enquiries' => $base . '/enquiry_list.php',
         ];
@@ -61,7 +61,7 @@ function panel_search_urls(): array
     if ($role === 'accounts') {
         return [
             'students' => $owner . '/students_list.php',
-            'parents' => $owner . '/parents_children.php',
+            'parents' => $owner . '/students_list.php',
             'fees' => $base . '/daily_collection.php',
             'enquiries' => $owner . '/enquiry_list.php',
         ];
@@ -69,7 +69,7 @@ function panel_search_urls(): array
 
     return [
         'students' => $owner . '/students_list.php',
-        'parents' => $owner . '/parents_children.php',
+        'parents' => $owner . '/students_list.php',
         'fees' => $owner . '/pending_fees.php',
         'enquiries' => $owner . '/enquiry_list.php',
     ];
@@ -170,7 +170,7 @@ function panel_global_search(string $query, int $limitPerType = 6): array
                 'type' => 'parent',
                 'title' => (string) ($r['name'] ?? 'Parent'),
                 'subtitle' => 'Parent · ' . (string) ($r['phone'] ?? ''),
-                'url' => $urls['parents'] . '?parent_user_id=' . (int) ($r['id'] ?? 0),
+                'url' => $urls['students'] . '?q=' . rawurlencode((string) ($r['phone'] ?? $r['name'] ?? $q)),
                 'icon' => 'bi-people',
             ];
         }

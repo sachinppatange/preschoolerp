@@ -29,11 +29,8 @@ function owner_panel_menu(): array
             'items' => [
                 ['url' => $reception . '/admission.php', 'icon' => 'bi-person-plus-fill', 'label' => 'New Admission', 'match' => 'admission'],
                 ['url' => $owner . '/students_list.php', 'icon' => 'bi-people-fill', 'label' => 'Students', 'match' => 'students_list'],
-                ['url' => $owner . '/parents_children.php', 'icon' => 'bi-person-lines-fill', 'label' => 'Parents & Children', 'match' => 'parents_children'],
-                ['url' => $reception . '/add_parents.php', 'icon' => 'bi-person-add', 'label' => 'Add Parent', 'match' => 'add_parents'],
                 ['url' => $owner . '/enquiry_list.php', 'icon' => 'bi-chat-left-text', 'label' => 'Enquiries', 'match' => 'enquiry'],
                 ['url' => $reception . '/admissionbulk.php', 'icon' => 'bi-file-earmark-spreadsheet', 'label' => 'Bulk Admission', 'match' => 'admissionbulk'],
-                ['url' => $reception . '/add_parentsbulk.php', 'icon' => 'bi-upload', 'label' => 'Bulk Parents', 'match' => 'add_parentsbulk'],
                 ['url' => $owner . '/pending_tasks.php', 'icon' => 'bi-list-check', 'label' => 'Reception Tasks', 'match' => 'pending_tasks'],
             ],
         ],
