@@ -144,10 +144,26 @@ function login_otp_process(array $config): array
         $cols = $fullRow
             ? 'id, name, phone, role, school_id, whatsapp_id, is_active'
             : 'id, name, role, is_active';
+        $digits = preg_replace('/\D+/', '', $phonePlain) ?? '';
+        $last10 = strlen($digits) >= 10 ? substr($digits, -10) : $digits;
+        $variants = array_values(array_unique(array_filter([
+            $phonePlus,
+            $phonePlain,
+            $last10,
+            '91' . $last10,
+            '+91' . $last10,
+            '0' . $last10,
+        ])));
+        $ph = implode(',', array_fill(0, count($variants), '?'));
         $sql = "SELECT {$cols} FROM users WHERE {$roleSql}
-                  AND (phone = ? OR phone = ? OR whatsapp_id = ? OR whatsapp_id = ?)
-                LIMIT 1";
-        $params = array_merge($roleParams, [$phonePlus, $phonePlain, $phonePlus, $phonePlain]);
+                  AND (
+                    phone IN ({$ph})
+                    OR whatsapp_id IN ({$ph})
+                    OR RIGHT(REPLACE(REPLACE(REPLACE(IFNULL(phone,''), '+', ''), ' ', ''), '-', ''), 10) = ?
+                    OR RIGHT(REPLACE(REPLACE(REPLACE(IFNULL(whatsapp_id,''), '+', ''), ' ', ''), '-', ''), 10) = ?
+                  )
+                ORDER BY id ASC LIMIT 1";
+        $params = array_merge($roleParams, $variants, $variants, [$last10, $last10]);
         return db_fetch_one($sql, $params);
     };
 

@@ -3,8 +3,7 @@
  * reception/admission.php
  *
  * Full Student Admission form and save handler.
- * - Auto-prefill parent when parent_id provided in URL and auto-select in dropdown
- * - Add Parent modal (AJAX) to create parent and optionally open admission for newly created parent
+ * - Parent login is created/linked automatically from parent name + mobile (same number = siblings)
  * - Saves form into `students` table: discovers existing columns and inserts only matching columns
  * - Ensures parents_children mapping exists
  * - Uploads photo to uploads/students/
@@ -25,6 +24,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('reception');
 $DEBUG = panel_debug();
+if (!function_exists('parent_find_or_create')) {
+    require_once __DIR__ . '/../includes/parent_account.php';
+}
 
 /* Ensure required tables exist */
 if (!table_exists('students') || !table_exists('users') || !table_exists('parents_children')) {
@@ -41,9 +43,8 @@ $CSRF = $_SESSION['csrf_token'];
 /* Load lists */
 $schoolList = table_exists('schools') ? safe_db_get_all("SELECT id, name FROM schools ORDER BY name ASC") : [];
 $classList = table_exists('classes') ? safe_db_get_all("SELECT id, name, fees FROM classes ORDER BY name ASC") : [];
-$parentList = safe_db_get_all("SELECT id, name, phone FROM users WHERE role = 'parent' ORDER BY name ASC");
 
-/* Parent prefill */
+/* Optional prefill when opened from Parents list (?parent_id=) */
 $parent = null;
 $parent_id = isset($_GET['parent_id']) ? (int)$_GET['parent_id'] : 0;
 if ($parent_id > 0) {
@@ -71,6 +72,9 @@ $defaults = [
     // NEW
     'academic_year' => ay_selected(),
 
+    'parent_login_name' => $parent['name'] ?? '',
+    'parent_login_phone' => $parent['phone'] ?? '',
+    'parent_login_relation' => 'parent',
     'stu_first'=>'','stu_middle'=>'','stu_last'=>'',
     'dob'=>'','gender'=>'male','place_of_birth'=>'','nationality'=>'','caste'=>'','languages'=>'',
     'address'=>'','city'=>'','state'=>'','country'=>'','pin'=>'',
@@ -83,39 +87,6 @@ $defaults = [
 ];
 
 $errors = []; $messages = [];
-
-/* -------------------------
-   AJAX: create_parent
-   ------------------------- */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_POST['action'] ?? '') === 'create_parent')) {
-    header('Content-Type: application/json; charset=utf-8');
-    $incoming = $_POST['csrf_token'] ?? '';
-    if (!hash_equals($_SESSION['csrf_token'] ?? '', (string)$incoming)) {
-        echo json_encode(['ok'=>false,'error'=>'Invalid CSRF token']); exit;
-    }
-    $school_id = isset($_POST['school_id']) && $_POST['school_id'] !== '' ? (int)$_POST['school_id'] : null;
-    $name = trim((string)($_POST['name'] ?? ''));
-    $phone = preg_replace('/\D+/', '', (string)($_POST['phone'] ?? ''));
-    $whatsapp_id = trim((string)($_POST['whatsapp_id'] ?? ''));
-    $is_active = isset($_POST['is_active']) && ($_POST['is_active'] === '0' ? 0 : 1);
-    $admit = isset($_POST['admit']) && ($_POST['admit'] === '1' || $_POST['admit'] === 'on');
-    if ($name === '') { echo json_encode(['ok'=>false,'error'=>'Name required']); exit; }
-    if ($phone === '') { echo json_encode(['ok'=>false,'error'=>'Phone required']); exit; }
-    try {
-        $pdo = pdo_connect(); if (!($pdo instanceof \PDO)) throw new RuntimeException('DB unavailable');
-        $found = safe_db_get_one("SELECT id, name FROM users WHERE (phone = :p OR whatsapp_id = :p) LIMIT 1", [':p'=>$phone]);
-        if ($found) { echo json_encode(['ok'=>true,'existing'=>true,'id'=>$found['id'],'name'=>$found['name']]); exit; }
-        $stmt = $pdo->prepare("INSERT INTO users (school_id, name, phone, role, whatsapp_id, is_active, meta, created_at, updated_at) VALUES (:school_id, :name, :phone, 'parent', :whatsapp, :is_active, NULL, NOW(), NOW())");
-        $stmt->execute([':school_id'=>$school_id,':name'=>$name,':phone'=>$phone,':whatsapp'=>$whatsapp_id?:$phone,':is_active'=>$is_active]);
-        $newId = (int)$pdo->lastInsertId();
-        $resp = ['ok'=>true,'id'=>$newId,'name'=>$name];
-        if ($admit && $newId) $resp['admit_url'] = '/reception/admission.php?parent_id=' . urlencode((string)$newId);
-        echo json_encode($resp); exit;
-    } catch (Throwable $e) {
-        error_log('create_parent error: '.$e->getMessage());
-        echo json_encode(['ok'=>false,'error'=>$DEBUG ? $e->getMessage() : 'Server error']); exit;
-    }
-}
 
 /* -------------------------
    Handle Admission POST (main)
@@ -193,11 +164,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
         $in['remark'] = trim((string)($_POST['remark'] ?? ''));
         $in['stamp'] = trim((string)($_POST['stamp'] ?? ''));
 
-        // parent selection
-        $posted_parent_id = $parent_id > 0 ? $parent_id : (!empty($_POST['parent_id']) ? (int)$_POST['parent_id'] : 0);
+        $in['parent_login_name'] = trim((string)($_POST['parent_login_name'] ?? ''));
+        $in['parent_login_phone'] = parent_phone_last10((string)($_POST['parent_login_phone'] ?? ''));
+        $in['parent_login_relation'] = trim((string)($_POST['parent_login_relation'] ?? 'parent'));
+        if (!in_array($in['parent_login_relation'], ['father', 'mother', 'guardian', 'parent'], true)) {
+            $in['parent_login_relation'] = 'parent';
+        }
+        if ($in['parent_login_name'] === '') {
+            $fn = trim($in['father_first'] . ' ' . $in['father_last']);
+            $mn = trim($in['mother_first'] . ' ' . $in['mother_last']);
+            $in['parent_login_name'] = $fn !== '' ? $fn : ($mn !== '' ? $mn : trim($in['guardian_name']));
+        }
 
         // validations
-        if ($posted_parent_id <= 0) $errors[] = 'Parent is required. Create/select parent first.';
+        if (strlen($in['parent_login_phone']) !== 10) $errors[] = 'Parent login mobile must be a 10-digit number (used for Parent Portal OTP).';
+        if ($in['parent_login_name'] === '') $errors[] = 'Parent name is required.';
         if ($in['stu_first'] === '') $errors[] = 'Student first name required.';
         if ($in['dob'] === '') $errors[] = 'Date of birth is required.';
 
@@ -242,6 +223,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                 try {
                     $pdo->beginTransaction();
 
+                    $parentAccount = parent_find_or_create($pdo, [
+                        'name' => $in['parent_login_name'],
+                        'phone' => $in['parent_login_phone'],
+                        'school_id' => $in['school_id'] ?: 1,
+                    ]);
+                    $posted_parent_id = (int) $parentAccount['id'];
+                    if ($posted_parent_id <= 0) {
+                        throw new RuntimeException('Could not create or find parent login.');
+                    }
+
                     // discover existing student columns
                     $colsInfo = safe_db_get_all("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'students'");
                     $existingCols = array_column($colsInfo, 'COLUMN_NAME');
@@ -252,7 +243,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                     if (in_array('first_name', $existingCols)) $dbData['first_name'] = $full_first;
                     if (in_array('middle_name', $existingCols)) $dbData['middle_name'] = $in['stu_middle'];
                     if (in_array('last_name', $existingCols)) $dbData['last_name'] = $in['stu_last'];
-                    if (in_array('school_id', $existingCols)) $dbData['school_id'] = $in['school_id'];
+                    if (in_array('school_id', $existingCols)) $dbData['school_id'] = $in['school_id'] ?: 1;
                     if (in_array('dob', $existingCols)) $dbData['dob'] = $in['dob'];
                     if (in_array('class_id', $existingCols)) $dbData['class_id'] = $in['class_id'];
                     if (in_array('parent_id', $existingCols)) $dbData['parent_id'] = $posted_parent_id;
@@ -382,7 +373,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                             'remark'=>$in['remark'],
                             'stamp'=>$in['stamp']
                         ],
-                        'created_at'=>$now
+                        'created_at'=>$now,
+                        'parent_login'=>[
+                            'name'=>$in['parent_login_name'],
+                            'phone'=>$in['parent_login_phone'],
+                            'relation'=>$in['parent_login_relation'],
+                            'user_id'=>$posted_parent_id ?? null,
+                        ],
                     ];
                     if (in_array('extended_json', $existingCols)) {
                         $dbData['extended_json'] = json_encode($extended_payload, JSON_UNESCAPED_UNICODE);
@@ -403,13 +400,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                     $studentId = (int)$pdo->lastInsertId();
                     if ($studentId <= 0) throw new RuntimeException('Failed to insert student record.');
 
-                    // ensure parents_children mapping
-                    $mapStmt = $pdo->prepare("SELECT id FROM parents_children WHERE parent_user_id = :p AND child_student_id = :c LIMIT 1");
-                    $mapStmt->execute([':p'=>$posted_parent_id, ':c'=>$studentId]);
-                    if (!$mapStmt->fetch(\PDO::FETCH_ASSOC)) {
-                        $ins = $pdo->prepare("INSERT INTO parents_children (parent_user_id, child_student_id, relation, created_at) VALUES (:p,:c,:r,NOW())");
-                        $ins->execute([':p'=>$posted_parent_id, ':c'=>$studentId, ':r'=>'guardian']);
-                    }
+                    parent_link_student($pdo, $posted_parent_id, $studentId, $in['parent_login_relation']);
 
                     // write meta json file
                     $metaDir = __DIR__ . '/../uploads/students/meta/';
@@ -458,10 +449,7 @@ require_once __DIR__ . '/../includes/header.php';
 
   <div class="panel-toolbar adm-toolbar">
     <div>
-      <p class="panel-page-lead mb-1">New student admission form — fill in the required details and save.</p>
-      <?php if ($parent): ?>
-        <div class="adm-parent-banner"><i class="bi bi-person-check-fill"></i> Parent pre-selected: <strong><?php echo e($parent['name']); ?></strong><?php if (!empty($parent['phone'])) echo ' · '.e($parent['phone']); ?></div>
-      <?php endif; ?>
+      <p class="panel-page-lead mb-1">Fill student details. Parent Portal login is created from the parent mobile number — the same number on two children keeps one parent login.</p>
     </div>
     <div class="adm-toolbar-actions">
       <a href="students_list.php" class="btn btn-sm btn-outline-secondary"><i class="bi bi-people me-1"></i>Students</a>
@@ -472,7 +460,7 @@ require_once __DIR__ . '/../includes/header.php';
 
   <nav class="adm-nav" aria-label="Form sections">
     <a href="#adm-basic" class="active">Basic</a>
-    <a href="#adm-parent">Parent</a>
+    <a href="#adm-parent">Parent login</a>
     <a href="#adm-student">Student</a>
     <a href="#adm-address">Address</a>
     <a href="#adm-family">Family</a>
@@ -530,30 +518,34 @@ require_once __DIR__ . '/../includes/header.php';
     <section class="adm-section" id="adm-parent">
       <div class="adm-section-head">
         <span class="adm-section-num">2</span>
-        <div><h2>Parent / Guardian Account</h2><p>Select existing parent or create new</p></div>
-        <button type="button" class="btn btn-sm btn-primary ms-auto d-none d-md-inline-flex" data-bs-toggle="modal" data-bs-target="#addParentModal"><i class="bi bi-person-plus me-1"></i>Add Parent</button>
+        <div>
+          <h2>Parent login (WhatsApp OTP)</h2>
+          <p>Enter the parent’s name and 10-digit mobile. The same number on a second child links both students to one Parent Portal login.</p>
+        </div>
       </div>
       <div class="adm-section-body">
-        <div class="row g-3 align-items-end">
-          <div class="col-12 col-lg-9">
-            <label class="form-label">Select Parent <span class="adm-req">*</span></label>
-            <div class="adm-parent-search">
-              <i class="bi bi-search"></i>
-              <input type="search" id="parentSearch" class="form-control" placeholder="Search parent by name or phone…" autocomplete="off">
-            </div>
-            <select name="parent_id" id="parent_select" class="form-select" required>
-              <option value="">-- Select parent --</option>
-              <?php foreach ($parentList as $pp):
-                $sel = ($parent_id > 0 && (int)$parent_id === (int)$pp['id']) ? ' selected' : '';
-                if ($parent_id == 0 && isset($_POST['parent_id']) && (string)$_POST['parent_id'] === (string)$pp['id']) $sel = ' selected';
-              ?>
-                <option value="<?php echo (int)$pp['id']; ?>"<?php echo $sel; ?>><?php echo e($pp['name']); ?><?php if(!empty($pp['phone'])) echo ' ('.e($pp['phone']).')'; ?></option>
-              <?php endforeach; ?>
-            </select>
-            <div class="form-text">If the parent is not listed, use &ldquo;Add Parent&rdquo;.</div>
+        <?php if ($parent): ?>
+          <div class="adm-parent-banner mb-3"><i class="bi bi-person-check-fill"></i> Prefill from existing parent: <strong><?php echo e($parent['name']); ?></strong><?php if (!empty($parent['phone'])) echo ' · '.e($parent['phone']); ?></div>
+        <?php endif; ?>
+        <div class="row g-3">
+          <div class="col-md-5">
+            <label class="form-label">Parent name <span class="adm-req">*</span></label>
+            <input name="parent_login_name" class="form-control" required value="<?php echo e($_POST['parent_login_name'] ?? $defaults['parent_login_name']); ?>" placeholder="Name as on Parent Portal">
           </div>
-          <div class="col-12 col-lg-3">
-            <button type="button" class="btn btn-primary w-100" data-bs-toggle="modal" data-bs-target="#addParentModal"><i class="bi bi-person-plus me-1"></i>Add Parent</button>
+          <div class="col-md-4">
+            <label class="form-label">Parent mobile (login) <span class="adm-req">*</span></label>
+            <input name="parent_login_phone" class="form-control" required inputmode="numeric" maxlength="15" pattern="[0-9]{10,15}" value="<?php echo e($_POST['parent_login_phone'] ?? parent_phone_last10((string)$defaults['parent_login_phone'])); ?>" placeholder="10-digit mobile">
+            <div class="form-text">This number is used for Parent Portal WhatsApp OTP. Siblings should use the same number.</div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Relation</label>
+            <?php $rel = $_POST['parent_login_relation'] ?? $defaults['parent_login_relation']; ?>
+            <select name="parent_login_relation" class="form-select">
+              <option value="parent" <?php if ($rel === 'parent') echo 'selected'; ?>>Parent</option>
+              <option value="father" <?php if ($rel === 'father') echo 'selected'; ?>>Father</option>
+              <option value="mother" <?php if ($rel === 'mother') echo 'selected'; ?>>Mother</option>
+              <option value="guardian" <?php if ($rel === 'guardian') echo 'selected'; ?>>Guardian</option>
+            </select>
           </div>
         </div>
       </div>
@@ -728,78 +720,14 @@ require_once __DIR__ . '/../includes/header.php';
     </section>
 
     <div class="adm-submit-bar">
-      <p class="form-text small-muted"><span class="adm-req">*</span> Parent, student name, date of birth, and academic year are required.</p>
+      <p class="form-text small-muted"><span class="adm-req">*</span> Parent name, parent mobile, student name, date of birth, and academic year are required.</p>
       <button class="btn btn-success btn-lg" type="submit"><i class="bi bi-check2-circle me-1"></i>Submit Admission</button>
     </div>
   </form>
 </div>
 
-<!-- Add Parent Modal -->
-<div class="modal fade" id="addParentModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <form id="addParentForm" method="post">
-        <input type="hidden" name="csrf_token" value="<?php echo e($CSRF); ?>">
-        <input type="hidden" name="action" value="create_parent">
-        <div class="modal-header">
-          <h5 class="modal-title">Add Parent</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <div class="row g-2">
-            <div class="col-md-6"><label class="form-label">Name *</label><input name="name" id="add_name" class="form-control" required></div>
-            <div class="col-md-6"><label class="form-label">Phone *</label><input name="phone" id="add_phone" class="form-control" required></div>
-            <div class="col-md-6"><label class="form-label">WhatsApp ID (optional)</label><input name="whatsapp_id" id="add_whatsapp" class="form-control"></div>
-            <div class="col-md-3"><label class="form-label">Active</label>
-              <select name="is_active" class="form-select"><option value="1" selected>Active</option><option value="0">Inactive</option></select>
-            </div>
-            <div class="col-md-3"><label class="form-label">School ID (optional)</label><input name="school_id" class="form-control" placeholder="school id"></div>
-            <div class="col-12">
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="admitAfterCreate" name="admit" value="1">
-                <label class="form-check-label" for="admitAfterCreate">Open Admission form after creating parent</label>
-              </div>
-            </div>
-            <div class="col-12"><div id="addParentErrors" class="text-danger small"></div><div id="addParentSuccess" class="text-success small"></div></div>
-          </div>
-        </div>
-        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button id="addParentSubmit" class="btn btn-primary" type="submit">Add Parent</button></div>
-      </form>
-    </div>
-  </div>
-</div>
-
 <script>
 document.addEventListener('DOMContentLoaded', function(){
-  var addForm = document.getElementById('addParentForm');
-  if (addForm) {
-    addForm.addEventListener('submit', function(ev){
-      ev.preventDefault();
-      var fd = new FormData(addForm);
-      var errEl = document.getElementById('addParentErrors');
-      var okEl = document.getElementById('addParentSuccess');
-      errEl.textContent=''; okEl.textContent='';
-      var btn = document.getElementById('addParentSubmit');
-      btn.disabled = true; btn.textContent='Saving...';
-
-      fetch(location.pathname, { method:'POST', credentials:'same-origin', body: fd })
-        .then(function(resp){ return resp.json().catch(function(){ return {ok:false,error:'Invalid JSON response'}; }); })
-        .then(function(json){
-          if (!json.ok) { errEl.textContent = json.error || 'Failed'; btn.disabled=false; btn.textContent='Add Parent'; return; }
-          okEl.textContent = 'Parent saved.';
-          if (json.id) {
-            var sel = document.getElementById('parent_select');
-            var opt = document.createElement('option');
-            opt.value = json.id;
-            opt.textContent = (json.name || document.getElementById('add_name').value) + (document.getElementById('add_phone').value ? ' ('+document.getElementById('add_phone').value+')' : '');
-            sel.appendChild(opt); sel.value = String(json.id);
-          }
-          if (json.admit_url) { window.location.href = json.admit_url; return; }
-          setTimeout(function(){ var modalEl = document.getElementById('addParentModal'); var md = bootstrap.Modal.getInstance(modalEl); if (md) md.hide(); btn.disabled=false; btn.textContent='Add Parent'; }, 600);
-        }).catch(function(){ errEl.textContent='Network/server error'; btn.disabled=false; btn.textContent='Add Parent'; });
-    });
-  }
-
   var classFees = <?php echo json_encode($class_fees_map); ?>;
   var classSel = document.getElementById('admission_seeking_in');
   var totalFeesInput = document.getElementById('total_fees');
@@ -809,27 +737,6 @@ document.addEventListener('DOMContentLoaded', function(){
     totalFeesInput.value = (v && classFees[v] !== undefined) ? classFees[v] : '';
   }
   if (classSel) { classSel.addEventListener('change', updateFees); updateFees(); }
-
-  var parentSearch = document.getElementById('parentSearch');
-  var parentSelect = document.getElementById('parent_select');
-  if (parentSearch && parentSelect) {
-    var allOptions = Array.prototype.slice.call(parentSelect.options);
-    parentSearch.addEventListener('input', function(){
-      var q = parentSearch.value.trim().toLowerCase();
-      var current = parentSelect.value;
-      parentSelect.innerHTML = '';
-      allOptions.forEach(function(opt){
-        if (!opt.value) {
-          parentSelect.appendChild(opt.cloneNode(true));
-          return;
-        }
-        if (!q || opt.text.toLowerCase().indexOf(q) !== -1) {
-          parentSelect.appendChild(opt.cloneNode(true));
-        }
-      });
-      if (current) parentSelect.value = current;
-    });
-  }
 
   var photoInput = document.getElementById('photoInput');
   var photoPreview = document.getElementById('photoPreview');
@@ -853,15 +760,5 @@ document.addEventListener('DOMContentLoaded', function(){
 </script>
 
 <?php
-// Optional fetch_parent endpoint used by JS if needed
-if (isset($_GET['fetch_parent']) && is_numeric($_GET['fetch_parent'])) {
-    $pid = (int)$_GET['fetch_parent'];
-    header('Content-Type: application/json; charset=utf-8');
-    $row = safe_db_get_one("SELECT id, name, phone FROM users WHERE id = :id AND role = 'parent' LIMIT 1", [':id'=>$pid]);
-    if ($row) echo json_encode(['ok'=>true,'data'=>$row]);
-    else echo json_encode(['ok'=>false]);
-    exit;
-}
-
 require_once __DIR__ . '/../includes/footer.php';
 ?>

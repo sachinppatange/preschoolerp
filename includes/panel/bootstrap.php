@@ -34,6 +34,9 @@ function panel_bootstrap(?string $role = null, array $options = []): void
     require_once $includesDir . '/db_compat.php';
 
     require_once $includesDir . '/functions.php';
+    if (file_exists($includesDir . '/parent_account.php')) {
+        require_once $includesDir . '/parent_account.php';
+    }
 
     require_once $includesDir . '/auth.php';
     require_once __DIR__ . '/helpers.php';
