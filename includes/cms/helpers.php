@@ -45,7 +45,7 @@ function cms_upload_dir(): string|false
 
 function cms_public_upload_url(string $filename): string
 {
-    return rtrim(site_url('/assets/uploads/' . ltrim($filename, '/')), '/');
+    return '/assets/uploads/' . ltrim($filename, '/');
 }
 
 function cms_resolve_image_url(string $path): string
@@ -53,10 +53,7 @@ function cms_resolve_image_url(string $path): string
     if (function_exists('resolve_image_url')) {
         return resolve_image_url($path);
     }
-    if (preg_match('#^https?://#i', $path)) {
-        return $path;
-    }
-    return site_url('/' . ltrim($path, '/'));
+    return function_exists('site_url') ? site_url($path) : $path;
 }
 
 /**
@@ -64,10 +61,16 @@ function cms_resolve_image_url(string $path): string
  */
 function cms_fs_path_from_url(string $url): string
 {
-    $base = site_url('');
-    $relative = (str_starts_with($url, $base))
-        ? substr($url, strlen($base))
-        : ltrim($url, '/');
+    $path = $url;
+    if (function_exists('app_path_from_maybe_legacy_url')) {
+        $rewritten = app_path_from_maybe_legacy_url($url);
+        if ($rewritten !== null) {
+            $path = $rewritten;
+        }
+    }
+    $relative = function_exists('normalize_media_path')
+        ? normalize_media_path($path)
+        : ltrim((string) (parse_url($path, PHP_URL_PATH) ?: $path), '/');
     $appRoot = realpath(dirname(__DIR__, 2)) ?: dirname(__DIR__, 2);
     return $appRoot . '/' . ltrim($relative, '/');
 }

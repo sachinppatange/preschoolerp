@@ -130,7 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SESSION['csrf_token'])) {
 
 /* Preserve desired redirect after logout (optional). Accept only safe redirect. */
 $requested_redirect = $_REQUEST['redirect'] ?? '';
-$redirect_after = safe_redirect_url($requested_redirect, '/owner/login.php');
+$redirect_after = safe_redirect_url($requested_redirect, function_exists('site_url') ? site_url('/owner/login.php') : '/owner/login.php');
 
 /* Now perform logout: unset session vars, destroy session, remove cookies */
 $oldSessionId = session_id();

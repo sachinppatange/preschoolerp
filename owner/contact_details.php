@@ -21,20 +21,11 @@ $DEBUG = panel_debug();
 
 session_start();
 
-function app_base(): string
-{
-    $script = $_SERVER['SCRIPT_NAME'] ?? '/pioneerplayschool/owner/contact_details.php';
-    $ownerDir = rtrim(dirname($script), '/');
-    $base = rtrim(dirname($ownerDir), '/'); // /pioneerplayschool
-    if ($base === '' || $base === '.') $base = '';
-    return $base;
-}
-function site_url(string $path = ''): string
-{
-    $base = app_base();
-    if ($path === '') return $base ?: '/';
-    $p = ($path[0] === '/') ? $path : ('/' . ltrim($path, '/'));
-    return ($base === '' ? $p : $base . $p);
+if (!function_exists('app_base')) {
+    function app_base(): string
+    {
+        return defined('BASE_URL') ? rtrim((string) BASE_URL, '/') : '';
+    }
 }
 
 if (!function_exists('db_get_one')) {

@@ -143,16 +143,69 @@ function normalize_phone($phone, $countryCode = '91')
 }
 
 /**
+ * Hosts whose stored absolute URLs should be rewritten to the current BASE_URL.
+ */
+function app_is_own_host(?string $host): bool
+{
+    $host = strtolower((string) $host);
+    if ($host === '') {
+        return false;
+    }
+    $current = defined('BASE_URL') ? strtolower((string) (parse_url((string) BASE_URL, PHP_URL_HOST) ?: '')) : '';
+    if ($current !== '' && $host === $current) {
+        return true;
+    }
+    if ($host === 'localhost' || $host === '127.0.0.1' || str_ends_with($host, '.localhost')) {
+        return true;
+    }
+    return str_ends_with($host, '.preschoolapp.in') || $host === 'preschoolapp.in';
+}
+
+/**
+ * Convert an old Pioneer / localhost / other-tenant absolute URL into an app-root path.
+ * Returns null for external URLs (Facebook, Maps, CDN, …).
+ */
+function app_path_from_maybe_legacy_url(string $url): ?string
+{
+    if (!preg_match('#^https?://#i', $url)) {
+        return null;
+    }
+    $host = parse_url($url, PHP_URL_HOST);
+    if (!app_is_own_host(is_string($host) ? $host : null)) {
+        return null;
+    }
+    $path = (string) (parse_url($url, PHP_URL_PATH) ?? '');
+    $qs = parse_url($url, PHP_URL_QUERY);
+    $frag = parse_url($url, PHP_URL_FRAGMENT);
+    $rel = '/' . ltrim(normalize_media_path($path), '/');
+    if ($rel === '/') {
+        $rel = '/';
+    }
+    if (is_string($qs) && $qs !== '') {
+        $rel .= '?' . $qs;
+    }
+    if (is_string($frag) && $frag !== '') {
+        $rel .= '#' . $frag;
+    }
+    return $rel;
+}
+
+/**
  * Build absolute URL from app root (uses BASE_URL).
+ * Absolute URLs that belong to this app (old Pioneer domain, localhost, live) are rewritten.
  */
 function site_url(string $path = ''): string
 {
     $base = defined('BASE_URL') ? rtrim((string) BASE_URL, '/') : '';
+    if (preg_match('#^https?://#i', $path)) {
+        $rewritten = app_path_from_maybe_legacy_url($path);
+        if ($rewritten === null) {
+            return $path;
+        }
+        $path = $rewritten;
+    }
     if ($path === '' || $path === '/') {
         return $base ? $base . '/' : '/';
-    }
-    if (preg_match('#^https?://#i', $path)) {
-        return $path;
     }
     return ($base ?: '') . '/' . ltrim($path, '/');
 }
@@ -171,7 +224,7 @@ function asset_url(string $path): string
 function normalize_media_path(string $path): string
 {
     $path = '/' . ltrim($path, '/');
-    foreach (['/demopreschoolapp', '/pioneerplayschool01', '/pioneerplayschool'] as $prefix) {
+    foreach (['/demopreschoolapp', '/pioneerplayschool01', '/pioneerplayschool', '/apppreschool'] as $prefix) {
         if (str_starts_with($path, $prefix . '/')) {
             $path = substr($path, strlen($prefix));
             break;
@@ -247,7 +300,7 @@ function media_default_fallback_for(string $relativePath): string
 
 /**
  * Resolve image path from DB / CMS to a working public URL on any host.
- * Rewrites old localhost or mismatched absolute URLs to current BASE_URL.
+ * Rewrites old Pioneer / localhost / other-tenant absolute URLs to current BASE_URL.
  * Falls back to bundled assets when the upload file is missing.
  */
 function resolve_image_url(?string $path, ?string $fallback = null): string
@@ -260,19 +313,11 @@ function resolve_image_url(?string $path, ?string $fallback = null): string
     $rel = null;
 
     if (preg_match('#^https?://#i', $p)) {
-        $currentHost = parse_url(site_url('/'), PHP_URL_HOST);
-        $srcHost = parse_url($p, PHP_URL_HOST);
-        $pathPart = parse_url($p, PHP_URL_PATH) ?? '';
-        if ($pathPart !== '' && (
-            $srcHost === $currentHost
-            || $srcHost === 'localhost'
-            || $srcHost === '127.0.0.1'
-            || str_ends_with((string) $srcHost, '.localhost')
-        )) {
-            $rel = normalize_media_path($pathPart);
-        } else {
+        $rewritten = app_path_from_maybe_legacy_url($p);
+        if ($rewritten === null) {
             return $p;
         }
+        $rel = normalize_media_path((string) (parse_url($p, PHP_URL_PATH) ?? ''));
     } else {
         $rel = normalize_media_path($p);
     }

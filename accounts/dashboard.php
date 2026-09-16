@@ -157,7 +157,7 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="small-muted">Today's Collection</div>
             <div class="h5 mb-1"><?php echo e(format_money($metrics['todayCollection'])); ?></div>
             <div class="small-muted">Collections today</div>
-            <div class="mt-2"><a href="<?php echo e((function_exists('site_url') ? site_url('/accounts/daily_collection.php') : '/pioneerplayschool01/accounts/daily_collection.php')); ?>" class="btn btn-sm btn-outline-primary w-100 btn-compact">Open</a></div>
+            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/daily_collection.php'))); ?>" class="btn btn-sm btn-outline-primary w-100 btn-compact">Open</a></div>
           </div>
         </div>
       </div>
@@ -168,7 +168,7 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="small-muted">This Month Collection</div>
             <div class="h5 mb-1"><?php echo e(format_money($metrics['monthCollection'])); ?></div>
             <div class="small-muted">Current month</div>
-            <div class="mt-2"><a href="<?php echo e((function_exists('site_url') ? site_url('/accounts/monthly_summary.php') : '/pioneerplayschool01/accounts/monthly_summary.php')); ?>" class="btn btn-sm btn-outline-info w-100 btn-compact">Summary</a></div>
+            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/monthly_summary.php'))); ?>" class="btn btn-sm btn-outline-info w-100 btn-compact">Summary</a></div>
           </div>
         </div>
       </div>
@@ -179,7 +179,7 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="small-muted">Pending Fees</div>
             <div class="h5 mb-1"><?php echo e(format_money($metrics['pendingFees'])); ?></div>
             <div class="small-muted">Total due</div>
-            <div class="mt-2"><a href="<?php echo e((function_exists('site_url') ? site_url('/accounts/pending_fees.php') : '/pioneerplayschool01/accounts/pending_fees.php')); ?>" class="btn btn-sm btn-outline-warning w-100 btn-compact">View</a></div>
+            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/pending_fees.php'))); ?>" class="btn btn-sm btn-outline-warning w-100 btn-compact">View</a></div>
           </div>
         </div>
       </div>
@@ -190,7 +190,7 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="small-muted">Due Invoices</div>
             <div class="h5 mb-1"><?php echo e(number_format($metrics['dueInvoices'])); ?></div>
             <div class="small-muted">Overdue / due</div>
-            <div class="mt-2"><a href="<?php echo e((function_exists('site_url') ? site_url('/accounts/invoices.php') : '/pioneerplayschool01/accounts/invoices.php')); ?>" class="btn btn-sm btn-outline-secondary w-100 btn-compact">Invoices</a></div>
+            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/invoices.php'))); ?>" class="btn btn-sm btn-outline-secondary w-100 btn-compact">Invoices</a></div>
           </div>
         </div>
       </div>
@@ -202,7 +202,7 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="small-muted">Expenses This Month</div>
             <div class="h5 mb-1"><?php echo e(format_money($metrics['expenseThisMonth'])); ?></div>
             <div class="small-muted">Outflow</div>
-            <div class="mt-2"><a href="<?php echo e((function_exists('site_url') ? site_url('/accounts/expenses.php') : '/pioneerplayschool01/accounts/expenses.php')); ?>" class="btn btn-sm btn-outline-danger w-100 btn-compact">Open</a></div>
+            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/expenses.php'))); ?>" class="btn btn-sm btn-outline-danger w-100 btn-compact">Open</a></div>
           </div>
         </div>
       </div>
@@ -214,7 +214,7 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="small-muted">Total Students</div>
             <div class="h5 mb-1"><?php echo e(number_format($metrics['totalStudents'])); ?></div>
             <div class="small-muted">Active</div>
-            <div class="mt-2"><a href="<?php echo e((function_exists('site_url') ? site_url('/accounts/students_list.php') : '/pioneerplayschool01/accounts/students_list.php')); ?>" class="btn btn-sm btn-outline-secondary w-100 btn-compact">Students</a></div>
+            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/students_list.php'))); ?>" class="btn btn-sm btn-outline-secondary w-100 btn-compact">Students</a></div>
           </div>
         </div>
       </div>
@@ -244,7 +244,7 @@ require_once __DIR__ . '/../includes/header.php';
           <?php else: ?>
             <div class="small-muted">No recent payments</div>
           <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-primary btn-compact" href="<?php echo e((function_exists('site_url') ? site_url('/accounts/daily_collection.php') : '/pioneerplayschool01/accounts/daily_collection.php')); ?>">View all</a></div>
+          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-primary btn-compact" href="<?php echo e((site_url('/accounts/daily_collection.php'))); ?>">View all</a></div>
         </div>
       </div>
     </div>
@@ -268,7 +268,7 @@ require_once __DIR__ . '/../includes/header.php';
           <?php else: ?>
             <div class="small-muted">No pending fees</div>
           <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-warning btn-compact" href="<?php echo e((function_exists('site_url') ? site_url('/accounts/pending_fees.php') : '/pioneerplayschool01/accounts/pending_fees.php')); ?>">Manage</a></div>
+          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-warning btn-compact" href="<?php echo e((site_url('/accounts/pending_fees.php'))); ?>">Manage</a></div>
         </div>
       </div>
     </div>
@@ -292,7 +292,7 @@ require_once __DIR__ . '/../includes/header.php';
           <?php else: ?>
             <div class="small-muted">No recent expenses</div>
           <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-danger btn-compact" href="<?php echo e((function_exists('site_url') ? site_url('/accounts/expenses.php') : '/pioneerplayschool01/accounts/expenses.php')); ?>">Open</a></div>
+          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-danger btn-compact" href="<?php echo e((site_url('/accounts/expenses.php'))); ?>">Open</a></div>
         </div>
       </div>
     </div>

@@ -248,6 +248,9 @@ $hero_title = $school['hero_title'] ?? ($school['tagline'] ?? $page_title);
 $hero_subtitle = $school['hero_subtitle'] ?? $school['short_about'] ?? '';
 $hero_cta_text = $school['hero_cta_text'] ?? 'Admission Enquiry';
 $hero_cta_url = $school['hero_cta_url'] ?? '#enquiry';
+if (function_exists('site_url') && is_string($hero_cta_url) && preg_match('#^https?://#i', $hero_cta_url)) {
+    $hero_cta_url = site_url($hero_cta_url);
+}
 $short_about = $school['short_about'] ?? '';
 $long_about = $school['long_about'] ?? '';
 $map_embed_safe = sanitize_map_embed($school['map_embed'] ?? '');

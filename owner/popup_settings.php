@@ -18,18 +18,10 @@ $DEBUG = panel_debug();
 
 session_start();
 
-function app_base(): string {
-    $script = $_SERVER['SCRIPT_NAME'] ?? '/owner/popup_settings.php';
-    $ownerDir = rtrim(dirname($script), '/');
-    $base = rtrim(dirname($ownerDir), '/');
-    if ($base === '' || $base === '.') $base = '';
-    return $base;
-}
-function site_url(string $path = ''): string {
-    $base = app_base();
-    if ($path === '') return $base ?: '/';
-    $p = ($path[0] === '/') ? $path : ('/' . ltrim($path, '/'));
-    return ($base === '' ? $p : $base . $p);
+if (!function_exists('app_base')) {
+    function app_base(): string {
+        return defined('BASE_URL') ? rtrim((string) BASE_URL, '/') : '';
+    }
 }
 
 if (!function_exists('db_get_one')) {
@@ -83,8 +75,7 @@ function is_valid_image(string $tmp): bool {
     return in_array($info[2], $allowed, true);
 }
 function web_path_for_upload(string $filename): string {
-    // returns a web-accessible path for uploaded file
-    return site_url('/assets/uploads/' . $filename);
+    return '/assets/uploads/' . ltrim($filename, '/');
 }
 
 /* -------------------------

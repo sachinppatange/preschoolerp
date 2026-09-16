@@ -48,7 +48,7 @@ if (!function_exists('safe_redirect_url')) {
      * - If $url is an absolute URL, allows only when host matches current host.
      * - Otherwise returns $fallback.
      */
-    function safe_redirect_url(string $url, string $fallback = '/pioneerplayschool01/parent/login.php'): string {
+    function safe_redirect_url(string $url, string $fallback = '/parent/login.php'): string {
         $url = trim($url);
         if ($url === '') return $fallback;
 
@@ -109,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && function_exists('validate_csrf_toke
 
 /* Determine safe redirect after logout */
 $requested = $_REQUEST['redirect'] ?? '';
-$redirect_after = safe_redirect_url((string)$requested, '/pioneerplayschool01/parent/login.php');
+$redirect_after = safe_redirect_url((string)$requested, function_exists('site_url') ? site_url('/parent/login.php') : '/parent/login.php');
 
 /* Capture parent session info for optional revocation/audit */
 $parent_user = auth_user();

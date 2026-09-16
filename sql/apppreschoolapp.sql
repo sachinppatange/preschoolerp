@@ -765,7 +765,7 @@ CREATE TABLE `schools` (
 --
 
 INSERT INTO `schools` (`id`, `name`, `logo_path`, `short_about`, `address`, `map_embed`, `settings`, `created_at`, `updated_at`, `tagline`, `hero_image`, `long_about`, `classes_offered`, `facilities`, `gallery`, `contact_phone`, `contact_email`, `opening_hours`, `social_links`, `seo_title`, `seo_description`, `slug`, `hero_title`, `hero_subtitle`, `hero_cta_text`, `hero_cta_url`, `why_choose_us`, `admission_process`, `testimonials`, `faqs`, `contact_whatsapp`) VALUES
-(1, 'Pioneer Play School', '/assets/uploads/1770732023_b41acefe_Logo.png', 'Safe, joyful and smart learning for your child.', '📍 <b>Address:</b> “Garje Automotive”, First Floor, Gate No. 2, \r\nBehind PVR, Plot X-3, MIDC, Barshi Road, Latur – 413512', '<iframe src=\"https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3785.6463620127456!2d76.5384606!3d18.4089392!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bcf816b6045c9eb%3A0x605fabad554d2239!2sPioneer%20Play%20School%2C%20Latur%20(A%20Unit%20of%20Garje%20Foundation)!5e0!3m2!1sen!2sin!4v1770722598423!5m2!1sen!2sin\" width=\"600\" height=\"450\" style=\"border:0;\" allowfullscreen=\"\" loading=\"lazy\" referrerpolicy=\"no-referrer-when-downgrade\"></iframe>', '{\"timezone\":\"Asia\\/Kolkata\",\"currency\":\"INR\",\"about_image\":\"\\/assets\\/uploads\\/1770732675_460422e8e0_image1-79.jpg\",\"popup\":{\"enabled\":false,\"image\":\"\\/pioneerplayschool01\\/assets\\/uploads\\/1771647245_2f58a0970bef_Page_2.jpg\",\"title\":\"Test\",\"text\":\"Hi\",\"show_once\":true}}', '2026-02-04 06:35:20', '2026-02-21 04:14:05', 'A Unit of Garje Foundation', '/assets/uploads/1770732119_82639af9_Hero.jpeg', '🌱 <b>About School</b>\r\n\r\nPioneer Play School is thoughtfully designed to provide young children with a <b>secure, joyful, and stimulating learning environment.</b> We understand that early childhood is a crucial stage in a child’s development, and our approach focuses on nurturing curiosity, creativity, and confidence.\r\n\r\nOur preschool follows a <b>CBSE pattern–based curriculum,</b> combined with play-way and activity-based learning methods that encourage children to learn naturally. Every classroom and activity is aligned with Government Approved Standards, ensuring quality education and safety.\r\n\r\nWith a team of trained, caring, and passionate educators, we guide children to develop language skills, motor skills, emotional balance, social interaction, and early academic readiness.', '[]', '[\"✔ Spacious & Safe Play Area\",\"✔ Bright & Colourful Classrooms\",\"✔ Activity Rooms for Art & Craft\",\"✔ Music, Dance & Rhymes Sessions\",\"✔ Storytelling & Creative Play\",\"✔ Outdoor & Indoor Games\",\"✔ CCTV Surveillance & Safety Systems\"]', '[\"\\/pioneerplayschool\\/assets\\/uploads\\/1770485929_c0f6183e_WhatsApp_Image_2026-02-07_at_21.07.37.jpeg\",\"\\/pioneerplayschool\\/assets\\/uploads\\/1770485939_0637427f_WhatsApp_Image_2026-02-07_at_21.07.41.jpeg\",\"\\/pioneerplayschool\\/assets\\/uploads\\/1770485975_c2b242fa_WhatsApp_Image_2026-02-07_at_21.07.39.jpeg\",\"\\/pioneerplayschool\\/assets\\/uploads\\/1770485982_e6c1b5af_WhatsApp_Image_2026-02-07_at_21.07.42.jpeg\",\"\\/pioneerplayschool\\/assets\\/uploads\\/1770485991_3035fd3f_WhatsApp_Image_2026-02-07_at_21.07.40.jpeg\",\"\\/pioneerplayschool\\/assets\\/uploads\\/1770486013_7a697855_WhatsApp_Image_2026-02-07_at_21.07.40__1_.jpeg\",\"\\/pioneerplayschool\\/assets\\/uploads\\/1770486022_0194868c_WhatsApp_Image_2026-02-07_at_21.07.43__1_.jpeg\",\"\\/pioneerplayschool\\/assets\\/uploads\\/1770486028_3eabf066_WhatsApp_Image_2026-02-07_at_21.07.39__1_.jpeg\",\"\\/pioneerplayschool\\/assets\\/uploads\\/1770486032_b775d983_WhatsApp_Image_2026-02-07_at_21.07.38__1_.jpeg\",\"\\/pioneerplayschool\\/assets\\/uploads\\/1770486042_09631bad_WhatsApp_Image_2026-02-07_at_21.07.37__1_.jpeg\",\"\\/pioneerplayschool\\/assets\\/uploads\\/1770486074_1a5d22e0_WhatsApp_Image_2026-02-07_at_21.07.42__1_.jpeg\"]', '+917770007156', 'pioneerplayschoollatur@gmail.com', 'Mon-Fri 9:00 AM - 5:00 PM', '{\"facebook\":\"https:\\/\\/facebook.com\\/pioneerplayschool\",\"instagram\":\"https:\\/\\/instagram.com\\/pioneer_play_school\",\"youtube\":\"https:\\/\\/youtube.com\\/@pioneer_play_school\"}', 'Pioneer Play School — Preschool in Latur', 'Pioneer Play School in Latur offers joyful early learning, art & craft, music, play area and nutritious meals.', 'pioneer-play-school', '🌈 A Second Home Full of Joy, Care & Learning', 'At Pioneer Play School, we believe that every child deserves a safe, loving, and inspiring start to life. Our preschool blends fun, care, and structured learning to build strong foundations for a bright future.', 'Admissions Open 2026–27 - Book a School Visit | Enroll Now', '/#enquiry', '[{\"title\":\"Child-Centered Learning Approach\",\"description\":\"We follow a CBSE pattern–based, age-appropriate curriculum that focuses on learning through play, activities, and exploration. Our teaching methods encourage curiosity, creativity, and confidence in every child.\"},{\"title\":\"Trained & Caring Teachers\",\"description\":\"Our educators are professionally trained, experienced, and passionate about early childhood education. They understand each child’s unique needs and provide individual attention in a warm and supportive environment.\"},{\"title\":\"Safe, Secure & Hygienic Campus\",\"description\":\"Child safety is our top priority. Our campus is fully secured with 24×7 CCTV surveillance, child-friendly infrastructure, hygienic classrooms, and strict supervision to ensure a safe learning space.\"},{\"title\":\"Activity-Based & Play-Way Learning\",\"description\":\"Children learn best when learning is fun. We integrate art, craft, music, dance, storytelling, and games into daily activities to support physical, emotional, social, and cognitive development.\"},{\"title\":\"Positive & Joyful Environment\",\"description\":\"We create a welcoming atmosphere where children feel happy, confident, and comfortable—just like a second home. This helps them develop strong social skills and emotional well-being.\"},{\"title\":\"Individual Attention to Every Child\",\"description\":\"Small class sizes allow us to focus on every child’s progress. We observe, guide, and support each child based on their learning pace and interests.\"},{\"title\":\"Parent Partnership & Transparency\",\"description\":\"We believe parents are our partners in a child’s learning journey. Regular communication, updates, and open interaction help build trust and transparency.\"},{\"title\":\"Trusted & Quality Preschool\",\"description\":\"Designed and operated as per Government Approved Standards, Pioneer Play School is trusted by parents for quality education, strong safety measures, and a nurturing environment.\"}]', '[{\"step\": 1, \"title\": \"Visit & Tour\", \"description\": \"Schedule a campus visit and meet our team\"}, {\"step\": 2, \"title\": \"Submit Documents\", \"description\": \"Fill form and submit birth certificate / ID proof\"}, {\"step\": 3, \"title\": \"Pay Fees\", \"description\": \"Pay registration & term fees to confirm seat\"}, {\"step\": 4, \"title\": \"Orientation\", \"description\": \"Attend orientation before term starts\"}]', '[{\"name\":\"Nursery Student\",\"role\":\"Parent\",\"quote\":\"“Pioneer Play School provides a safe and loving environment. My child enjoys coming to school every day.”\",\"photo\":\"\\/assets\\/uploads\\/1770733979_e1ef5b4449_Logo01.png\"},{\"name\":\"L.K.G. Student\",\"role\":\"Parent\",\"quote\":\"“The teachers are very caring and supportive. We have seen great improvement in our child’s confidence.”\",\"photo\":\"\\/assets\\/uploads\\/1770734002_97bca7eabe_Logo.png\"},{\"name\":\"U.K.G. Student\",\"role\":\"Parent\",\"quote\":\"“Excellent school with strong safety and quality education. Highly recommended.”\",\"photo\":\"\\/assets\\/uploads\\/1770734043_64521c2ece_Logo.png\"}]', '[{\"q\":\"Q. What age group do you accept?\",\"a\":\"We accept children from Play Group to U.K.G. as per age eligibility.\"},{\"q\":\"Q. Is the curriculum CBSE based?\",\"a\":\"Yes, our preschool follows a CBSE pattern–based curriculum.\"},{\"q\":\"Q. Is the school safe for children?\",\"a\":\"Absolutely. We have CCTV surveillance, trained staff, and child-safe infrastructure.\"},{\"q\":\"Q. How can parents apply for admission?\",\"a\":\"Parents can fill out the admission enquiry form or contact us directly.\"}]', '+917770007156');
+(1, 'Pioneer Play School', '/assets/uploads/1770732023_b41acefe_Logo.png', 'Safe, joyful and smart learning for your child.', '📍 <b>Address:</b> “Garje Automotive”, First Floor, Gate No. 2, \r\nBehind PVR, Plot X-3, MIDC, Barshi Road, Latur – 413512', '<iframe src=\"https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3785.6463620127456!2d76.5384606!3d18.4089392!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bcf816b6045c9eb%3A0x605fabad554d2239!2sPioneer%20Play%20School%2C%20Latur%20(A%20Unit%20of%20Garje%20Foundation)!5e0!3m2!1sen!2sin!4v1770722598423!5m2!1sen!2sin\" width=\"600\" height=\"450\" style=\"border:0;\" allowfullscreen=\"\" loading=\"lazy\" referrerpolicy=\"no-referrer-when-downgrade\"></iframe>', '{\"timezone\":\"Asia\\/Kolkata\",\"currency\":\"INR\",\"about_image\":\"\\/assets\\/uploads\\/1770732675_460422e8e0_image1-79.jpg\",\"popup\":{\"enabled\":false,\"image\":\"\\/assets\\/uploads\\/1771647245_2f58a0970bef_Page_2.jpg\",\"title\":\"Test\",\"text\":\"Hi\",\"show_once\":true}}', '2026-02-04 06:35:20', '2026-02-21 04:14:05', 'A Unit of Garje Foundation', '/assets/uploads/1770732119_82639af9_Hero.jpeg', '🌱 <b>About School</b>\r\n\r\nPioneer Play School is thoughtfully designed to provide young children with a <b>secure, joyful, and stimulating learning environment.</b> We understand that early childhood is a crucial stage in a child’s development, and our approach focuses on nurturing curiosity, creativity, and confidence.\r\n\r\nOur preschool follows a <b>CBSE pattern–based curriculum,</b> combined with play-way and activity-based learning methods that encourage children to learn naturally. Every classroom and activity is aligned with Government Approved Standards, ensuring quality education and safety.\r\n\r\nWith a team of trained, caring, and passionate educators, we guide children to develop language skills, motor skills, emotional balance, social interaction, and early academic readiness.', '[]', '[\"✔ Spacious & Safe Play Area\",\"✔ Bright & Colourful Classrooms\",\"✔ Activity Rooms for Art & Craft\",\"✔ Music, Dance & Rhymes Sessions\",\"✔ Storytelling & Creative Play\",\"✔ Outdoor & Indoor Games\",\"✔ CCTV Surveillance & Safety Systems\"]', '[\"\\/assets\\/uploads\\/1770485929_c0f6183e_WhatsApp_Image_2026-02-07_at_21.07.37.jpeg\",\"\\/assets\\/uploads\\/1770485939_0637427f_WhatsApp_Image_2026-02-07_at_21.07.41.jpeg\",\"\\/assets\\/uploads\\/1770485975_c2b242fa_WhatsApp_Image_2026-02-07_at_21.07.39.jpeg\",\"\\/assets\\/uploads\\/1770485982_e6c1b5af_WhatsApp_Image_2026-02-07_at_21.07.42.jpeg\",\"\\/assets\\/uploads\\/1770485991_3035fd3f_WhatsApp_Image_2026-02-07_at_21.07.40.jpeg\",\"\\/assets\\/uploads\\/1770486013_7a697855_WhatsApp_Image_2026-02-07_at_21.07.40__1_.jpeg\",\"\\/assets\\/uploads\\/1770486022_0194868c_WhatsApp_Image_2026-02-07_at_21.07.43__1_.jpeg\",\"\\/assets\\/uploads\\/1770486028_3eabf066_WhatsApp_Image_2026-02-07_at_21.07.39__1_.jpeg\",\"\\/assets\\/uploads\\/1770486032_b775d983_WhatsApp_Image_2026-02-07_at_21.07.38__1_.jpeg\",\"\\/assets\\/uploads\\/1770486042_09631bad_WhatsApp_Image_2026-02-07_at_21.07.37__1_.jpeg\",\"\\/assets\\/uploads\\/1770486074_1a5d22e0_WhatsApp_Image_2026-02-07_at_21.07.42__1_.jpeg\"]', '+917770007156', 'pioneerplayschoollatur@gmail.com', 'Mon-Fri 9:00 AM - 5:00 PM', '{\"facebook\":\"https:\\/\\/facebook.com\\/pioneerplayschool\",\"instagram\":\"https:\\/\\/instagram.com\\/pioneer_play_school\",\"youtube\":\"https:\\/\\/youtube.com\\/@pioneer_play_school\"}', 'Pioneer Play School — Preschool in Latur', 'Pioneer Play School in Latur offers joyful early learning, art & craft, music, play area and nutritious meals.', 'pioneer-play-school', '🌈 A Second Home Full of Joy, Care & Learning', 'At Pioneer Play School, we believe that every child deserves a safe, loving, and inspiring start to life. Our preschool blends fun, care, and structured learning to build strong foundations for a bright future.', 'Admissions Open 2026–27 - Book a School Visit | Enroll Now', '/#enquiry', '[{\"title\":\"Child-Centered Learning Approach\",\"description\":\"We follow a CBSE pattern–based, age-appropriate curriculum that focuses on learning through play, activities, and exploration. Our teaching methods encourage curiosity, creativity, and confidence in every child.\"},{\"title\":\"Trained & Caring Teachers\",\"description\":\"Our educators are professionally trained, experienced, and passionate about early childhood education. They understand each child’s unique needs and provide individual attention in a warm and supportive environment.\"},{\"title\":\"Safe, Secure & Hygienic Campus\",\"description\":\"Child safety is our top priority. Our campus is fully secured with 24×7 CCTV surveillance, child-friendly infrastructure, hygienic classrooms, and strict supervision to ensure a safe learning space.\"},{\"title\":\"Activity-Based & Play-Way Learning\",\"description\":\"Children learn best when learning is fun. We integrate art, craft, music, dance, storytelling, and games into daily activities to support physical, emotional, social, and cognitive development.\"},{\"title\":\"Positive & Joyful Environment\",\"description\":\"We create a welcoming atmosphere where children feel happy, confident, and comfortable—just like a second home. This helps them develop strong social skills and emotional well-being.\"},{\"title\":\"Individual Attention to Every Child\",\"description\":\"Small class sizes allow us to focus on every child’s progress. We observe, guide, and support each child based on their learning pace and interests.\"},{\"title\":\"Parent Partnership & Transparency\",\"description\":\"We believe parents are our partners in a child’s learning journey. Regular communication, updates, and open interaction help build trust and transparency.\"},{\"title\":\"Trusted & Quality Preschool\",\"description\":\"Designed and operated as per Government Approved Standards, Pioneer Play School is trusted by parents for quality education, strong safety measures, and a nurturing environment.\"}]', '[{\"step\": 1, \"title\": \"Visit & Tour\", \"description\": \"Schedule a campus visit and meet our team\"}, {\"step\": 2, \"title\": \"Submit Documents\", \"description\": \"Fill form and submit birth certificate / ID proof\"}, {\"step\": 3, \"title\": \"Pay Fees\", \"description\": \"Pay registration & term fees to confirm seat\"}, {\"step\": 4, \"title\": \"Orientation\", \"description\": \"Attend orientation before term starts\"}]', '[{\"name\":\"Nursery Student\",\"role\":\"Parent\",\"quote\":\"“Pioneer Play School provides a safe and loving environment. My child enjoys coming to school every day.”\",\"photo\":\"\\/assets\\/uploads\\/1770733979_e1ef5b4449_Logo01.png\"},{\"name\":\"L.K.G. Student\",\"role\":\"Parent\",\"quote\":\"“The teachers are very caring and supportive. We have seen great improvement in our child’s confidence.”\",\"photo\":\"\\/assets\\/uploads\\/1770734002_97bca7eabe_Logo.png\"},{\"name\":\"U.K.G. Student\",\"role\":\"Parent\",\"quote\":\"“Excellent school with strong safety and quality education. Highly recommended.”\",\"photo\":\"\\/assets\\/uploads\\/1770734043_64521c2ece_Logo.png\"}]', '[{\"q\":\"Q. What age group do you accept?\",\"a\":\"We accept children from Play Group to U.K.G. as per age eligibility.\"},{\"q\":\"Q. Is the curriculum CBSE based?\",\"a\":\"Yes, our preschool follows a CBSE pattern–based curriculum.\"},{\"q\":\"Q. Is the school safe for children?\",\"a\":\"Absolutely. We have CCTV surveillance, trained staff, and child-safe infrastructure.\"},{\"q\":\"Q. How can parents apply for admission?\",\"a\":\"Parents can fill out the admission enquiry form or contact us directly.\"}]', '+917770007156');
 
 -- --------------------------------------------------------
 
@@ -1591,3 +1591,194 @@ COMMIT;
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+
+-- =============================================================================
+-- MIGRATION (run on live DB in phpMyAdmin): rewrite old Pioneer / localhost URLs
+-- Stored values become site-relative (/assets/...). PHP uses BASE_URL at display.
+-- Safe to run more than once. Does not change Facebook / Maps / WhatsApp links.
+-- =============================================================================
+START TRANSACTION;
+
+UPDATE `schools` SET
+  `logo_path` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`logo_path`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `logo_path` IS NOT NULL AND `logo_path` <> '';
+
+UPDATE `schools` SET
+  `hero_image` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`hero_image`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `hero_image` IS NOT NULL AND `hero_image` <> '';
+
+UPDATE `schools` SET
+  `hero_cta_url` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`hero_cta_url`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `hero_cta_url` IS NOT NULL AND `hero_cta_url` <> '';
+
+UPDATE `schools` SET
+  `settings` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`settings`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `settings` IS NOT NULL AND `settings` <> '';
+
+UPDATE `schools` SET
+  `gallery` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`gallery`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `gallery` IS NOT NULL AND `gallery` <> '';
+
+UPDATE `schools` SET
+  `testimonials` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`testimonials`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `testimonials` IS NOT NULL AND `testimonials` <> '';
+
+UPDATE `students` SET
+  `photo_path` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`photo_path`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `photo_path` IS NOT NULL AND `photo_path` <> '';
+
+UPDATE `students` SET
+  `extended_json` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`extended_json`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `extended_json` IS NOT NULL AND `extended_json` <> '';
+
+UPDATE `news_events` SET
+  `image_path` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`image_path`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `image_path` IS NOT NULL AND `image_path` <> '';
+
+UPDATE `news_events` SET
+  `content` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`content`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `content` IS NOT NULL AND `content` <> '';
+
+UPDATE `class_photos` SET
+  `file_path` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`file_path`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `file_path` IS NOT NULL AND `file_path` <> '';
+
+UPDATE `alerts` SET
+  `link` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`link`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `link` IS NOT NULL AND `link` <> '';
+
+UPDATE `notifications` SET
+  `link` = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(`link`,
+    'https://www.pioneerplayschool.preschoolapp.in', ''),
+    'http://www.pioneerplayschool.preschoolapp.in', ''),
+    'https://pioneerplayschool.preschoolapp.in', ''),
+    'http://pioneerplayschool.preschoolapp.in', ''),
+    'https://www.app.preschoolapp.in', ''),
+    'https://app.preschoolapp.in', ''),
+    'https://localhost/apppreschool', ''),
+    'http://localhost/apppreschool', ''),
+    '/pioneerplayschool01/', '/'),
+    '/pioneerplayschool/', '/')
+WHERE `link` IS NOT NULL AND `link` <> '';
+
+COMMIT;

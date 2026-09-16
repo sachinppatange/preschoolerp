@@ -18,7 +18,12 @@
 $httpHost = strtolower((string) ($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? ''));
 $httpHost = preg_replace('/:\d+$/', '', $httpHost) ?: '';
 $isLocalHost = ($httpHost === 'localhost' || $httpHost === '127.0.0.1' || str_ends_with($httpHost, '.localhost'));
-$isLiveHost = ($httpHost === 'app.preschoolapp.in' || $httpHost === 'www.app.preschoolapp.in');
+$isLiveHost = in_array($httpHost, [
+    'app.preschoolapp.in',
+    'www.app.preschoolapp.in',
+    'pioneerplayschool.preschoolapp.in',
+    'www.pioneerplayschool.preschoolapp.in',
+], true);
 /* CLI / cron: Mac XAMPP path = local, otherwise live */
 if ($httpHost === '') {
     $isLocalHost = (PHP_OS_FAMILY === 'Darwin' || stripos(__DIR__, 'xampp') !== false);

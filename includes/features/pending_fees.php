@@ -383,7 +383,7 @@ require_once __DIR__ . '/../header.php';
       </div>
       <div class="col-md-2 text-end">
         <button class="btn btn-primary">Filter</button>
-        <a class="btn btn-outline-secondary" href="/pioneerplayschool01/accounts/pending_fees.php">Reset</a>
+        <a class="btn btn-outline-secondary" href="<?php echo e(site_url('/accounts/pending_fees.php')); ?>">Reset</a>
       </div>
     </form>
   </div>

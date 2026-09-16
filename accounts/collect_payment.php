@@ -368,7 +368,7 @@ require_once __DIR__ . '/../includes/header.php';
         </div>
 
         <div class="col-12 text-end">
-          <a class="btn btn-outline-secondary" href="/pioneerplayschool01/accounts/pending_fees.php">Cancel</a>
+          <a class="btn btn-outline-secondary" href="<?php echo e(site_url('/accounts/pending_fees.php')); ?>">Cancel</a>
           <button type="submit" class="btn btn-primary">Save & Print</button>
         </div>
       </form>

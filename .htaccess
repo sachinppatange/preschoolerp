@@ -8,7 +8,7 @@ DirectoryIndex index.php index.html
     RewriteCond %{HTTPS} off
     RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
-    # Redirect bare domain to www (site is served on www subdomain)
-    RewriteCond %{HTTP_HOST} ^pioneerplayschool\.preschoolapp\.in$ [NC]
-    RewriteRule ^ https://www.pioneerplayschool.preschoolapp.in%{REQUEST_URI} [L,R=301]
+    # Old public domain → current live site
+    RewriteCond %{HTTP_HOST} ^(www\.)?pioneerplayschool\.preschoolapp\.in$ [NC]
+    RewriteRule ^ https://app.preschoolapp.in%{REQUEST_URI} [L,R=301]
 </IfModule>
