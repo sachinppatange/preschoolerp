@@ -26,6 +26,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('owner');
 $DEBUG = panel_debug();
+require_once __DIR__ . '/../includes/student_export.php';
 
 /* Optional includes */
 /* Auth */
@@ -209,36 +210,9 @@ if ($deleteId > 0) {
     } else $errors[] = 'Invalid id.';
 }
 
-/* EXPORT CSV */
+/* EXPORT CSV / Excel / PDF — same Academic Year + filters as the list */
 if ($action === 'export') {
-    $where = []; $params = [];
-    if (!empty($_GET['q'])) { $where[] = "(first_name LIKE :q OR last_name LIKE :q)"; $params[':q'] = '%'.trim($_GET['q']).'%'; }
-    if (!empty($_GET['class_id'])) { $where[] = "class_id = :class_id"; $params[':class_id'] = (int)$_GET['class_id']; }
-    if (!empty($_GET['status'])) { $where[] = "status = :status"; $params[':status'] = $_GET['status']; }
-    $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
-    $rows = safe_db_get_all("SELECT * FROM students $whereSql ORDER BY first_name ASC", $params);
-
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=students_export_'.date('Ymd_His').'.csv');
-    $out = fopen('php://output', 'w');
-    fputcsv($out, ['ID','School ID','First Name','Last Name','DOB','Class ID','Parent ID','Photo','Admission Date','Status','Created At','Updated At']);
-    foreach ($rows as $r) {
-        fputcsv($out, [
-            $r['id'] ?? '',
-            $r['school_id'] ?? '',
-            $r['first_name'] ?? '',
-            $r['last_name'] ?? '',
-            $r['dob'] ?? '',
-            $r['class_id'] ?? '',
-            $r['parent_id'] ?? '',
-            $r['photo_path'] ?? '',
-            $r['admission_date'] ?? '',
-            $r['status'] ?? '',
-            $r['created_at'] ?? '',
-            $r['updated_at'] ?? ''
-        ]);
-    }
-    fclose($out); exit;
+    student_handle_export();
 }
 
 /* -------------------------
@@ -248,17 +222,13 @@ $page = max(1, (int)($_GET['page'] ?? 1));
 $perPage = 25;
 $offset = ($page - 1) * $perPage;
 
-$where = []; $params = [];
-$qraw = trim((string)($_GET['q'] ?? ''));
-if ($qraw !== '') { $where[] = "(s.first_name LIKE :q OR s.last_name LIKE :q)"; $params[':q'] = '%' . $qraw . '%'; }
-$classFilter = isset($_GET['class_id']) && $_GET['class_id'] !== '' ? (int)$_GET['class_id'] : null;
-if ($classFilter !== null) { $where[] = "s.class_id = :class_id"; $params[':class_id'] = $classFilter; }
-$statusFilter = trim((string)($_GET['status'] ?? ''));
-if ($statusFilter !== '') { $where[] = "s.status = :status"; $params[':status'] = $statusFilter; }
-
-if (function_exists('ay_apply_student_filter')) {
-    ay_apply_student_filter($where, $params, 's');
-}
+$listFilters = student_list_filters();
+$where = $listFilters['where'];
+$params = $listFilters['params'];
+$qraw = $listFilters['q'];
+$classFilter = $listFilters['class_id'];
+$statusFilter = $listFilters['status'];
+$genderFilter = $listFilters['gender'];
 
 $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
@@ -320,11 +290,15 @@ require_once __DIR__ . '/../includes/header.php';
   <?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo $esc($m); ?></div><?php endforeach; ?>
   <?php foreach ($errors as $err): ?><div class="alert alert-danger"><?php echo $esc($err); ?></div><?php endforeach; ?>
 
+  <div class="alert alert-info py-2">
+    <?php echo e(function_exists('ay_display_long') ? ay_display_long() : ''); ?> — only this year's students are listed and exported.
+  </div>
+
   <!-- Filters -->
   <div class="card mb-3 p-3">
     <form method="get" class="row g-2 align-items-end">
-      <div class="col-md-4"><label class="form-label">Search</label><input name="q" class="form-control" value="<?php echo $esc($qraw); ?>" placeholder="First or last name"></div>
-      <div class="col-md-3"><label class="form-label">Class</label>
+      <div class="col-md-3"><label class="form-label">Search</label><input name="q" class="form-control" value="<?php echo $esc($qraw); ?>" placeholder="Name, form no, phone"></div>
+      <div class="col-md-2"><label class="form-label">Class</label>
         <select name="class_id" class="form-select">
           <option value="">Any</option>
           <?php foreach ($classList as $c): ?><option value="<?php echo (int)$c['id']; ?>" <?php if($classFilter === (int)$c['id']) echo 'selected'; ?>><?php echo $esc($c['name']); ?></option><?php endforeach; ?>
@@ -336,10 +310,21 @@ require_once __DIR__ . '/../includes/header.php';
           <?php foreach ($statusOptions as $st): ?><option value="<?php echo $esc($st); ?>" <?php if(($statusFilter ?? '')===$st) echo 'selected'; ?>><?php echo $esc(ucfirst($st)); ?></option><?php endforeach; ?>
         </select>
       </div>
-      <div class="col-md-3 text-end">
+      <div class="col-md-2"><label class="form-label">Gender</label>
+        <select name="gender" class="form-select">
+          <option value="">Any</option>
+          <option value="male" <?php if (($genderFilter ?? '') === 'male') echo 'selected'; ?>>Male</option>
+          <option value="female" <?php if (($genderFilter ?? '') === 'female') echo 'selected'; ?>>Female</option>
+        </select>
+      </div>
+      <div class="col-md-3">
         <button class="btn btn-primary">Filter</button>
         <a class="btn btn-outline-secondary" href="?">Reset</a>
-        <a class="btn btn-sm btn-success" href="?action=export&<?php echo build_qs(); ?>">Export CSV</a>
+      </div>
+      <div class="col-12 d-flex flex-wrap gap-2">
+        <a class="btn btn-sm btn-success" href="?<?php echo e(student_export_query_string('csv')); ?>">Export CSV</a>
+        <a class="btn btn-sm btn-outline-success" href="?<?php echo e(student_export_query_string('excel')); ?>">Export Excel</a>
+        <a class="btn btn-sm btn-outline-primary" href="?<?php echo e(student_export_query_string('pdf')); ?>" target="_blank">Export PDF</a>
       </div>
     </form>
   </div>

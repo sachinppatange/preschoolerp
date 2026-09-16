@@ -1,6 +1,6 @@
 <?php
 /**
- * Print / Save as PDF — full admission form from students table columns.
+ * Printable Student Admission Form (Pioneer Play School layout) + payment records.
  */
 declare(strict_types=1);
 
@@ -15,7 +15,8 @@ if ($id <= 0) {
 }
 
 $student = safe_db_get_one(
-    "SELECT st.*, COALESCE(c.name,'') AS class_name, COALESCE(u.name,'') AS parent_login_name, COALESCE(u.phone,'') AS parent_login_phone
+    "SELECT st.*, COALESCE(c.name,'') AS class_name,
+            COALESCE(u.name,'') AS parent_login_name, COALESCE(u.phone,'') AS parent_login_phone
      FROM students st
      LEFT JOIN classes c ON c.id = st.class_id
      LEFT JOIN users u ON u.id = st.parent_id
@@ -27,182 +28,249 @@ if (!$student) {
     echo 'Student not found.';
     exit;
 }
-
 if (function_exists('student_hydrate_row')) {
     $student = student_hydrate_row($student);
 }
 
-$fullName = function_exists('student_full_name') ? student_full_name($student) : trim(($student['first_name'] ?? '') . ' ' . ($student['last_name'] ?? ''));
-$appName = defined('APP_NAME') ? APP_NAME : 'Preschool';
-$photo = function_exists('resolve_image_url') ? resolve_image_url((string) ($student['photo_path'] ?? ''), '') : (string) ($student['photo_path'] ?? '');
-$dash = static function ($v): string {
-    $s = trim((string) ($v ?? ''));
-    return $s === '' ? '—' : $s;
-};
+$school = [];
+if (table_exists('schools')) {
+    $school = safe_db_get_one('SELECT * FROM schools ORDER BY id ASC LIMIT 1') ?: [];
+}
 
-$row = static function (string $label, $value) use ($dash): void {
-    echo '<tr><th>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</th><td>' . htmlspecialchars($dash($value), ENT_QUOTES, 'UTF-8') . '</td></tr>';
+$fullName = function_exists('student_full_name') ? student_full_name($student) : trim(($student['first_name'] ?? '') . ' ' . ($student['last_name'] ?? ''));
+$photo = function_exists('resolve_image_url') ? resolve_image_url((string) ($student['photo_path'] ?? ''), '') : '';
+$logo = function_exists('resolve_image_url')
+    ? resolve_image_url((string) ($school['logo_path'] ?? ''), function_exists('asset_url') ? asset_url('assets/images/logo.png') : '')
+    : '';
+$fees = function_exists('student_fee_summary') ? student_fee_summary($student) : ['total' => 0, 'paid' => 0, 'remaining' => 0];
+$payments = function_exists('student_fee_payments') ? student_fee_payments($id) : [];
+$ayLabel = function_exists('ay_display_long') ? ay_display_long((string) ($student['academic_year'] ?? '')) : (string) ($student['academic_year'] ?? '');
+
+$dash = static function ($v): string {
+    $s = trim(strip_tags((string) ($v ?? '')));
+    return $s === '' ? '' : $s;
+};
+$cls = strtolower((string) ($student['class_name'] ?? ''));
+$mark = static function (string $hay, array $needles) use ($cls): string {
+    foreach ($needles as $n) {
+        if ($n !== '' && str_contains($cls, $n)) {
+            return 'checked';
+        }
+    }
+    return '';
+};
+$g = strtolower((string) ($student['gender'] ?? ''));
+$phone = $dash($school['contact_phone'] ?? '');
+$email = $dash($school['contact_email'] ?? '');
+$addr = trim(preg_replace('/\s+/', ' ', strip_tags((string) ($school['address'] ?? ''))));
+$money = static function (float $n): string {
+    return '₹ ' . number_format($n, 2);
 };
 ?>
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Admission Form — <?php echo htmlspecialchars($fullName !== '' ? $fullName : 'Student #' . $id, ENT_QUOTES, 'UTF-8'); ?></title>
+  <title>Admission Form — <?php echo htmlspecialchars($fullName !== '' ? $fullName : ('#' . $id), ENT_QUOTES, 'UTF-8'); ?></title>
   <style>
+    :root { --navy:#143a7a; --line:#9bb4d4; --ink:#1a1a1a; }
     * { box-sizing: border-box; }
-    body { font-family: Georgia, "Times New Roman", serif; color: #222; margin: 0; background: #f4f4f4; }
-    .toolbar { background: #fff; padding: 12px 16px; display: flex; gap: 8px; position: sticky; top: 0; z-index: 2; border-bottom: 1px solid #ddd; }
-    .sheet { width: 210mm; max-width: 100%; margin: 16px auto; background: #fff; padding: 16mm; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
-    h1 { font-size: 20px; margin: 0 0 4px; }
-    h2 { font-size: 13px; letter-spacing: .04em; text-transform: uppercase; background: #eef3ea; padding: 6px 8px; margin: 16px 0 0; border: 1px solid #cfd8c8; }
-    .muted { color: #666; font-size: 12px; }
-    .head { display: flex; justify-content: space-between; gap: 16px; border-bottom: 3px solid #2d6a3e; padding-bottom: 12px; }
-    .photo { width: 28mm; height: 32mm; object-fit: cover; border: 1px solid #ccc; background: #f7f7f7; }
-    table.kv { width: 100%; border-collapse: collapse; font-size: 13px; }
-    table.kv th { width: 34%; text-align: left; font-weight: 600; padding: 5px 8px; border: 1px solid #ddd; background: #fafafa; vertical-align: top; }
-    table.kv td { padding: 5px 8px; border: 1px solid #ddd; vertical-align: top; }
-    .btn { border: 1px solid #2d6a3e; background: #2d6a3e; color: #fff; padding: 8px 14px; border-radius: 6px; cursor: pointer; font: inherit; }
-    .btn-outline { background: #fff; color: #222; border-color: #ccc; }
-    @page { size: A4; margin: 12mm; }
+    body { margin: 0; background: #eceff4; color: var(--ink); font-family: "Segoe UI", Arial, sans-serif; }
+    .toolbar { position: sticky; top: 0; background: #fff; padding: 10px 14px; display: flex; gap: 8px; border-bottom: 1px solid #ddd; z-index: 5; }
+    .btn { background: var(--navy); color: #fff; border: 0; padding: 8px 14px; border-radius: 6px; cursor: pointer; font: inherit; }
+    .btn.ghost { background: #fff; color: #222; border: 1px solid #ccc; }
+    .page { width: 210mm; min-height: 297mm; margin: 12px auto; background: #fff; padding: 10mm 12mm 18mm; position: relative; box-shadow: 0 8px 20px rgba(0,0,0,.08); }
+    .topbar { height: 8px; background: linear-gradient(90deg,#ffd54a 0 18%, #5ec8f0 18% 82%, #ffd54a 82% 100%); margin: -10mm -12mm 8px; }
+    .meta { display: flex; justify-content: space-between; font-size: 12px; }
+    .brand { text-align: center; margin-top: -8px; }
+    .brand img.logo { height: 58px; }
+    .brand .tag { font-size: 12px; color: var(--navy); font-weight: 700; }
+    .brand .addr { font-size: 11px; max-width: 150mm; margin: 2px auto; }
+    .title { display: inline-block; background: var(--navy); color: #fff; border-radius: 18px; padding: 4px 18px; font-weight: 800; margin: 6px 0 10px; }
+    .photo { position: absolute; right: 12mm; top: 28mm; width: 28mm; height: 34mm; border: 1px dashed #888; overflow: hidden; background: #fafafa; text-align: center; font-size: 9px; color: #888; }
+    .photo img { width: 100%; height: 100%; object-fit: cover; }
+    .row { display: flex; gap: 10px; align-items: flex-end; margin: 5px 0; font-size: 13px; }
+    .lab { font-weight: 700; white-space: nowrap; }
+    .line { flex: 1; border-bottom: 1px solid #333; min-height: 16px; padding: 0 4px; }
+    .sec { font-weight: 800; margin: 10px 0 4px; font-size: 14px; }
+    .green { color: #2e9a3a; } .pink { color: #d23b7a; } .blue { color: #2a6fbd; } .teal { color: #1aa39a; }
+    .checks { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; margin: 4px 0 8px; font-weight: 700; }
+    .box { display: inline-block; width: 12px; height: 12px; border: 1.5px solid #222; margin-right: 4px; vertical-align: -1px; text-align: center; line-height: 10px; font-size: 10px; }
+    .box.on { background: var(--navy); color: #fff; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+    table.pay { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+    table.pay th, table.pay td { border: 1px solid #c5d0e0; padding: 5px 6px; }
+    table.pay th { background: #eaf1fb; text-align: left; }
+    .sum { display: flex; gap: 10px; margin: 8px 0; }
+    .sum div { flex: 1; border: 1px solid #c5d0e0; border-radius: 8px; padding: 8px; text-align: center; }
+    .sum b { display: block; font-size: 16px; }
+    .foot { position: absolute; left: 0; right: 0; bottom: 0; height: 28mm; background: linear-gradient(#fff 0 8mm, #eaf8c8 8mm 100%); overflow: hidden; }
+    .rainbow { position: absolute; left: -20px; bottom: -30px; width: 90mm; height: 50mm; border-radius: 50%; border: 10px solid #ff5d7a; border-right-color: #ffd54a; border-bottom-color: #5ec8f0; border-left-color: #7be07b; opacity: .85; }
+    .small { font-size: 11px; color: #555; }
+    @page { size: A4; margin: 8mm; }
     @media print {
       body { background: #fff; }
       .toolbar { display: none !important; }
-      .sheet { margin: 0; width: auto; box-shadow: none; padding: 0; }
+      .page { margin: 0; box-shadow: none; width: auto; min-height: auto; page-break-after: always; }
+      .page:last-child { page-break-after: auto; }
     }
   </style>
 </head>
 <body>
   <div class="toolbar">
     <button class="btn" type="button" onclick="window.print()">Download PDF / Print</button>
-    <button class="btn btn-outline" type="button" onclick="history.back()">Back</button>
+    <button class="btn ghost" type="button" onclick="history.back()">Back</button>
   </div>
-  <div class="sheet">
-    <div class="head">
-      <div>
-        <h1><?php echo htmlspecialchars($appName, ENT_QUOTES, 'UTF-8'); ?></h1>
-        <div><strong>Student Admission Form</strong></div>
-        <div class="muted">Form No: <?php echo htmlspecialchars($dash($student['form_no'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
-          · AY <?php echo htmlspecialchars($dash($student['academic_year'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
-      </div>
-      <?php if ($photo !== ''): ?>
-        <img class="photo" src="<?php echo htmlspecialchars($photo, ENT_QUOTES, 'UTF-8'); ?>" alt="Photo">
+
+  <section class="page">
+    <div class="topbar"></div>
+    <div class="meta">
+      <div>Location: <strong><?php echo htmlspecialchars($dash($student['location'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+      <div>Form NO.: <strong><?php echo htmlspecialchars($dash($student['form_no'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+    </div>
+    <div class="brand">
+      <?php if ($logo): ?><img class="logo" src="<?php echo htmlspecialchars($logo, ENT_QUOTES, 'UTF-8'); ?>" alt="Logo"><?php endif; ?>
+      <div class="tag"><?php echo htmlspecialchars((string) ($school['tagline'] ?? 'A Unit of Garje Foundation'), ENT_QUOTES, 'UTF-8'); ?></div>
+      <div class="addr"><?php echo htmlspecialchars($addr !== '' ? $addr : 'MIDC, Barshi Road, Latur', ENT_QUOTES, 'UTF-8'); ?></div>
+      <div class="addr"><strong>Call :</strong> <?php echo htmlspecialchars($phone, ENT_QUOTES, 'UTF-8'); ?>
+        &nbsp; <strong>Email :</strong> <?php echo htmlspecialchars($email, ENT_QUOTES, 'UTF-8'); ?></div>
+      <div class="title">Student Admission Form</div>
+    </div>
+    <div class="photo">
+      <?php if ($photo): ?>
+        <img src="<?php echo htmlspecialchars($photo, ENT_QUOTES, 'UTF-8'); ?>" alt="Photo">
+      <?php else: ?>
+        <div style="padding:18px 6px">Attach a recent passport size color photograph</div>
       <?php endif; ?>
     </div>
 
-    <h2>1. Admission</h2>
-    <table class="kv">
-      <?php
-      $row('Form No', $student['form_no'] ?? '');
-      $row('Academic year', $student['academic_year'] ?? '');
-      $row('Class', $student['class_name'] ?? '');
-      $row('Location', $student['location'] ?? '');
-      $row('Admission date', $student['admission_date'] ?? '');
-      $row('Status', $student['status'] ?? '');
-      ?>
+    <div class="row"><span class="lab">Admission Seeking In :</span>
+      <div class="checks">
+        <span><span class="box <?php echo $mark($cls, ['play']) ? 'on' : ''; ?>"><?php echo $mark($cls, ['play']) ? '✓' : ''; ?></span> Play Group</span>
+        <span><span class="box <?php echo $mark($cls, ['nurs']) ? 'on' : ''; ?>"><?php echo $mark($cls, ['nurs']) ? '✓' : ''; ?></span> Nursery</span>
+        <span><span class="box <?php echo $mark($cls, ['lkg', 'l.k.g', 'l k g']) ? 'on' : ''; ?>"><?php echo $mark($cls, ['lkg', 'l.k.g', 'l k g']) ? '✓' : ''; ?></span> L.K.G.</span>
+        <span><span class="box <?php echo $mark($cls, ['ukg', 'u.k.g', 'u k g']) ? 'on' : ''; ?>"><?php echo $mark($cls, ['ukg', 'u.k.g', 'u k g']) ? '✓' : ''; ?></span> U.K.G.</span>
+      </div>
+    </div>
+    <div class="small"><?php echo htmlspecialchars($ayLabel, ENT_QUOTES, 'UTF-8'); ?> · Class: <?php echo htmlspecialchars($dash($student['class_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
+
+    <div class="sec green">Student's Personal Details :</div>
+    <div class="row"><span class="lab">Student's Name:</span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['first_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['middle_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['last_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+    </div>
+    <div class="row"><span class="lab">Date of Birth:</span><span class="line"><?php echo htmlspecialchars($dash($student['dob'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="lab">Gender :</span>
+      <span><span class="box <?php echo $g === 'male' ? 'on' : ''; ?>"><?php echo $g === 'male' ? '✓' : ''; ?></span> Male</span>
+      <span><span class="box <?php echo $g === 'female' ? 'on' : ''; ?>"><?php echo $g === 'female' ? '✓' : ''; ?></span> Female</span>
+    </div>
+    <div class="row"><span class="lab">Place of Birth:</span><span class="line"><?php echo htmlspecialchars($dash($student['place_of_birth'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="lab">Nationality :</span><span class="line"><?php echo htmlspecialchars($dash($student['nationality'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <div class="row"><span class="lab">Caste categories :</span><span class="line"><?php echo htmlspecialchars($dash($student['caste'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="lab">Languages Known :</span><span class="line"><?php echo htmlspecialchars($dash($student['languages'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+
+    <div class="sec pink">Residential Address &amp; Family information</div>
+    <div class="row"><span class="lab">Address :</span><span class="line"><?php echo htmlspecialchars($dash($student['address'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <div class="row">
+      <span class="line"><?php echo htmlspecialchars($dash($student['city'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['state'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['country'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['pin'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+    </div>
+
+    <div class="sec blue">Father :</div>
+    <div class="row"><span class="lab">Full Name :</span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['father_first'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['father_middle'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['father_last'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+    </div>
+    <div class="grid2">
+      <div class="row"><span class="lab">E-mail :</span><span class="line"><?php echo htmlspecialchars($dash($student['father_email'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+      <div class="row"><span class="lab">Educational Qualification :</span><span class="line"><?php echo htmlspecialchars($dash($student['father_edu'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+      <div class="row"><span class="lab">Profession :</span><span class="line"><?php echo htmlspecialchars($dash($student['father_prof'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+      <div class="row"><span class="lab">Designation :</span><span class="line"><?php echo htmlspecialchars($dash($student['father_designation'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+      <div class="row"><span class="lab">Phone :</span><span class="line"><?php echo htmlspecialchars($dash($student['father_phone'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    </div>
+
+    <div class="sec teal">Mother :</div>
+    <div class="row"><span class="lab">Full Name :</span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['mother_first'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['mother_middle'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="line"><?php echo htmlspecialchars($dash($student['mother_last'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+    </div>
+    <div class="grid2">
+      <div class="row"><span class="lab">E-mail :</span><span class="line"><?php echo htmlspecialchars($dash($student['mother_email'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+      <div class="row"><span class="lab">Educational Qualification :</span><span class="line"><?php echo htmlspecialchars($dash($student['mother_edu'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+      <div class="row"><span class="lab">Profession :</span><span class="line"><?php echo htmlspecialchars($dash($student['mother_prof'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+      <div class="row"><span class="lab">Designation :</span><span class="line"><?php echo htmlspecialchars($dash($student['mother_designation'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+      <div class="row"><span class="lab">Phone :</span><span class="line"><?php echo htmlspecialchars($dash($student['mother_phone'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    </div>
+
+    <div class="sec pink">Guardian (Emergency numbers)</div>
+    <div class="row"><span class="lab">Full Name :</span><span class="line"><?php echo htmlspecialchars($dash($student['guardian_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="lab">E-mail :</span><span class="line"><?php echo htmlspecialchars($dash($student['guardian_email'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <div class="row"><span class="lab">Relation with student :</span><span class="line"><?php echo htmlspecialchars($dash($student['guardian_relation'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="lab">Phone :</span><span class="line"><?php echo htmlspecialchars($dash($student['guardian_phone'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+
+    <div class="sec green">Educational Background</div>
+    <div class="row"><span class="lab">Previous School :</span><span class="line"><?php echo htmlspecialchars($dash($student['previous_school'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <div class="foot"><div class="rainbow"></div></div>
+  </section>
+
+  <section class="page">
+    <div class="topbar"></div>
+    <div class="sec green">Health &amp; other details</div>
+    <div class="row"><span class="lab">Allergies :</span><span class="line"><?php echo htmlspecialchars($dash($student['allergies'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <div class="row"><span class="lab">Health conditions :</span><span class="line"><?php echo htmlspecialchars($dash($student['health_conditions'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <div class="row"><span class="lab">Current medications :</span><span class="line"><?php echo htmlspecialchars($dash($student['current_medications'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <div class="row"><span class="lab">Immunization :</span><span class="line"><?php echo htmlspecialchars($dash($student['immunization_records'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <div class="row"><span class="lab">Sibling 1 :</span><span class="line"><?php echo htmlspecialchars($dash($student['sibling1'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="lab">Sibling 2 :</span><span class="line"><?php echo htmlspecialchars($dash($student['sibling2'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <div class="row"><span class="lab">Additional info :</span><span class="line"><?php echo htmlspecialchars($dash($student['additional_info'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+
+    <div class="sec pink">Parent Portal login</div>
+    <div class="row"><span class="lab">Login name :</span><span class="line"><?php echo htmlspecialchars($dash($student['parent_login_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="lab">Mobile :</span><span class="line"><?php echo htmlspecialchars($dash($student['parent_login_phone'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+
+    <div class="sec blue">Fee payment record</div>
+    <div class="small">Same summary as Collect Fees — Total fee, paid, remaining, and every receipt.</div>
+    <div class="sum">
+      <div>Total Fee<b><?php echo htmlspecialchars($money((float) $fees['total']), ENT_QUOTES, 'UTF-8'); ?></b></div>
+      <div>Paid<b><?php echo htmlspecialchars($money((float) $fees['paid']), ENT_QUOTES, 'UTF-8'); ?></b></div>
+      <div>Remaining / Pending<b><?php echo htmlspecialchars($money((float) $fees['remaining']), ENT_QUOTES, 'UTF-8'); ?></b></div>
+    </div>
+    <table class="pay">
+      <thead>
+        <tr>
+          <th>Date</th><th>Receipt</th><th>Type</th><th>Amount</th><th>Note</th><th>Collected by</th>
+        </tr>
+      </thead>
+      <tbody>
+      <?php if (!$payments): ?>
+        <tr><td colspan="6">No payment recorded yet.</td></tr>
+      <?php else: foreach ($payments as $p): ?>
+        <tr>
+          <td><?php echo htmlspecialchars((string) ($p['collected_at'] ?? $p['created_at'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+          <td><?php echo htmlspecialchars((string) ($p['receipt_display'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+          <td><?php echo htmlspecialchars((string) ($p['payment_type'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+          <td><?php echo htmlspecialchars($money((float) ($p['paid_amount'] ?? 0)), ENT_QUOTES, 'UTF-8'); ?></td>
+          <td><?php echo htmlspecialchars((string) ($p['payment_note'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+          <td><?php echo htmlspecialchars((string) ($p['collector_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+        </tr>
+      <?php endforeach; endif; ?>
+      </tbody>
     </table>
 
-    <h2>2. Student</h2>
-    <table class="kv">
-      <?php
-      $row('First name', $student['first_name'] ?? '');
-      $row('Middle name', $student['middle_name'] ?? '');
-      $row('Last name', $student['last_name'] ?? '');
-      $row('Date of birth', $student['dob'] ?? '');
-      $row('Gender', $student['gender'] ?? '');
-      $row('Place of birth', $student['place_of_birth'] ?? '');
-      $row('Nationality', $student['nationality'] ?? '');
-      $row('Caste', $student['caste'] ?? '');
-      $row('Languages', $student['languages'] ?? '');
-      ?>
-    </table>
-
-    <h2>3. Address</h2>
-    <table class="kv">
-      <?php
-      $row('Address', $student['address'] ?? '');
-      $row('City', $student['city'] ?? '');
-      $row('State', $student['state'] ?? '');
-      $row('Country', $student['country'] ?? '');
-      $row('PIN', $student['pin'] ?? '');
-      ?>
-    </table>
-
-    <h2>4. Father</h2>
-    <table class="kv">
-      <?php
-      $row('Name', trim(($student['father_first'] ?? '') . ' ' . ($student['father_middle'] ?? '') . ' ' . ($student['father_last'] ?? '')));
-      $row('Phone', $student['father_phone'] ?? '');
-      $row('Email', $student['father_email'] ?? '');
-      $row('Education', $student['father_edu'] ?? '');
-      $row('Profession', $student['father_prof'] ?? '');
-      $row('Designation', $student['father_designation'] ?? '');
-      ?>
-    </table>
-
-    <h2>5. Mother</h2>
-    <table class="kv">
-      <?php
-      $row('Name', trim(($student['mother_first'] ?? '') . ' ' . ($student['mother_middle'] ?? '') . ' ' . ($student['mother_last'] ?? '')));
-      $row('Phone', $student['mother_phone'] ?? '');
-      $row('Email', $student['mother_email'] ?? '');
-      $row('Education', $student['mother_edu'] ?? '');
-      $row('Profession', $student['mother_prof'] ?? '');
-      $row('Designation', $student['mother_designation'] ?? '');
-      ?>
-    </table>
-
-    <h2>6. Guardian / emergency</h2>
-    <table class="kv">
-      <?php
-      $row('Name', $student['guardian_name'] ?? '');
-      $row('Relation', $student['guardian_relation'] ?? '');
-      $row('Phone', $student['guardian_phone'] ?? '');
-      $row('Email', $student['guardian_email'] ?? '');
-      ?>
-    </table>
-
-    <h2>7. Parent Portal login</h2>
-    <table class="kv">
-      <?php
-      $row('Login name', $student['parent_login_name'] ?? '');
-      $row('Mobile', $student['parent_login_phone'] ?? '');
-      ?>
-    </table>
-
-    <h2>8. Education & health</h2>
-    <table class="kv">
-      <?php
-      $row('Previous school', $student['previous_school'] ?? '');
-      $row('Allergies', $student['allergies'] ?? '');
-      $row('Health conditions', $student['health_conditions'] ?? '');
-      $row('Current medications', $student['current_medications'] ?? '');
-      $row('Immunization', $student['immunization_records'] ?? '');
-      $row('Sibling 1', $student['sibling1'] ?? '');
-      $row('Sibling 2', $student['sibling2'] ?? '');
-      $row('Additional info', $student['additional_info'] ?? '');
-      ?>
-    </table>
-
-    <h2>9. Fees / office</h2>
-    <table class="kv">
-      <?php
-      $row('Total fees', $student['total_fees'] ?? '');
-      $row('Installment 1', $student['installment1'] ?? '');
-      $row('Installment 2', $student['installment2'] ?? '');
-      $row('Installment 3', $student['installment3'] ?? '');
-      $row('Remark', $student['remark'] ?? '');
-      $row('Stamp', $student['stamp'] ?? '');
-      $row('Parent signature', $student['parent_signature'] ?? '');
-      ?>
-    </table>
-
-    <p class="muted" style="margin-top:18px;">Generated <?php echo htmlspecialchars(date('d M Y, h:i A'), ENT_QUOTES, 'UTF-8'); ?>. Use Print → Save as PDF.</p>
-  </div>
-  <script>
-    if (new URLSearchParams(location.search).get('autoprint') === '1') {
-      window.addEventListener('load', function () { window.print(); });
-    }
-  </script>
+    <div class="sec teal">Office use</div>
+    <div class="row"><span class="lab">Total fees :</span><span class="line"><?php echo htmlspecialchars($dash((string) ($student['total_fees'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="lab">Remark :</span><span class="line"><?php echo htmlspecialchars($dash($student['remark'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <div class="row"><span class="lab">Installment 1 :</span><span class="line"><?php echo htmlspecialchars($dash((string) ($student['installment1'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="lab">2 :</span><span class="line"><?php echo htmlspecialchars($dash((string) ($student['installment2'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="lab">3 :</span><span class="line"><?php echo htmlspecialchars($dash((string) ($student['installment3'] ?? '')), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <div class="row" style="margin-top:28px"><span class="lab">Parent signature :</span><span class="line"><?php echo htmlspecialchars($dash($student['parent_signature'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+      <span class="lab">Office stamp :</span><span class="line"><?php echo htmlspecialchars($dash($student['stamp'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span></div>
+    <p class="small" style="margin-top:18px">Generated <?php echo htmlspecialchars(date('d M Y, h:i A'), ENT_QUOTES, 'UTF-8'); ?>. Use Print → Save as PDF.</p>
+  </section>
 </body>
 </html>

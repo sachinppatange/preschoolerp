@@ -275,3 +275,79 @@ function student_print_url(int $id): string
     $path = '/reception/students_form_print.php?id=' . $id;
     return function_exists('site_url') ? site_url($path) : $path;
 }
+
+/**
+ * @return array{receipt: string, method: string, note: string}
+ */
+function student_parse_receipt_meta(?string $receiptNo): array
+{
+    $raw = trim((string) $receiptNo);
+    $out = ['receipt' => $raw, 'method' => '', 'note' => ''];
+    if ($raw === '') {
+        return $out;
+    }
+    $parts = explode('||', $raw);
+    $out['receipt'] = trim((string) ($parts[0] ?? $raw));
+    foreach ($parts as $i => $p) {
+        if ($i === 0) {
+            continue;
+        }
+        $p = trim($p);
+        if (stripos($p, 'METHOD:') === 0) {
+            $out['method'] = trim(substr($p, 7));
+        } elseif (stripos($p, 'NOTE:') === 0) {
+            $out['note'] = trim(substr($p, 5));
+        }
+    }
+    return $out;
+}
+
+/**
+ * @return array<int, array<string,mixed>>
+ */
+function student_fee_payments(int $studentId): array
+{
+    if ($studentId <= 0 || !function_exists('table_exists') || !table_exists('fees_records')) {
+        return [];
+    }
+    $rows = safe_db_get_all(
+        "SELECT fr.id, fr.receipt_no, fr.amount, fr.paid_amount, fr.status, fr.collected_at, fr.created_at, fr.collected_by,
+                COALESCE(u.name, '') AS collector_name
+         FROM fees_records fr
+         LEFT JOIN users u ON u.id = fr.collected_by
+         WHERE fr.student_id = :id
+         ORDER BY COALESCE(fr.collected_at, fr.created_at) ASC, fr.id ASC",
+        [':id' => $studentId]
+    ) ?: [];
+    foreach ($rows as &$r) {
+        $meta = student_parse_receipt_meta((string) ($r['receipt_no'] ?? ''));
+        $r['receipt_display'] = $meta['receipt'];
+        $r['payment_type'] = $meta['method'];
+        $r['payment_note'] = $meta['note'];
+    }
+    unset($r);
+    return $rows;
+}
+
+/**
+ * @param array<string,mixed> $student
+ * @return array{total: float, paid: float, remaining: float}
+ */
+function student_fee_summary(array $student): array
+{
+    $total = (float) ($student['total_fees'] ?? 0);
+    $paid = 0.0;
+    $id = (int) ($student['id'] ?? 0);
+    if ($id > 0 && function_exists('table_exists') && table_exists('fees_records')) {
+        $row = safe_db_get_one(
+            "SELECT COALESCE(SUM(paid_amount),0) AS paid_sum FROM fees_records WHERE student_id = :id",
+            [':id' => $id]
+        );
+        $paid = (float) ($row['paid_sum'] ?? 0);
+    }
+    return [
+        'total' => $total,
+        'paid' => $paid,
+        'remaining' => max(0.0, $total - $paid),
+    ];
+}
