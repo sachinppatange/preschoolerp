@@ -51,6 +51,27 @@ if (function_exists('student_hydrate_row')) {
     $student = student_hydrate_row($student);
 }
 
+if (empty($student['parent_id']) && function_exists('parent_ensure_for_student')) {
+    $pdoFix = function_exists('pdo_connect') ? pdo_connect() : null;
+    if ($pdoFix instanceof \PDO) {
+        try {
+            $fixedParentId = parent_ensure_for_student($pdoFix, $student);
+            if ($fixedParentId > 0) {
+                $student['parent_id'] = $fixedParentId;
+                $parentRow = safe_db_get_one('SELECT name, phone, is_active FROM users WHERE id = :id LIMIT 1', [':id' => $fixedParentId]);
+                if ($parentRow) {
+                    $student['parent_login_name'] = $parentRow['name'] ?? '';
+                    $student['parent_login_phone'] = $parentRow['phone'] ?? '';
+                    $student['parent_is_active'] = $parentRow['is_active'] ?? 1;
+                }
+                $messages[] = 'Parent Portal login was missing and has been created from this admission.';
+            }
+        } catch (Throwable $e) {
+            $errors[] = $DEBUG ? ('Parent login repair: ' . $e->getMessage()) : 'Could not create Parent Portal login for this student.';
+        }
+    }
+}
+
 $fullName = function_exists('student_full_name') ? student_full_name($student) : trim(($student['first_name'] ?? '') . ' ' . ($student['last_name'] ?? ''));
 $dash = static function ($v): string {
     $s = trim((string) ($v ?? ''));
@@ -204,7 +225,7 @@ require_once __DIR__ . '/header.php';
           <div class="small">Mobile: <?php echo e($dash($student['parent_login_phone'] ?? '')); ?></div>
           <div class="form-text">This number is used for Parent Portal login.</div>
         <?php else: ?>
-          <div class="text-muted">No parent login linked.</div>
+          <div class="text-muted">No parent login linked. Add a 10-digit father, mother, or SMS OTP mobile on Edit, then open this page again.</div>
         <?php endif; ?>
       </div>
 

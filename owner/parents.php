@@ -139,6 +139,10 @@ if (!empty($_GET['updated'])) {
 $panelAy = function_exists('ay_selected') ? ay_selected() : parent_login_academic_year();
 $loginAy = parent_login_academic_year();
 if ($action === 'list' || $action === '') {
+    $backfill = parent_backfill_missing_logins($panelAy);
+    if (($backfill['fixed'] ?? 0) > 0) {
+        $messages[] = 'Created/linked ' . (int) $backfill['fixed'] . ' missing parent login' . ((int) $backfill['fixed'] === 1 ? '' : 's') . ' from student admission details.';
+    }
     $sync = parent_sync_logins_for_year($loginAy);
     if (($sync['disabled'] ?? 0) > 0 || ($sync['enabled'] ?? 0) > 0) {
         $messages[] = 'Parent logins synced for ' . $loginAy . ': enabled ' . (int) $sync['enabled'] . ', auto-disabled ' . (int) $sync['disabled'] . ' (no child this year).';

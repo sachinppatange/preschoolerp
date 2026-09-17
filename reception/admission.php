@@ -210,6 +210,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
         if ($emailRaw !== '' && $in['parent_login_email'] === '') {
             $errors[] = 'Enter a valid email address for Email OTP.';
         }
+        if (strlen($in['parent_login_phone']) !== 10 && strlen($in['parent_login_whatsapp']) !== 10) {
+            $errors[] = 'Enter SMS OTP mobile, WhatsApp number, or a 10-digit father/mother phone so Parent Portal login can be created.';
+        }
         if ($in['stu_first'] === '') $errors[] = 'Student first name required.';
         if ($in['dob'] === '') $errors[] = 'Date of birth is required.';
 
@@ -254,19 +257,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                 try {
                     $pdo->beginTransaction();
 
-                    $posted_parent_id = 0;
-                    if (strlen($in['parent_login_phone']) === 10 || strlen($in['parent_login_whatsapp']) === 10) {
-                        $parentAccount = parent_find_or_create($pdo, [
-                            'name' => $in['parent_login_name'],
-                            'phone' => $in['parent_login_phone'],
-                            'whatsapp_id' => $in['parent_login_whatsapp'],
-                            'email' => $in['parent_login_email'],
-                            'school_id' => $in['school_id'] ?: 1,
-                        ]);
-                        $posted_parent_id = (int) $parentAccount['id'];
-                        if ($posted_parent_id <= 0) {
-                            throw new RuntimeException('Could not create or find parent login.');
-                        }
+                    $parentAccount = parent_find_or_create($pdo, [
+                        'name' => $in['parent_login_name'],
+                        'phone' => $in['parent_login_phone'],
+                        'whatsapp_id' => $in['parent_login_whatsapp'],
+                        'email' => $in['parent_login_email'],
+                        'school_id' => $in['school_id'] ?: 1,
+                    ]);
+                    $posted_parent_id = (int) $parentAccount['id'];
+                    if ($posted_parent_id <= 0) {
+                        throw new RuntimeException('Could not create or find parent login.');
                     }
 
                     // discover existing student columns
@@ -282,7 +282,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                     if (in_array('school_id', $existingCols)) $dbData['school_id'] = $in['school_id'] ?: 1;
                     if (in_array('dob', $existingCols)) $dbData['dob'] = $in['dob'];
                     if (in_array('class_id', $existingCols)) $dbData['class_id'] = $in['class_id'];
-                    if (in_array('parent_id', $existingCols) && $posted_parent_id > 0) $dbData['parent_id'] = $posted_parent_id;
+                    if (in_array('parent_id', $existingCols)) $dbData['parent_id'] = $posted_parent_id;
                     if (in_array('photo_path', $existingCols)) $dbData['photo_path'] = $photo_path_db;
                     if (in_array('admission_date', $existingCols)) $dbData['admission_date'] = $in['application_date'];
 
@@ -417,7 +417,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                             'whatsapp'=>$in['parent_login_whatsapp'],
                             'email'=>$in['parent_login_email'],
                             'relation'=>$in['parent_login_relation'],
-                            'user_id'=>$posted_parent_id > 0 ? $posted_parent_id : null,
+                            'user_id'=>$posted_parent_id,
                         ],
                     ];
                     if (in_array('extended_json', $existingCols)) {
@@ -439,9 +439,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                     $studentId = (int)$pdo->lastInsertId();
                     if ($studentId <= 0) throw new RuntimeException('Failed to insert student record.');
 
-                    if ($posted_parent_id > 0) {
-                        parent_link_student($pdo, $posted_parent_id, $studentId, $in['parent_login_relation']);
-                    }
+                    parent_link_student($pdo, $posted_parent_id, $studentId, $in['parent_login_relation']);
 
                     // write meta json file
                     $metaDir = __DIR__ . '/../uploads/students/meta/';

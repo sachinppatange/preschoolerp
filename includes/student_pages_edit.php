@@ -89,7 +89,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $data['caste'] = trim((string)($_POST['caste'] ?? ''));
         $data['languages'] = trim((string)($_POST['languages'] ?? ''));
         $data['class_id'] = ($_POST['class_id'] ?? '') !== '' ? (int)$_POST['class_id'] : null;
-        $data['parent_id'] = ($_POST['parent_id'] ?? '') !== '' ? (int)$_POST['parent_id'] : null;
+        $data['parent_id'] = ($_POST['parent_id'] ?? '') !== '' ? (int)$_POST['parent_id'] : (int)($student['parent_id'] ?? 0);
+        if ($data['parent_id'] <= 0) {
+            $data['parent_id'] = null;
+        }
 
         $data['admission_date'] = trim((string)($_POST['admission_date'] ?? '')) ?: null;
         $data['status'] = trim((string)($_POST['status'] ?? 'active'));
@@ -198,6 +201,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Required validations
         if ($data['first_name'] === '') $errors[] = 'First name is required.';
         if ($data['status'] === '') $data['status'] = 'active';
+
+        if (empty($errors)) {
+            if (empty($data['parent_id']) && function_exists('parent_ensure_for_student')) {
+                $pdoFix = function_exists('pdo_connect') ? pdo_connect() : null;
+                if ($pdoFix instanceof \PDO) {
+                    try {
+                        $ensured = parent_ensure_for_student($pdoFix, array_merge($student, $data, ['id' => $id]));
+                        if ($ensured > 0) {
+                            $data['parent_id'] = $ensured;
+                        }
+                    } catch (Throwable $e) {
+                        $errors[] = $DEBUG ? ('Parent login: ' . $e->getMessage()) : 'Could not create Parent Portal login.';
+                    }
+                }
+            }
+        }
 
         if (empty($errors)) {
             // Build update SQL only for columns that exist

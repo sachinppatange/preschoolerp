@@ -248,7 +248,12 @@ function parent_find_or_create(\PDO $pdo, array $data): array
         ]);
     }
 
-    return ['id' => (int) $pdo->lastInsertId(), 'created' => true, 'existing' => false];
+    $newId = (int) $pdo->lastInsertId();
+    if ($newId <= 0) {
+        $created = parent_find_by_last10($pdo, $last10, 'parent');
+        $newId = (int) ($created['id'] ?? 0);
+    }
+    return ['id' => $newId, 'created' => $newId > 0, 'existing' => false];
 }
 
 function parent_link_student(\PDO $pdo, int $parentId, int $studentId, string $relation = 'parent'): void
@@ -407,4 +412,133 @@ function parent_portal_blocked_message(): string
     $ay = parent_login_academic_year();
     $label = function_exists('ay_display_long') ? ay_display_long($ay) : ('Academic Year ' . $ay);
     return 'Parent portal login is only for families with a child in ' . $label . '. Contact the school if this is a new admission.';
+}
+
+/**
+ * @return array{name:string,phone:string,whatsapp_id:string,email:string}
+ */
+function parent_contact_from_student_row(array $st): array
+{
+    $extra = [];
+    if (!empty($st['extended_json']) && is_string($st['extended_json'])) {
+        $decoded = json_decode($st['extended_json'], true);
+        if (is_array($decoded)) {
+            $extra = is_array($decoded['parent_login'] ?? null) ? $decoded['parent_login'] : [];
+        }
+    }
+    $phone = parent_phone_last10((string) ($extra['phone'] ?? ''));
+    if (strlen($phone) !== 10) {
+        foreach (['father_phone', 'mother_phone', 'guardian_phone'] as $col) {
+            $phone = parent_phone_last10((string) ($st[$col] ?? ''));
+            if (strlen($phone) === 10) {
+                break;
+            }
+        }
+    }
+    $wa = parent_phone_last10((string) ($extra['whatsapp'] ?? $extra['whatsapp_id'] ?? ''));
+    if (strlen($wa) !== 10) {
+        $wa = $phone;
+    }
+    $email = parent_normalize_email((string) ($extra['email'] ?? ''));
+    if ($email === '') {
+        foreach (['father_email', 'mother_email', 'guardian_email'] as $col) {
+            $email = parent_normalize_email((string) ($st[$col] ?? ''));
+            if ($email !== '') {
+                break;
+            }
+        }
+    }
+    $name = trim((string) ($extra['name'] ?? ''));
+    if ($name === '') {
+        $fn = trim((string) ($st['father_first'] ?? '') . ' ' . (string) ($st['father_last'] ?? ''));
+        $mn = trim((string) ($st['mother_first'] ?? '') . ' ' . (string) ($st['mother_last'] ?? ''));
+        $name = $fn !== '' ? $fn : ($mn !== '' ? $mn : trim((string) ($st['guardian_name'] ?? '')));
+    }
+    return [
+        'name' => $name,
+        'phone' => $phone,
+        'whatsapp_id' => $wa,
+        'email' => $email,
+    ];
+}
+
+/**
+ * Create/link a parent login for a student that was saved without a parent user.
+ */
+function parent_ensure_for_student(\PDO $pdo, array $student): int
+{
+    $studentId = (int) ($student['id'] ?? 0);
+    $parentId = (int) ($student['parent_id'] ?? 0);
+    if ($parentId > 0) {
+        $existing = safe_db_get_one("SELECT id, role FROM users WHERE id = :id LIMIT 1", [':id' => $parentId]);
+        if ($existing && strtolower((string) ($existing['role'] ?? '')) === 'parent') {
+            if ($studentId > 0) {
+                parent_link_student($pdo, $parentId, $studentId, 'parent');
+            }
+            return $parentId;
+        }
+        $parentId = 0;
+    }
+
+    $contact = parent_contact_from_student_row($student);
+    if (strlen($contact['phone']) !== 10 && strlen($contact['whatsapp_id']) !== 10) {
+        return 0;
+    }
+
+    $account = parent_find_or_create($pdo, [
+        'name' => $contact['name'],
+        'phone' => $contact['phone'],
+        'whatsapp_id' => $contact['whatsapp_id'],
+        'email' => $contact['email'],
+        'school_id' => (int) ($student['school_id'] ?? 1),
+    ]);
+    $parentId = (int) ($account['id'] ?? 0);
+    if ($parentId <= 0 || $studentId <= 0) {
+        return $parentId;
+    }
+
+    $pdo->prepare('UPDATE students SET parent_id = :p WHERE id = :id')->execute([
+        ':p' => $parentId,
+        ':id' => $studentId,
+    ]);
+    parent_link_student($pdo, $parentId, $studentId, 'parent');
+    return $parentId;
+}
+
+/**
+ * Repair students that have no parent login user.
+ *
+ * @return array{fixed:int,skipped:int}
+ */
+function parent_backfill_missing_logins(?string $ay = null): array
+{
+    $fixed = 0;
+    $skipped = 0;
+    if (!function_exists('table_exists') || !table_exists('students') || !table_exists('users')) {
+        return ['fixed' => 0, 'skipped' => 0];
+    }
+    $pdo = function_exists('pdo_connect') ? pdo_connect() : null;
+    if (!($pdo instanceof \PDO)) {
+        return ['fixed' => 0, 'skipped' => 0];
+    }
+    $sql = "SELECT s.*
+            FROM students s
+            LEFT JOIN users u ON u.id = s.parent_id AND u.role = 'parent'
+            WHERE (s.parent_id IS NULL OR s.parent_id = 0 OR u.id IS NULL)";
+    $params = [];
+    $sql .= ' ORDER BY s.id DESC LIMIT 500';
+    $rows = safe_db_get_all($sql, $params) ?: [];
+    foreach ($rows as $st) {
+        try {
+            $id = parent_ensure_for_student($pdo, $st);
+            if ($id > 0) {
+                $fixed++;
+            } else {
+                $skipped++;
+            }
+        } catch (Throwable $e) {
+            $skipped++;
+        }
+    }
+    return ['fixed' => $fixed, 'skipped' => $skipped];
 }
