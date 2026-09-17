@@ -425,6 +425,10 @@ function ay_execute_rollover(string $fromAy, string $toAy, array $continuingIds,
     }
     ay_admin_save($save);
 
+    if (function_exists('parent_sync_logins_for_year')) {
+        parent_sync_logins_for_year($toAy);
+    }
+
     return $result;
 }
 

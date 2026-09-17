@@ -41,6 +41,12 @@ function login_otp_bootstrap(): void
     require_once __DIR__ . '/csrf.php';
     require_once __DIR__ . '/db.php';
     require_once __DIR__ . '/auth.php';
+    if (file_exists(__DIR__ . '/panel/academic_year.php')) {
+        require_once __DIR__ . '/panel/academic_year.php';
+    }
+    if (file_exists(__DIR__ . '/parent_account.php')) {
+        require_once __DIR__ . '/parent_account.php';
+    }
     if (file_exists(__DIR__ . '/otp_settings.php')) {
         require_once __DIR__ . '/otp_settings.php';
     }
@@ -184,6 +190,23 @@ function login_otp_process(array $config): array
         return in_array($role, array_map('strtolower', $roles), true);
     };
 
+    $parentYearOk = static function (?array $user) use ($roles): bool {
+        if (!$user) {
+            return false;
+        }
+        $role = strtolower((string) ($user['role'] ?? ''));
+        if ($role !== 'parent') {
+            return true;
+        }
+        if (!in_array('parent', array_map('strtolower', $roles), true)) {
+            return true;
+        }
+        return function_exists('parent_portal_login_allowed') ? parent_portal_login_allowed($user) : true;
+    };
+    $parentBlockedMsg = function_exists('parent_portal_blocked_message')
+        ? parent_portal_blocked_message()
+        : $inactiveMessage;
+
     $sendOtp = function (string $phonePlus, array $user = []) use (&$ctx, $otpLength, $otpExpiry, $otpCooldown, $logPrefix, $appDebug): array {
         $now = time();
         if (!empty($ctx['last_sent_at']) && ($now - (int) $ctx['last_sent_at']) < $otpCooldown) {
@@ -275,6 +298,8 @@ function login_otp_process(array $config): array
                             $msgError = $denyMessage;
                         } elseif (isset($user['is_active']) && (int) $user['is_active'] === 0) {
                             $msgError = $inactiveMessage;
+                        } elseif (!$parentYearOk($user)) {
+                            $msgError = $parentBlockedMsg;
                         } else {
                             $result = $sendOtp($phonePlus, is_array($user) ? $user : []);
                             if ($result['ok']) {
@@ -303,6 +328,8 @@ function login_otp_process(array $config): array
 
                     if (!$roleAllowed($user)) {
                         $msgError = $denyMessage;
+                    } elseif (!$parentYearOk($user)) {
+                        $msgError = $parentBlockedMsg;
                     } else {
                         $result = $sendOtp($phonePlus, is_array($user) ? $user : []);
                         if ($result['ok']) {
@@ -357,7 +384,7 @@ function login_otp_process(array $config): array
                             $phonePlain = ltrim($phonePlus, '+');
                             $userRow = $findUser($phonePlus, $phonePlain, true);
 
-                            if ($userRow && $roleAllowed($userRow) && (int) ($userRow['is_active'] ?? 1) === 1) {
+                            if ($userRow && $roleAllowed($userRow) && (int) ($userRow['is_active'] ?? 1) === 1 && $parentYearOk($userRow)) {
                                 auth_set_session($userRow);
                                 login_otp_reset_ctx($ctxKey);
                                 $dest = function_exists('site_url') ? site_url($redirect) : $redirect;

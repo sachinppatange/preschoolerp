@@ -9,7 +9,7 @@ $otp = login_otp_process([
     'ctx_key' => 'parent_otp_ctx',
     'redirect' => '/parent/dashboard.php',
     'deny_message' => 'No parent account found for this number. Please register first or contact school.',
-    'inactive_message' => 'Your account is not active. Please contact the school.',
+    'inactive_message' => 'Parent portal is only for the current academic year. If your child is not admitted this year, login is disabled.',
     'verify_fail_message' => 'No parent account found for the verified phone number. Contact the school.',
     'log_prefix' => 'parent',
 ]);

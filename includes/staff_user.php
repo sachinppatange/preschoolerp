@@ -47,9 +47,14 @@ function staff_people_nav(string $active): void
     $parentN = 0;
     try {
         $a = safe_db_get_one("SELECT COUNT(*) AS c FROM users WHERE role <> 'parent'");
-        $b = safe_db_get_one("SELECT COUNT(*) AS c FROM users WHERE role = 'parent'");
         $staffN = (int) ($a['c'] ?? 0);
-        $parentN = (int) ($b['c'] ?? 0);
+        $ay = function_exists('ay_selected') ? ay_selected() : '';
+        if ($ay !== '' && function_exists('parent_ids_with_child_in_year')) {
+            $parentN = count(parent_ids_with_child_in_year($ay));
+        } else {
+            $b = safe_db_get_one("SELECT COUNT(*) AS c FROM users WHERE role = 'parent'");
+            $parentN = (int) ($b['c'] ?? 0);
+        }
     } catch (Throwable $e) {
         // ignore
     }
@@ -65,13 +70,17 @@ function staff_people_nav(string $active): void
  * @param list<int> $parentIds
  * @return array<int, list<array<string,mixed>>>
  */
-function staff_children_by_parent_ids(array $parentIds): array
+function staff_children_by_parent_ids(array $parentIds, ?string $ay = null): array
 {
     $parentIds = array_values(array_unique(array_filter(array_map('intval', $parentIds))));
     if ($parentIds === []) {
         return [];
     }
     $in = implode(',', $parentIds);
+    $aySql = '';
+    if (is_string($ay) && preg_match('/^\d{4}-\d{2}$/', $ay)) {
+        $aySql = " AND s.academic_year = '" . $ay . "'";
+    }
     $map = [];
     foreach ($parentIds as $id) {
         $map[$id] = [];
@@ -85,7 +94,7 @@ function staff_children_by_parent_ids(array $parentIds): array
                         s.class_id, cl.name AS class_name
                  FROM students s
                  LEFT JOIN classes cl ON cl.id = s.class_id
-                 WHERE s.parent_id IN ($in)
+                 WHERE s.parent_id IN ($in) $aySql
                  ORDER BY s.first_name ASC, s.last_name ASC"
             ) ?: [];
         }
@@ -96,7 +105,7 @@ function staff_children_by_parent_ids(array $parentIds): array
                  FROM parents_children pc
                  INNER JOIN students s ON s.id = pc.child_student_id
                  LEFT JOIN classes cl ON cl.id = s.class_id
-                 WHERE pc.parent_user_id IN ($in)
+                 WHERE pc.parent_user_id IN ($in) $aySql
                  ORDER BY s.first_name ASC"
             ) ?: [];
             $rows = array_merge($rows, $extra);

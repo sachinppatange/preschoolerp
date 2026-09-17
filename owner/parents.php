@@ -28,12 +28,16 @@ $errors = [];
 if ($action === 'toggle' && !empty($_GET['id'])) {
     $id = (int) $_GET['id'];
     $set = isset($_GET['to']) && ($_GET['to'] === '1' || $_GET['to'] === '0') ? (int) $_GET['to'] : null;
-    $row = $id > 0 ? safe_db_get_one("SELECT id, role FROM users WHERE id = :id LIMIT 1", [':id' => $id]) : null;
+    $row = $id > 0 ? safe_db_get_one("SELECT id, role, meta FROM users WHERE id = :id LIMIT 1", [':id' => $id]) : null;
     if (!$row || ($row['role'] ?? '') !== 'parent' || $set === null) {
         $errors[] = 'Invalid parent account.';
+    } elseif ($set === 1 && !parent_has_child_in_year($id)) {
+        $errors[] = 'This parent has no child in the current academic year, so login cannot be enabled.';
     } else {
-        $ok = safe_db_run('UPDATE users SET is_active = :a, updated_at = NOW() WHERE id = :id AND role = :r', [
+        $metaJson = parent_merge_meta($row['meta'] ?? null, ['login_locked' => $set === 0]);
+        $ok = safe_db_run('UPDATE users SET is_active = :a, meta = :m, updated_at = NOW() WHERE id = :id AND role = :r', [
             ':a' => $set,
+            ':m' => $metaJson,
             ':id' => $id,
             ':r' => 'parent',
         ]);
@@ -46,16 +50,23 @@ if ($action === 'toggle' && !empty($_GET['id'])) {
 }
 
 if ($action === 'export') {
+    $ay = function_exists('ay_selected') ? ay_selected() : parent_login_academic_year();
+    $yearIds = parent_ids_with_child_in_year($ay);
     $qraw = trim((string) ($_GET['q'] ?? ''));
     $where = ["u.role = 'parent'"];
     $params = [];
+    if ($yearIds === []) {
+        $where[] = '1 = 0';
+    } else {
+        $where[] = 'u.id IN (' . implode(',', array_map('intval', $yearIds)) . ')';
+    }
     if ($qraw !== '') {
         $where[] = '(u.name LIKE :q OR u.phone LIKE :q OR IFNULL(u.whatsapp_id,\'\') LIKE :q OR IFNULL(u.meta,\'\') LIKE :q)';
         $params[':q'] = '%' . $qraw . '%';
     }
     $whereSql = 'WHERE ' . implode(' AND ', $where);
     $rows = safe_db_get_all("SELECT u.id, u.name, u.phone, u.whatsapp_id, u.is_active, u.meta, u.created_at FROM users u $whereSql ORDER BY u.name ASC", $params) ?: [];
-    $kids = staff_children_by_parent_ids(array_map(static fn($r) => (int) ($r['id'] ?? 0), $rows));
+    $kids = staff_children_by_parent_ids(array_map(static fn($r) => (int) ($r['id'] ?? 0), $rows), $ay);
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename=parents_' . date('Ymd_His') . '.csv');
     $out = fopen('php://output', 'w');
@@ -86,7 +97,7 @@ if ($action === 'view' && !empty($_GET['id'])) {
         echo '<div class="text-muted">Parent not found.</div>';
         exit;
     }
-    $kids = staff_children_by_parent_ids([$id]);
+    $kids = staff_children_by_parent_ids([$id], function_exists('ay_selected') ? ay_selected() : null);
     $viewUrl = function_exists('site_url') ? rtrim(site_url('/owner/students_view.php'), '?') : 'students_view.php';
     echo '<dl class="row mb-0">';
     echo '<dt class="col-sm-3">Name</dt><dd class="col-sm-9">' . e((string) $row['name']) . '</dd>';
@@ -121,14 +132,29 @@ if (!empty($_GET['updated'])) {
     $messages[] = 'Parent login status updated.';
 }
 
+$panelAy = function_exists('ay_selected') ? ay_selected() : parent_login_academic_year();
+$loginAy = parent_login_academic_year();
+if ($action === 'list' || $action === '') {
+    $sync = parent_sync_logins_for_year($loginAy);
+    if (($sync['disabled'] ?? 0) > 0 || ($sync['enabled'] ?? 0) > 0) {
+        $messages[] = 'Parent logins synced for ' . $loginAy . ': enabled ' . (int) $sync['enabled'] . ', auto-disabled ' . (int) $sync['disabled'] . ' (no child this year).';
+    }
+}
+
 $page = max(1, (int) ($_GET['page'] ?? 1));
 $perPage = 25;
 $offset = ($page - 1) * $perPage;
 $qraw = trim((string) ($_GET['q'] ?? ''));
 $activeFilter = (string) ($_GET['is_active'] ?? '');
 
+$yearIds = parent_ids_with_child_in_year($panelAy);
 $where = ["u.role = 'parent'"];
 $params = [];
+if ($yearIds === []) {
+    $where[] = '1 = 0';
+} else {
+    $where[] = 'u.id IN (' . implode(',', array_map('intval', $yearIds)) . ')';
+}
 if ($qraw !== '') {
     $search = '(u.name LIKE :q OR u.phone LIKE :q OR IFNULL(u.whatsapp_id,\'\') LIKE :q OR IFNULL(u.meta,\'\') LIKE :q)';
     if (table_exists('students')) {
@@ -175,7 +201,7 @@ try {
     $errors[] = $DEBUG ? $e->getMessage() : 'Could not load parents.';
 }
 
-$kids = staff_children_by_parent_ids(array_map(static fn($r) => (int) ($r['id'] ?? 0), $parents));
+$kids = staff_children_by_parent_ids(array_map(static fn($r) => (int) ($r['id'] ?? 0), $parents), $panelAy);
 $totalPages = (int) ceil(max(0, $total) / $perPage);
 $studentView = function_exists('site_url') ? site_url('/owner/students_view.php') : 'students_view.php';
 $admissionUrl = function_exists('site_url') ? site_url('/reception/admission.php') : '../reception/admission.php';
@@ -200,7 +226,11 @@ require_once __DIR__ . '/../includes/header.php';
 <?php staff_people_nav('parents'); ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-  <p class="text-muted mb-0">Parent portal logins created from admission. One mobile number = one parent = all siblings.</p>
+  <p class="text-muted mb-0">
+    <?php echo e(function_exists('ay_display_long') ? ay_display_long($panelAy) : ('Academic Year ' . $panelAy)); ?>
+    — only parents who have a child in this year (same filter as Students).
+    Portal login is auto-disabled when there is no child in <?php echo e($loginAy); ?>.
+  </p>
   <div class="d-flex gap-2">
     <a class="btn btn-success" href="<?php echo $esc($admissionUrl); ?>">New admission</a>
     <a class="btn btn-outline-secondary" href="?">Refresh</a>
@@ -287,7 +317,7 @@ require_once __DIR__ . '/../includes/header.php';
           </td>
         </tr>
       <?php endforeach; else: ?>
-        <tr><td colspan="6" class="text-center text-muted py-4">No parent accounts found. They appear here after New Admission.</td></tr>
+        <tr><td colspan="6" class="text-center text-muted py-4">No parents for this academic year. They appear after New Admission for the selected year.</td></tr>
       <?php endif; ?>
       </tbody>
     </table>
