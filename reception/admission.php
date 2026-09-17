@@ -210,9 +210,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
         if ($emailRaw !== '' && $in['parent_login_email'] === '') {
             $errors[] = 'Enter a valid email address for Email OTP.';
         }
-        if (strlen($in['parent_login_phone']) !== 10 && strlen($in['parent_login_whatsapp']) !== 10) {
-            $errors[] = 'Enter SMS OTP mobile, WhatsApp number, or a 10-digit father/mother phone so Parent Portal login can be created.';
-        }
         if ($in['stu_first'] === '') $errors[] = 'Student first name required.';
         if ($in['dob'] === '') $errors[] = 'Date of birth is required.';
 
@@ -257,16 +254,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                 try {
                     $pdo->beginTransaction();
 
-                    $parentAccount = parent_find_or_create($pdo, [
-                        'name' => $in['parent_login_name'],
-                        'phone' => $in['parent_login_phone'],
-                        'whatsapp_id' => $in['parent_login_whatsapp'],
-                        'email' => $in['parent_login_email'],
-                        'school_id' => $in['school_id'] ?: 1,
-                    ]);
-                    $posted_parent_id = (int) $parentAccount['id'];
+                    $posted_parent_id = function_exists('parent_resolve_login')
+                        ? parent_resolve_login($pdo, [
+                            'name' => $in['parent_login_name'],
+                            'phone' => $in['parent_login_phone'],
+                            'whatsapp_id' => $in['parent_login_whatsapp'],
+                            'email' => $in['parent_login_email'],
+                            'school_id' => $in['school_id'] ?: 1,
+                        ])
+                        : (int) (parent_find_or_create($pdo, [
+                            'name' => $in['parent_login_name'],
+                            'phone' => $in['parent_login_phone'],
+                            'whatsapp_id' => $in['parent_login_whatsapp'],
+                            'email' => $in['parent_login_email'],
+                            'school_id' => $in['school_id'] ?: 1,
+                        ])['id'] ?? 0);
                     if ($posted_parent_id <= 0) {
-                        throw new RuntimeException('Could not create or find parent login.');
+                        throw new RuntimeException('Could not create or find parent login. Enter parent name or a mobile number.');
                     }
 
                     // discover existing student columns
@@ -557,7 +561,7 @@ require_once __DIR__ . '/../includes/header.php';
         <span class="adm-section-num">2</span>
         <div>
           <h2>Parent portal login</h2>
-          <p>SMS, WhatsApp and email OTP contacts are optional. The same mobile on a second child links both students to one Parent Portal login. If SMS is blank, father/mother phone is used when available.</p>
+          <p>SMS, WhatsApp and email OTP are optional. Parent name is enough to create the Parents-page login. The same mobile on a second child keeps one login. If SMS is blank, father/mother phone is used when available.</p>
         </div>
       </div>
       <div class="adm-section-body">

@@ -256,6 +256,95 @@ function parent_find_or_create(\PDO $pdo, array $data): array
     return ['id' => $newId, 'created' => $newId > 0, 'existing' => false];
 }
 
+function parent_find_by_name(\PDO $pdo, string $name): ?array
+{
+    $name = trim($name);
+    if ($name === '') {
+        return null;
+    }
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE role = 'parent' AND LOWER(TRIM(name)) = LOWER(:n) ORDER BY id DESC LIMIT 1");
+    $stmt->execute([':n' => $name]);
+    $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+/**
+ * Create or reuse a parent login. Phone/WhatsApp/email are optional.
+ * Same 10-digit mobile = same parent (siblings). If only a name is given, that name is used.
+ */
+function parent_resolve_login(\PDO $pdo, array $data): int
+{
+    $name = trim((string) ($data['name'] ?? ''));
+    $phone = parent_phone_last10((string) ($data['phone'] ?? ''));
+    $wa = parent_phone_last10((string) ($data['whatsapp_id'] ?? ''));
+    $email = parent_normalize_email((string) ($data['email'] ?? ''));
+    $existingId = (int) ($data['existing_id'] ?? 0);
+    if (strlen($phone) === 10 || strlen($wa) === 10) {
+        $acc = parent_find_or_create($pdo, $data);
+        return (int) ($acc['id'] ?? 0);
+    }
+    if ($existingId > 0) {
+        $row = safe_db_get_one("SELECT * FROM users WHERE id = :id AND role = 'parent' LIMIT 1", [':id' => $existingId]);
+        if ($row) {
+            $sets = [];
+            $params = [':id' => $existingId];
+            if ($name !== '' && trim((string) ($row['name'] ?? '')) !== $name) {
+                $sets[] = 'name = :name';
+                $params[':name'] = $name;
+            }
+            if ($email !== '') {
+                $sets[] = 'meta = :meta';
+                $params[':meta'] = parent_meta_with_email($row['meta'] ?? null, $email);
+            }
+            if ($sets) {
+                $pdo->prepare('UPDATE users SET ' . implode(', ', $sets) . ', updated_at = NOW() WHERE id = :id')->execute($params);
+            }
+            return $existingId;
+        }
+    }
+    if ($name === '') {
+        return 0;
+    }
+    $found = parent_find_by_name($pdo, $name);
+    if ($found) {
+        if ($email !== '') {
+            $pdo->prepare('UPDATE users SET meta = :meta, updated_at = NOW() WHERE id = :id')->execute([
+                ':meta' => parent_meta_with_email($found['meta'] ?? null, $email),
+                ':id' => (int) $found['id'],
+            ]);
+        }
+        return (int) $found['id'];
+    }
+
+    $schoolId = (int) ($data['school_id'] ?? 1);
+    if ($schoolId <= 0) {
+        $schoolId = 1;
+    }
+    $metaJson = $email !== '' ? parent_meta_with_email(null, $email) : null;
+    $hasLast10 = false;
+    try {
+        $chk = $pdo->query("SHOW COLUMNS FROM users LIKE 'phone_last10'");
+        $hasLast10 = $chk && $chk->rowCount() > 0;
+    } catch (Throwable $e) {
+        $hasLast10 = false;
+    }
+    if ($hasLast10) {
+        $ins = $pdo->prepare("INSERT INTO users (school_id, name, phone, role, whatsapp_id, is_active, phone_last10, meta, created_at, updated_at)
+            VALUES (:school_id, :name, NULL, 'parent', NULL, 1, NULL, :meta, NOW(), NOW())");
+        $ins->execute([':school_id' => $schoolId, ':name' => $name, ':meta' => $metaJson]);
+    } else {
+        $ins = $pdo->prepare("INSERT INTO users (school_id, name, phone, role, whatsapp_id, is_active, meta, created_at, updated_at)
+            VALUES (:school_id, :name, NULL, 'parent', NULL, 1, :meta, NOW(), NOW())");
+        $ins->execute([':school_id' => $schoolId, ':name' => $name, ':meta' => $metaJson]);
+    }
+    $newId = (int) $pdo->lastInsertId();
+    if ($newId <= 0) {
+        $created = parent_find_by_name($pdo, $name);
+        $newId = (int) ($created['id'] ?? 0);
+    }
+    return $newId;
+}
+
 function parent_link_student(\PDO $pdo, int $parentId, int $studentId, string $relation = 'parent'): void
 {
     $mapStmt = $pdo->prepare('SELECT id FROM parents_children WHERE parent_user_id = :p AND child_student_id = :c LIMIT 1');
@@ -481,18 +570,14 @@ function parent_ensure_for_student(\PDO $pdo, array $student): int
     }
 
     $contact = parent_contact_from_student_row($student);
-    if (strlen($contact['phone']) !== 10 && strlen($contact['whatsapp_id']) !== 10) {
-        return 0;
-    }
-
-    $account = parent_find_or_create($pdo, [
+    $parentId = parent_resolve_login($pdo, [
         'name' => $contact['name'],
         'phone' => $contact['phone'],
         'whatsapp_id' => $contact['whatsapp_id'],
         'email' => $contact['email'],
         'school_id' => (int) ($student['school_id'] ?? 1),
+        'existing_id' => $parentId,
     ]);
-    $parentId = (int) ($account['id'] ?? 0);
     if ($parentId <= 0 || $studentId <= 0) {
         return $parentId;
     }
