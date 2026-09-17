@@ -363,6 +363,7 @@ require_once __DIR__ . '/../includes/header.php';
         [$ownerBase . '/parent_portal.php', 'bi-eye', 'Parent Hub'],
         [$ownerBase . '/class_setup.php', 'bi-book', 'Class Setup'],
         [$ownerBase . '/staff_manage.php', 'bi-person-badge', 'Staff'],
+        [$ownerBase . '/parents.php', 'bi-people', 'Parents'],
     ];
     foreach ($quick as $q): ?>
       <div class="col-6 col-md-4 col-lg-3">

@@ -28,6 +28,111 @@ function staff_addable_roles(): array
     ];
 }
 
+function staff_staff_roles(): array
+{
+    return [
+        'owner' => 'Owner',
+        'accounts' => 'Accounts',
+        'teacher' => 'Teacher',
+        'reception' => 'Reception',
+        'staff' => 'Staff',
+    ];
+}
+
+function staff_people_nav(string $active): void
+{
+    $staffUrl = function_exists('site_url') ? site_url('/owner/staff_manage.php') : 'staff_manage.php';
+    $parentUrl = function_exists('site_url') ? site_url('/owner/parents.php') : 'parents.php';
+    $staffN = 0;
+    $parentN = 0;
+    try {
+        $a = safe_db_get_one("SELECT COUNT(*) AS c FROM users WHERE role <> 'parent'");
+        $b = safe_db_get_one("SELECT COUNT(*) AS c FROM users WHERE role = 'parent'");
+        $staffN = (int) ($a['c'] ?? 0);
+        $parentN = (int) ($b['c'] ?? 0);
+    } catch (Throwable $e) {
+        // ignore
+    }
+    $staffCls = $active === 'staff' ? 'btn-primary' : 'btn-outline-primary';
+    $parentCls = $active === 'parents' ? 'btn-primary' : 'btn-outline-primary';
+    echo '<div class="d-flex flex-wrap gap-2 mb-3">';
+    echo '<a class="btn ' . $staffCls . '" href="' . htmlspecialchars($staffUrl, ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-person-badge me-1"></i> Staff (' . $staffN . ')</a>';
+    echo '<a class="btn ' . $parentCls . '" href="' . htmlspecialchars($parentUrl, ENT_QUOTES, 'UTF-8') . '"><i class="bi bi-people me-1"></i> Parents (' . $parentN . ')</a>';
+    echo '</div>';
+}
+
+/**
+ * @param list<int> $parentIds
+ * @return array<int, list<array<string,mixed>>>
+ */
+function staff_children_by_parent_ids(array $parentIds): array
+{
+    $parentIds = array_values(array_unique(array_filter(array_map('intval', $parentIds))));
+    if ($parentIds === []) {
+        return [];
+    }
+    $in = implode(',', $parentIds);
+    $map = [];
+    foreach ($parentIds as $id) {
+        $map[$id] = [];
+    }
+    $seen = [];
+    try {
+        $rows = [];
+        if (function_exists('table_exists') && table_exists('students')) {
+            $rows = safe_db_get_all(
+                "SELECT s.id, s.parent_id, s.first_name, s.middle_name, s.last_name, s.status, s.academic_year,
+                        s.class_id, cl.name AS class_name
+                 FROM students s
+                 LEFT JOIN classes cl ON cl.id = s.class_id
+                 WHERE s.parent_id IN ($in)
+                 ORDER BY s.first_name ASC, s.last_name ASC"
+            ) ?: [];
+        }
+        if (function_exists('table_exists') && table_exists('parents_children')) {
+            $extra = safe_db_get_all(
+                "SELECT s.id, pc.parent_user_id AS parent_id, s.first_name, s.middle_name, s.last_name, s.status,
+                        s.academic_year, s.class_id, cl.name AS class_name
+                 FROM parents_children pc
+                 INNER JOIN students s ON s.id = pc.child_student_id
+                 LEFT JOIN classes cl ON cl.id = s.class_id
+                 WHERE pc.parent_user_id IN ($in)
+                 ORDER BY s.first_name ASC"
+            ) ?: [];
+            $rows = array_merge($rows, $extra);
+        }
+        foreach ($rows as $r) {
+            $pid = (int) ($r['parent_id'] ?? 0);
+            $sid = (int) ($r['id'] ?? 0);
+            if ($pid <= 0 || $sid <= 0) {
+                continue;
+            }
+            $key = $pid . ':' . $sid;
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $name = trim((string) ($r['first_name'] ?? '') . ' ' . (string) ($r['middle_name'] ?? '') . ' ' . (string) ($r['last_name'] ?? ''));
+            $name = preg_replace('/\s+/', ' ', $name) ?? $name;
+            $r['display_name'] = $name !== '' ? $name : ('Student #' . $sid);
+            $map[$pid][] = $r;
+        }
+    } catch (Throwable $e) {
+        // ignore
+    }
+    return $map;
+}
+
+function staff_child_label(array $child): string
+{
+    $label = (string) ($child['display_name'] ?? '');
+    $cls = trim((string) ($child['class_name'] ?? ''));
+    if ($cls !== '') {
+        $label .= ' (' . $cls . ')';
+    }
+    return $label;
+}
+
 function staff_phone_last10(string $raw): string
 {
     $digits = preg_replace('/\D+/', '', $raw) ?? '';

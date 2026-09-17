@@ -305,7 +305,7 @@ if ($deleteId > 0) {
 
 /* EXPORT CSV */
 if ($action === 'export') {
-    $where = []; $params = [];
+    $where = ["role <> 'parent'"]; $params = [];
     if (!empty($_GET['q'])) { $where[] = "(name LIKE :q OR phone LIKE :q)"; $params[':q'] = '%'.trim($_GET['q']).'%'; }
     if (!empty($_GET['role'])) { $where[] = "role = :role"; $params[':role'] = $_GET['role']; }
     if (isset($_GET['is_active']) && $_GET['is_active'] !== '') { $where[] = "is_active = :ia"; $params[':ia'] = (int)$_GET['is_active']; }
@@ -344,6 +344,11 @@ $where = []; $params = [];
 $qraw = trim((string)($_GET['q'] ?? ''));
 if ($qraw !== '') { $where[] = "(u.name LIKE :q OR u.phone LIKE :q OR IFNULL(u.whatsapp_id,'') LIKE :q OR IFNULL(u.meta,'') LIKE :q)"; $params[':q'] = '%' . $qraw . '%'; }
 $roleFilter = trim((string)($_GET['role'] ?? ''));
+if ($roleFilter === 'parent') {
+    header('Location: ' . (function_exists('site_url') ? site_url('/owner/parents.php') : 'parents.php'));
+    exit;
+}
+$where[] = "u.role <> 'parent'";
 if ($roleFilter !== '') { $where[] = "u.role = :role"; $params[':role'] = $roleFilter; }
 if (isset($_GET['is_active']) && $_GET['is_active'] !== '') { $where[] = "u.is_active = :ia"; $params[':ia'] = (int)$_GET['is_active']; }
 
@@ -391,10 +396,12 @@ function build_qs(array $over = []): string {
 $rolesList = $roles;
 
 /* Render header/footer if available */
-$pageTitle = 'Staff & Users';
-$page_title = 'Staff & Users';
+$pageTitle = 'Staff';
+$page_title = 'Staff';
 require_once __DIR__ . '/../includes/header.php';
 ?>
+
+<?php staff_people_nav('staff'); ?>
 
 <div class="d-flex justify-content-end gap-2 mb-3">
 <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addUserModal">Add staff</button>
@@ -411,7 +418,7 @@ require_once __DIR__ . '/../includes/header.php';
       <div class="col-md-3"><label class="form-label">Role</label>
         <select name="role" class="form-select">
           <option value="">Any</option>
-          <?php foreach ($rolesList as $rk=>$rv): ?>
+          <?php foreach ($rolesList as $rk=>$rv): if ($rk === 'parent') continue; ?>
             <option value="<?php echo $esc($rk); ?>" <?php if(($roleFilter ?? '')===$rk) echo 'selected'; ?>><?php echo $esc($rv); ?></option>
           <?php endforeach; ?>
         </select>

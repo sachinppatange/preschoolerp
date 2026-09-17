@@ -114,7 +114,8 @@ function owner_panel_menu(): array
             'section' => 'Settings & Admin',
             'items' => [
                 ['url' => $owner . '/otp_settings.php', 'icon' => 'bi-shield-lock', 'label' => 'OTP Settings', 'match' => 'otp_settings'],
-                ['url' => $owner . '/staff_manage.php', 'icon' => 'bi-person-badge', 'label' => 'Staff & Users', 'match' => 'staff_manage'],
+                ['url' => $owner . '/staff_manage.php', 'icon' => 'bi-person-badge', 'label' => 'Staff', 'match' => 'staff_manage'],
+                ['url' => $owner . '/parents.php', 'icon' => 'bi-people', 'label' => 'Parents', 'match' => 'parents'],
                 ['url' => $owner . '/reports_simple.php', 'icon' => 'bi-pie-chart', 'label' => 'Reports', 'match' => 'reports_simple'],
                 ['url' => $owner . '/profile.php', 'icon' => 'bi-gear', 'label' => 'My Profile', 'match' => 'profile'],
             ],
