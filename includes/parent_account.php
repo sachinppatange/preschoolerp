@@ -379,41 +379,83 @@ function parent_ay_sql_ok(string $ay): bool
  */
 function parent_ids_with_child_in_year(string $ay): array
 {
-    if (!parent_ay_sql_ok($ay) || !function_exists('table_exists') || !table_exists('students')) {
+    if (!parent_ay_sql_ok($ay)) {
         return [];
     }
     $ids = [];
-    try {
-        $rows = safe_db_get_all(
-            'SELECT DISTINCT parent_id AS id FROM students
-             WHERE academic_year = :ay AND parent_id IS NOT NULL AND parent_id > 0',
-            [':ay' => $ay]
-        ) ?: [];
+    $add = static function (array $rows) use (&$ids): void {
         foreach ($rows as $r) {
             $id = (int) ($r['id'] ?? 0);
             if ($id > 0) {
                 $ids[$id] = $id;
             }
         }
-        if (table_exists('parents_children')) {
-            $rows = safe_db_get_all(
-                'SELECT DISTINCT pc.parent_user_id AS id
-                 FROM parents_children pc
-                 INNER JOIN students s ON s.id = pc.child_student_id
-                 WHERE s.academic_year = :ay AND pc.parent_user_id > 0',
-                [':ay' => $ay]
-            ) ?: [];
-            foreach ($rows as $r) {
-                $id = (int) ($r['id'] ?? 0);
-                if ($id > 0) {
-                    $ids[$id] = $id;
-                }
-            }
-        }
+    };
+    try {
+        $add(parent_query_all(
+            'SELECT DISTINCT parent_id AS id FROM students
+             WHERE academic_year = :ay AND parent_id IS NOT NULL AND parent_id > 0',
+            [':ay' => $ay]
+        ));
+        $add(parent_query_all(
+            'SELECT DISTINCT pc.parent_user_id AS id
+             FROM parents_children pc
+             INNER JOIN students s ON s.id = pc.child_student_id
+             WHERE s.academic_year = :ay AND pc.parent_user_id > 0',
+            [':ay' => $ay]
+        ));
     } catch (Throwable $e) {
         return array_values($ids);
     }
     return array_values($ids);
+}
+
+/**
+ * @param array<string,mixed> $params
+ * @return list<array<string,mixed>>
+ */
+function parent_query_all(string $sql, array $params = []): array
+{
+    if (function_exists('safe_db_get_all')) {
+        try {
+            return safe_db_get_all($sql, $params) ?: [];
+        } catch (Throwable $e) {
+            // fall through
+        }
+    }
+    if (function_exists('db_fetch_all')) {
+        try {
+            return db_fetch_all($sql, $params) ?: [];
+        } catch (Throwable $e) {
+            return [];
+        }
+    }
+    return [];
+}
+
+/**
+ * @param array<string,mixed> $params
+ * @return array<string,mixed>|null
+ */
+function parent_query_one(string $sql, array $params = []): ?array
+{
+    if (function_exists('safe_db_get_one')) {
+        try {
+            $row = safe_db_get_one($sql, $params);
+            return is_array($row) ? $row : null;
+        } catch (Throwable $e) {
+            // fall through
+        }
+    }
+    if (function_exists('db_fetch_one')) {
+        try {
+            $row = db_fetch_one($sql, $params);
+            return is_array($row) ? $row : null;
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+    return null;
 }
 
 function parent_has_child_in_year(int $parentId, ?string $ay = null): bool
@@ -422,7 +464,31 @@ function parent_has_child_in_year(int $parentId, ?string $ay = null): bool
         return false;
     }
     $ay = $ay ?? parent_login_academic_year();
-    return in_array($parentId, parent_ids_with_child_in_year($ay), true);
+    if (!parent_ay_sql_ok($ay)) {
+        return false;
+    }
+    try {
+        $row = parent_query_one(
+            'SELECT id FROM students
+             WHERE parent_id = :p AND academic_year = :ay
+             LIMIT 1',
+            [':p' => $parentId, ':ay' => $ay]
+        );
+        if ($row) {
+            return true;
+        }
+        $row = parent_query_one(
+            'SELECT pc.id
+             FROM parents_children pc
+             INNER JOIN students s ON s.id = pc.child_student_id
+             WHERE pc.parent_user_id = :p AND s.academic_year = :ay
+             LIMIT 1',
+            [':p' => $parentId, ':ay' => $ay]
+        );
+        return (bool) $row;
+    } catch (Throwable $e) {
+        return false;
+    }
 }
 
 function parent_merge_meta(?string $json, array $patch): string

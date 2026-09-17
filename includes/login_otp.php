@@ -40,6 +40,9 @@ function login_otp_bootstrap(): void
 
     require_once __DIR__ . '/csrf.php';
     require_once __DIR__ . '/db.php';
+    if (file_exists(__DIR__ . '/db_compat.php')) {
+        require_once __DIR__ . '/db_compat.php';
+    }
     require_once __DIR__ . '/auth.php';
     if (file_exists(__DIR__ . '/panel/academic_year.php')) {
         require_once __DIR__ . '/panel/academic_year.php';
