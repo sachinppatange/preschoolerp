@@ -90,6 +90,10 @@ $defaults = [
 
 $errors = []; $messages = [];
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && function_exists('parent_otp_ajax_handle') && parent_otp_ajax_handle()) {
+    exit;
+}
+
 /* -------------------------
    Handle Admission POST (main)
    ------------------------- */
@@ -561,7 +565,7 @@ require_once __DIR__ . '/../includes/header.php';
         <span class="adm-section-num">2</span>
         <div>
           <h2>Parent portal login</h2>
-          <p>SMS, WhatsApp and email OTP are optional. Parent name is enough to create the Parents-page login. The same mobile on a second child keeps one login. If SMS is blank, father/mother phone is used when available.</p>
+          <p>SMS, WhatsApp and email OTP are optional. Send OTP and Verify for each contact you fill. Parent name is enough to create the Parents-page login.</p>
         </div>
       </div>
       <div class="adm-section-body">
@@ -585,15 +589,39 @@ require_once __DIR__ . '/../includes/header.php';
           </div>
           <div class="col-md-4">
             <label class="form-label">SMS OTP mobile</label>
-            <input name="parent_login_phone" class="form-control" inputmode="numeric" maxlength="15" value="<?php echo e($_POST['parent_login_phone'] ?? parent_phone_last10((string)$defaults['parent_login_phone'])); ?>" placeholder="10-digit mobile">
+            <div class="input-group">
+              <input id="parent_login_phone" name="parent_login_phone" class="form-control" inputmode="numeric" maxlength="15" value="<?php echo e($_POST['parent_login_phone'] ?? parent_phone_last10((string)$defaults['parent_login_phone'])); ?>" placeholder="10-digit mobile">
+              <button type="button" class="btn btn-outline-primary btn-parent-otp-send" data-channel="phone" data-source="parent_login_phone">Send OTP</button>
+            </div>
+            <div class="input-group mt-2">
+              <input class="form-control" id="potp_phone" maxlength="8" inputmode="numeric" autocomplete="one-time-code" placeholder="Enter SMS OTP">
+              <button type="button" class="btn btn-outline-secondary btn-parent-otp-verify" data-channel="phone">Verify</button>
+            </div>
+            <div class="small" id="potp_phone_status"></div>
           </div>
           <div class="col-md-4">
             <label class="form-label">WhatsApp OTP</label>
-            <input name="parent_login_whatsapp" class="form-control" inputmode="numeric" maxlength="15" value="<?php echo e($_POST['parent_login_whatsapp'] ?? parent_phone_last10((string)$defaults['parent_login_whatsapp'])); ?>" placeholder="10-digit WhatsApp">
+            <div class="input-group">
+              <input id="parent_login_whatsapp" name="parent_login_whatsapp" class="form-control" inputmode="numeric" maxlength="15" value="<?php echo e($_POST['parent_login_whatsapp'] ?? parent_phone_last10((string)$defaults['parent_login_whatsapp'])); ?>" placeholder="10-digit WhatsApp">
+              <button type="button" class="btn btn-outline-primary btn-parent-otp-send" data-channel="whatsapp" data-source="parent_login_whatsapp">Send OTP</button>
+            </div>
+            <div class="input-group mt-2">
+              <input class="form-control" id="potp_whatsapp" maxlength="8" inputmode="numeric" placeholder="Enter WhatsApp OTP">
+              <button type="button" class="btn btn-outline-secondary btn-parent-otp-verify" data-channel="whatsapp">Verify</button>
+            </div>
+            <div class="small" id="potp_whatsapp_status"></div>
           </div>
           <div class="col-md-4">
             <label class="form-label">Email OTP</label>
-            <input type="email" name="parent_login_email" class="form-control" value="<?php echo e($_POST['parent_login_email'] ?? $defaults['parent_login_email']); ?>" placeholder="parent@email.com">
+            <div class="input-group">
+              <input type="email" id="parent_login_email" name="parent_login_email" class="form-control" value="<?php echo e($_POST['parent_login_email'] ?? $defaults['parent_login_email']); ?>" placeholder="parent@email.com">
+              <button type="button" class="btn btn-outline-primary btn-parent-otp-send" data-channel="email" data-source="parent_login_email">Send OTP</button>
+            </div>
+            <div class="input-group mt-2">
+              <input class="form-control" id="potp_email" maxlength="8" inputmode="numeric" placeholder="Enter Email OTP">
+              <button type="button" class="btn btn-outline-secondary btn-parent-otp-verify" data-channel="email">Verify</button>
+            </div>
+            <div class="small" id="potp_email_status"></div>
           </div>
         </div>
       </div>
@@ -802,6 +830,50 @@ document.addEventListener('DOMContentLoaded', function(){
     link.addEventListener('click', function(){
       document.querySelectorAll('.adm-nav a').forEach(function(a){ a.classList.remove('active'); });
       link.classList.add('active');
+    });
+  });
+
+  function parentOtpCsrf() {
+    var el = document.querySelector('input[name="csrf_token"]');
+    return el ? el.value : '';
+  }
+  function parentOtpPost(action, data) {
+    var body = new URLSearchParams(data);
+    body.set('action', action);
+    body.set('csrf_token', parentOtpCsrf());
+    return fetch(window.location.href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+      body: body.toString(),
+      credentials: 'same-origin'
+    }).then(function (r) { return r.json(); });
+  }
+  function parentOtpStatus(channel, ok, text) {
+    var el = document.getElementById('potp_' + channel + '_status');
+    if (!el) return;
+    el.className = 'small ' + (ok ? 'text-success' : 'text-danger');
+    el.textContent = text || '';
+  }
+  document.querySelectorAll('.btn-parent-otp-send').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var channel = btn.getAttribute('data-channel') || '';
+      var srcId = btn.getAttribute('data-source') || '';
+      var src = document.getElementById(srcId);
+      parentOtpStatus(channel, true, 'Sending…');
+      parentOtpPost('parent_otp_send', { channel: channel, to: src ? src.value : '' }).then(function (json) {
+        if (json && json.ok) parentOtpStatus(channel, true, json.info || 'OTP sent.');
+        else parentOtpStatus(channel, false, (json && json.error) ? json.error : 'Failed to send OTP.');
+      }).catch(function () { parentOtpStatus(channel, false, 'Failed to send OTP.'); });
+    });
+  });
+  document.querySelectorAll('.btn-parent-otp-verify').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var channel = btn.getAttribute('data-channel') || '';
+      var input = document.getElementById('potp_' + channel);
+      parentOtpPost('parent_otp_verify', { channel: channel, otp: input ? input.value : '' }).then(function (json) {
+        if (json && json.ok) parentOtpStatus(channel, true, 'Verified');
+        else parentOtpStatus(channel, false, (json && json.error) ? json.error : 'Verification failed.');
+      }).catch(function () { parentOtpStatus(channel, false, 'Verification failed.'); });
     });
   });
 });

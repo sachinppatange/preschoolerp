@@ -627,3 +627,174 @@ function parent_backfill_missing_logins(?string $ay = null): array
     }
     return ['fixed' => $fixed, 'skipped' => $skipped];
 }
+
+function parent_otp_code(): string
+{
+    if (function_exists('staff_generate_otp')) {
+        return staff_generate_otp();
+    }
+    $len = defined('OTP_LENGTH') ? max(4, (int) OTP_LENGTH) : 4;
+    $max = (int) str_repeat('9', $len);
+    return str_pad((string) random_int(0, $max), $len, '0', STR_PAD_LEFT);
+}
+
+function parent_otp_e164(string $raw): string
+{
+    if (function_exists('staff_e164')) {
+        return staff_e164($raw);
+    }
+    $d = preg_replace('/\D+/', '', $raw) ?? '';
+    if (strlen($d) === 10) {
+        return '+91' . $d;
+    }
+    if (strlen($d) === 12 && str_starts_with($d, '91')) {
+        return '+' . $d;
+    }
+    return $d !== '' ? '+' . $d : '';
+}
+
+function parent_otp_store(array $ctx): void
+{
+    $_SESSION['parent_adm_otp'] = $ctx;
+}
+
+function parent_otp_ctx(): array
+{
+    if (empty($_SESSION['parent_adm_otp']) || !is_array($_SESSION['parent_adm_otp'])) {
+        $_SESSION['parent_adm_otp'] = [];
+    }
+    return $_SESSION['parent_adm_otp'];
+}
+
+/**
+ * @return array{ok:bool,error?:string,info?:string}
+ */
+function parent_otp_send_channel(string $channel, string $to): array
+{
+    $channel = strtolower(trim($channel));
+    $to = trim($to);
+    $ctx = parent_otp_ctx();
+    if (!isset($ctx['sent_at']) || !is_array($ctx['sent_at'])) {
+        $ctx['sent_at'] = [];
+    }
+    if (!isset($ctx['expires']) || !is_array($ctx['expires'])) {
+        $ctx['expires'] = [];
+    }
+    $now = time();
+    $last = (int) ($ctx['sent_at'][$channel] ?? 0);
+    if ($last > 0 && ($now - $last) < 45) {
+        $wait = 45 - ($now - $last);
+        return ['ok' => false, 'error' => "Please wait {$wait} seconds before resending."];
+    }
+
+    $otp = parent_otp_code();
+    $minutes = function_exists('otp_validity_minutes') ? otp_validity_minutes() : 5;
+    $expires = $now + max(60, $minutes * 60);
+
+    if ($channel === 'phone') {
+        $phone10 = parent_phone_last10($to);
+        if (strlen($phone10) !== 10) {
+            return ['ok' => false, 'error' => 'Enter a valid 10-digit SMS mobile.'];
+        }
+        if (function_exists('staff_find_by_phone10')) {
+            $taken = staff_find_by_phone10($phone10, 0);
+            if ($taken && strtolower((string) ($taken['role'] ?? '')) !== 'parent') {
+                return ['ok' => false, 'error' => 'This mobile is already used by a ' . ($taken['role'] ?? 'staff') . ' account.'];
+            }
+        }
+        if (!function_exists('otp_send_sms')) {
+            return ['ok' => false, 'error' => 'SMS OTP is not configured. Open OTP Settings.'];
+        }
+        $res = otp_send_sms($phone10, $otp);
+        if (empty($res['ok'])) {
+            return ['ok' => false, 'error' => 'SMS: ' . (string) ($res['error'] ?? 'failed')];
+        }
+        $ctx['phone'] = $phone10;
+        $ctx['phone_hash'] = password_hash($otp, PASSWORD_DEFAULT);
+        $ctx['phone_ok'] = false;
+    } elseif ($channel === 'whatsapp') {
+        $wa10 = parent_phone_last10($to);
+        if (strlen($wa10) !== 10) {
+            return ['ok' => false, 'error' => 'Enter a valid 10-digit WhatsApp number.'];
+        }
+        if (!function_exists('otp_send_whatsapp')) {
+            return ['ok' => false, 'error' => 'WhatsApp OTP is not configured. Open OTP Settings.'];
+        }
+        $res = otp_send_whatsapp(parent_otp_e164($wa10), $otp);
+        if (empty($res['ok'])) {
+            return ['ok' => false, 'error' => 'WhatsApp: ' . (string) ($res['error'] ?? 'failed')];
+        }
+        $ctx['whatsapp'] = $wa10;
+        $ctx['wa_hash'] = password_hash($otp, PASSWORD_DEFAULT);
+        $ctx['wa_ok'] = false;
+    } elseif ($channel === 'email') {
+        $email = parent_normalize_email($to);
+        if ($email === '') {
+            return ['ok' => false, 'error' => 'Enter a valid email address.'];
+        }
+        if (!function_exists('otp_send_email')) {
+            return ['ok' => false, 'error' => 'Email OTP is not configured. Open OTP Settings.'];
+        }
+        $res = otp_send_email($email, $otp);
+        if (empty($res['ok'])) {
+            return ['ok' => false, 'error' => 'Email: ' . (string) ($res['error'] ?? 'failed')];
+        }
+        $ctx['email'] = $email;
+        $ctx['email_hash'] = password_hash($otp, PASSWORD_DEFAULT);
+        $ctx['email_ok'] = false;
+    } else {
+        return ['ok' => false, 'error' => 'Invalid OTP channel.'];
+    }
+
+    $ctx['sent_at'][$channel] = $now;
+    $ctx['expires'][$channel] = $expires;
+    parent_otp_store($ctx);
+    return ['ok' => true, 'info' => 'OTP sent. Enter the code and tap Verify.'];
+}
+
+/**
+ * @return array{ok:bool,error?:string,verified?:bool}
+ */
+function parent_otp_verify_channel(string $channel, string $otp): array
+{
+    $channel = strtolower(trim($channel));
+    $otp = trim($otp);
+    $ctx = parent_otp_ctx();
+    $expires = (int) ($ctx['expires'][$channel] ?? 0);
+    if ($expires <= 0 || time() > $expires) {
+        return ['ok' => false, 'error' => 'OTP expired. Send OTP again.'];
+    }
+    if ($otp === '') {
+        return ['ok' => false, 'error' => 'Enter the OTP.'];
+    }
+    $hashKey = $channel === 'whatsapp' ? 'wa_hash' : ($channel === 'email' ? 'email_hash' : 'phone_hash');
+    $okKey = $channel === 'whatsapp' ? 'wa_ok' : ($channel === 'email' ? 'email_ok' : 'phone_ok');
+    $hash = (string) ($ctx[$hashKey] ?? '');
+    if ($hash === '' || !password_verify($otp, $hash)) {
+        return ['ok' => false, 'error' => 'Incorrect OTP.'];
+    }
+    $ctx[$okKey] = true;
+    parent_otp_store($ctx);
+    return ['ok' => true, 'verified' => true];
+}
+
+function parent_otp_ajax_handle(): bool
+{
+    $action = (string) ($_POST['action'] ?? '');
+    if (!in_array($action, ['parent_otp_send', 'parent_otp_verify'], true)) {
+        return false;
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    $token = (string) ($_POST['csrf_token'] ?? $_POST['csrf'] ?? '');
+    $sess = (string) ($_SESSION['csrf_token'] ?? '');
+    if ($sess === '' || !hash_equals($sess, $token)) {
+        echo json_encode(['ok' => false, 'error' => 'Invalid session. Refresh the page.']);
+        return true;
+    }
+    if ($action === 'parent_otp_send') {
+        echo json_encode(parent_otp_send_channel((string) ($_POST['channel'] ?? ''), (string) ($_POST['to'] ?? '')));
+    } else {
+        echo json_encode(parent_otp_verify_channel((string) ($_POST['channel'] ?? ''), (string) ($_POST['otp'] ?? '')));
+    }
+    return true;
+}
