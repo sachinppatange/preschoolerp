@@ -42,6 +42,9 @@ function panel_bootstrap(?string $role = null, array $options = []): void
     }
 
     require_once $includesDir . '/auth.php';
+    if (file_exists($includesDir . '/otp_settings.php')) {
+        require_once $includesDir . '/otp_settings.php';
+    }
     require_once __DIR__ . '/helpers.php';
     require_once __DIR__ . '/scope.php';
     require_once __DIR__ . '/academic_year.php';

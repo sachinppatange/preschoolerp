@@ -41,6 +41,9 @@ function login_otp_bootstrap(): void
     require_once __DIR__ . '/csrf.php';
     require_once __DIR__ . '/db.php';
     require_once __DIR__ . '/auth.php';
+    if (file_exists(__DIR__ . '/otp_settings.php')) {
+        require_once __DIR__ . '/otp_settings.php';
+    }
 
     if (file_exists(__DIR__ . '/whatsapp_config.php')) {
         require_once __DIR__ . '/whatsapp_config.php';
@@ -126,6 +129,12 @@ function login_otp_process(array $config): array
 
     $otpLength = defined('OTP_LENGTH') ? (int) constant('OTP_LENGTH') : 4;
     $otpExpiry = defined('OTP_EXPIRY_SECONDS') ? (int) constant('OTP_EXPIRY_SECONDS') : 300;
+    if (function_exists('otp_validity_minutes')) {
+        $mins = otp_validity_minutes();
+        if ($mins > 0) {
+            $otpExpiry = $mins * 60;
+        }
+    }
     $otpCooldown = defined('OTP_RESEND_COOLDOWN') ? (int) constant('OTP_RESEND_COOLDOWN') : 60;
     $waCountry = defined('WA_COUNTRY_CODE') ? (string) constant('WA_COUNTRY_CODE') : '91';
     $appEnv = defined('APP_ENV') ? (string) constant('APP_ENV') : 'production';
@@ -142,8 +151,8 @@ function login_otp_process(array $config): array
     $findUser = function (string $phonePlus, string $phonePlain, bool $fullRow = false) use ($roles): ?array {
         [$roleSql, $roleParams] = login_otp_role_clause($roles);
         $cols = $fullRow
-            ? 'id, name, phone, role, school_id, whatsapp_id, is_active'
-            : 'id, name, role, is_active';
+            ? 'id, name, phone, role, school_id, whatsapp_id, is_active, meta'
+            : 'id, name, role, is_active, meta';
         $digits = preg_replace('/\D+/', '', $phonePlain) ?? '';
         $last10 = strlen($digits) >= 10 ? substr($digits, -10) : $digits;
         $variants = array_values(array_unique(array_filter([
@@ -175,7 +184,7 @@ function login_otp_process(array $config): array
         return in_array($role, array_map('strtolower', $roles), true);
     };
 
-    $sendOtp = function (string $phonePlus) use (&$ctx, $otpLength, $otpExpiry, $otpCooldown, $logPrefix, $appDebug): array {
+    $sendOtp = function (string $phonePlus, array $user = []) use (&$ctx, $otpLength, $otpExpiry, $otpCooldown, $logPrefix, $appDebug): array {
         $now = time();
         if (!empty($ctx['last_sent_at']) && ($now - (int) $ctx['last_sent_at']) < $otpCooldown) {
             $wait = $otpCooldown - ($now - (int) $ctx['last_sent_at']);
@@ -200,13 +209,22 @@ function login_otp_process(array $config): array
             }
             $logLine = '[' . date('Y-m-d H:i:s') . "] {$logPrefix} OTP (dev/simulated) to {$phonePlus} => {$otp}" . PHP_EOL;
             @file_put_contents($logDir . '/whatsapp_otp_dev.log', $logLine, FILE_APPEND | LOCK_EX);
-            return ['ok' => true, 'resp' => 'simulated'];
+            return ['ok' => true, 'resp' => 'simulated', 'info' => 'OTP has been sent (development log).'];
         };
 
-        if (function_exists('whatsapp_send_otp')) {
+        if (function_exists('otp_send_login_channels')) {
+            $res = otp_send_login_channels($phonePlus, $otp, $user);
+            $sent = !empty($res['ok']);
+            if (!$sent && $appDebug) {
+                $res = $simulateDev();
+                $sent = true;
+            }
+        } elseif (function_exists('whatsapp_send_otp')) {
             $res = whatsapp_send_otp($phonePlus, $otp);
             $sent = !empty($res['ok']);
-            // Development: fall back to file-logged OTP when WhatsApp is unavailable.
+            if ($sent) {
+                $res['info'] = 'OTP has been sent. Please check WhatsApp.';
+            }
             if (!$sent && $appDebug) {
                 $res = $simulateDev();
                 $sent = true;
@@ -217,7 +235,7 @@ function login_otp_process(array $config): array
         }
 
         if (!$sent) {
-            $err = 'Failed to send OTP. Please try again later.';
+            $err = (string) ($res['error'] ?? 'Failed to send OTP. Please try again later.');
             if ($appDebug && isset($res['error'])) {
                 $err .= ' Debug: ' . htmlspecialchars((string) $res['error']);
             }
@@ -230,7 +248,7 @@ function login_otp_process(array $config): array
         $ctx['attempts'] = 0;
         $ctx['last_sent_at'] = time();
 
-        return ['ok' => true, 'info' => 'OTP has been sent. Please check WhatsApp.'];
+        return ['ok' => true, 'info' => (string) ($res['info'] ?? 'OTP has been sent.')];
     };
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -258,7 +276,7 @@ function login_otp_process(array $config): array
                         } elseif (isset($user['is_active']) && (int) $user['is_active'] === 0) {
                             $msgError = $inactiveMessage;
                         } else {
-                            $result = $sendOtp($phonePlus);
+                            $result = $sendOtp($phonePlus, is_array($user) ? $user : []);
                             if ($result['ok']) {
                                 $msgInfo = $result['info'] ?? 'OTP sent.';
                                 if (function_exists('whatsapp_log')) {
@@ -286,9 +304,9 @@ function login_otp_process(array $config): array
                     if (!$roleAllowed($user)) {
                         $msgError = $denyMessage;
                     } else {
-                        $result = $sendOtp($phonePlus);
+                        $result = $sendOtp($phonePlus, is_array($user) ? $user : []);
                         if ($result['ok']) {
-                            $msgInfo = 'OTP resent. Please check WhatsApp.';
+                            $msgInfo = $result['info'] ?? 'OTP resent.';
                             if (function_exists('whatsapp_log')) {
                                 whatsapp_log($logPrefix . '_resend_otp', [
                                     'phone' => $phonePlus,

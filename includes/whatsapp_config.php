@@ -51,11 +51,28 @@ function whatsapp_log(string $note, array $data = []): void {
     @file_put_contents($file, $line, FILE_APPEND | LOCK_EX);
 }
 
+function whatsapp_runtime_cfg(): array {
+    if (function_exists('otp_whatsapp_runtime')) {
+        return otp_whatsapp_runtime();
+    }
+    return [
+        'token' => defined('WHATSAPP_PROVIDER_KEY') ? (string) WHATSAPP_PROVIDER_KEY : '',
+        'phone_number_id' => defined('WHATSAPP_PHONE_NUMBER_ID') ? (string) WHATSAPP_PHONE_NUMBER_ID : '',
+        'api_base' => defined('WHATSAPP_API_BASE') ? (string) WHATSAPP_API_BASE : 'https://graph.facebook.com',
+        'api_version' => defined('WHATSAPP_API_VERSION') ? (string) WHATSAPP_API_VERSION : 'v19.0',
+        'template_name' => defined('WHATSAPP_TEMPLATE_OTP_NAME') ? (string) WHATSAPP_TEMPLATE_OTP_NAME : '',
+        'template_language' => defined('WHATSAPP_TEMPLATE_LANGUAGE') ? (string) WHATSAPP_TEMPLATE_LANGUAGE : 'en',
+        'url_button_param' => defined('WHATSAPP_URL_BUTTON_PARAM_STATIC') ? (string) WHATSAPP_URL_BUTTON_PARAM_STATIC : '',
+        'url_button_use_otp' => defined('WHATSAPP_URL_BUTTON_PARAM_USE_OTP') ? (bool) WHATSAPP_URL_BUTTON_PARAM_USE_OTP : false,
+    ];
+}
+
 /* Build WhatsApp Graph API messages URL */
 function whatsapp_api_messages_url(): string {
-    $base = rtrim(WHATSAPP_API_BASE, '/');
-    $ver  = trim(WHATSAPP_API_VERSION, '/');
-    $phoneId = WHATSAPP_PHONE_NUMBER_ID;
+    $rt = whatsapp_runtime_cfg();
+    $base = rtrim((string) ($rt['api_base'] ?: WHATSAPP_API_BASE), '/');
+    $ver  = trim((string) ($rt['api_version'] ?: WHATSAPP_API_VERSION), '/');
+    $phoneId = (string) ($rt['phone_number_id'] ?: WHATSAPP_PHONE_NUMBER_ID);
     return "{$base}/{$ver}/{$phoneId}/messages";
 }
 
@@ -68,7 +85,8 @@ function whatsapp_api_messages_url(): string {
  */
 function whatsapp_api_post(array $payload): array {
     $url = whatsapp_api_messages_url();
-    $token = WHATSAPP_PROVIDER_KEY;
+    $rt = whatsapp_runtime_cfg();
+    $token = (string) ($rt['token'] ?: WHATSAPP_PROVIDER_KEY);
 
     if (empty($token)) {
         return ['success' => false, 'http_code' => 0, 'response' => null, 'error' => 'Missing WHATSAPP_PROVIDER_KEY'];
@@ -177,8 +195,9 @@ function whatsapp_send_text(string $toPhone, string $message): array {
  * @return array
  */
 function whatsapp_send_template_otp(string $toPhone, string $otp, ?string $templateName = null, ?string $language = null, ?string $buttonParam = null): array {
-    $tName = $templateName ?: WHATSAPP_TEMPLATE_OTP_NAME;
-    $lang  = $language ?: WHATSAPP_TEMPLATE_LANGUAGE;
+    $rt = whatsapp_runtime_cfg();
+    $tName = $templateName ?: (string) ($rt['template_name'] ?: WHATSAPP_TEMPLATE_OTP_NAME);
+    $lang  = $language ?: (string) ($rt['template_language'] ?: WHATSAPP_TEMPLATE_LANGUAGE);
 
     if (empty($tName)) {
         return ['success' => false, 'http_code' => 0, 'response' => null, 'error' => 'Template name not configured'];
@@ -233,17 +252,20 @@ function whatsapp_send_template_otp(string $toPhone, string $otp, ?string $templ
 function whatsapp_send_otp(string $toPhone, string $otp): array {
     $shouldLogOtp = (defined('APP_ENV') && APP_ENV === 'development');
 
+    $rt = whatsapp_runtime_cfg();
+
     // Determine button parameter if configured
     $buttonParam = null;
-    if (!empty(WHATSAPP_URL_BUTTON_PARAM_STATIC)) {
-        $buttonParam = WHATSAPP_URL_BUTTON_PARAM_STATIC;
-    } elseif (!empty(WHATSAPP_URL_BUTTON_PARAM_USE_OTP) && WHATSAPP_URL_BUTTON_PARAM_USE_OTP === true) {
+    if (!empty($rt['url_button_param'])) {
+        $buttonParam = $rt['url_button_param'];
+    } elseif (!empty($rt['url_button_use_otp'])) {
         $buttonParam = (string)$otp;
     }
 
     // Prefer template; fallback to text if no template name configured
-    if (!empty(WHATSAPP_TEMPLATE_OTP_NAME)) {
-        $res = whatsapp_send_template_otp($toPhone, $otp, null, null, $buttonParam);
+    $tplName = (string) ($rt['template_name'] ?: (defined('WHATSAPP_TEMPLATE_OTP_NAME') ? WHATSAPP_TEMPLATE_OTP_NAME : ''));
+    if (!empty($tplName)) {
+        $res = whatsapp_send_template_otp($toPhone, $otp, $tplName, null, $buttonParam);
     } else {
         $msg = "Your Pioneer Play School OTP is: {$otp}";
         $res = whatsapp_send_text($toPhone, $msg);
