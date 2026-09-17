@@ -17,10 +17,11 @@ function staff_all_roles(): array
     ];
 }
 
-/** Roles that can be added from Staff & Users (not parent, not owner). */
+/** Roles that can be added/edited from Staff (parents stay on Parents page). */
 function staff_addable_roles(): array
 {
     return [
+        'owner' => 'Owner',
         'accounts' => 'Accounts',
         'teacher' => 'Teacher',
         'reception' => 'Reception',
@@ -235,6 +236,47 @@ function staff_generate_otp(): string
     }
 }
 
+function staff_count_owners(bool $activeOnly = true): int
+{
+    $sql = "SELECT COUNT(*) AS c FROM users WHERE role = 'owner'";
+    if ($activeOnly) {
+        $sql .= ' AND is_active = 1';
+    }
+    try {
+        $row = safe_db_get_one($sql);
+        return (int) ($row['c'] ?? 0);
+    } catch (Throwable $e) {
+        return 0;
+    }
+}
+
+function staff_current_user_id(): int
+{
+    if (function_exists('auth_user_id')) {
+        return (int) (auth_user_id() ?? 0);
+    }
+    $u = $_SESSION['auth_user'] ?? $_SESSION['owner_auth_user'] ?? null;
+    return is_array($u) ? (int) ($u['id'] ?? 0) : 0;
+}
+
+function staff_delete_block_reason(int $id): ?string
+{
+    $row = safe_db_get_one('SELECT id, role FROM users WHERE id = :id LIMIT 1', [':id' => $id]);
+    if (!$row) {
+        return 'User not found.';
+    }
+    if (strtolower((string) ($row['role'] ?? '')) === 'parent') {
+        return 'Parent accounts are managed on the Parents page.';
+    }
+    if ($id === staff_current_user_id()) {
+        return 'You cannot delete your own login.';
+    }
+    if (strtolower((string) ($row['role'] ?? '')) === 'owner' && staff_count_owners(true) <= 1) {
+        return 'Cannot delete the last owner account.';
+    }
+    return null;
+}
+
 function staff_add_otp_ctx(): array
 {
     if (empty($_SESSION['staff_add_otp']) || !is_array($_SESSION['staff_add_otp'])) {
@@ -256,7 +298,7 @@ function staff_add_otp_clear(): void
 /**
  * @return array{ok:bool,error?:string,info?:string,same_phone?:bool,expires_in?:int}
  */
-function staff_send_add_otps(string $phone, string $whatsapp, string $email): array
+function staff_send_add_otps(string $phone, string $whatsapp, string $email, int $exceptId = 0): array
 {
     $phone10 = staff_phone_last10($phone);
     $wa10 = staff_phone_last10($whatsapp !== '' ? $whatsapp : $phone);
@@ -270,12 +312,12 @@ function staff_send_add_otps(string $phone, string $whatsapp, string $email): ar
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         return ['ok' => false, 'error' => 'Enter a valid email address.'];
     }
-    $taken = staff_find_by_phone10($phone10);
+    $taken = staff_find_by_phone10($phone10, $exceptId);
     if ($taken) {
         return ['ok' => false, 'error' => 'This mobile number is already used by ' . ($taken['name'] ?? 'another user') . ' (' . ($taken['role'] ?? '') . ').'];
     }
     if ($wa10 !== $phone10) {
-        $waTaken = staff_find_by_phone10($wa10);
+        $waTaken = staff_find_by_phone10($wa10, $exceptId);
         if ($waTaken) {
             return ['ok' => false, 'error' => 'This WhatsApp number is already used by ' . ($waTaken['name'] ?? 'another user') . '.'];
         }
@@ -283,7 +325,7 @@ function staff_send_add_otps(string $phone, string $whatsapp, string $email): ar
 
     $ctx = staff_add_otp_ctx();
     $now = time();
-    if (!empty($ctx['sent_at']) && ($now - (int) $ctx['sent_at']) < 45) {
+    if (!empty($ctx['sent_at']) && (int) ($ctx['except_id'] ?? 0) === $exceptId && ($now - (int) $ctx['sent_at']) < 45) {
         $wait = 45 - ($now - (int) $ctx['sent_at']);
         return ['ok' => false, 'error' => "Please wait {$wait} seconds before resending OTPs."];
     }
@@ -329,6 +371,7 @@ function staff_send_add_otps(string $phone, string $whatsapp, string $email): ar
         'sent_at' => $now,
         'expires' => $expires,
         'same_phone' => $same,
+        'except_id' => $exceptId,
     ]);
 
     $info = $same
@@ -383,13 +426,16 @@ function staff_verify_add_otp(string $channel, string $otp): array
     ];
 }
 
-function staff_add_otp_matches(string $phone, string $whatsapp, string $email): bool
+function staff_add_otp_matches(string $phone, string $whatsapp, string $email, int $exceptId = 0): bool
 {
     $ctx = staff_add_otp_ctx();
     if (empty($ctx['phone_ok']) || empty($ctx['wa_ok']) || empty($ctx['email_ok'])) {
         return false;
     }
     if (empty($ctx['expires']) || time() > (int) $ctx['expires']) {
+        return false;
+    }
+    if ((int) ($ctx['except_id'] ?? 0) !== $exceptId) {
         return false;
     }
     $phone10 = staff_phone_last10($phone);

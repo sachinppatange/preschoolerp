@@ -48,7 +48,7 @@ $classList = table_exists('classes') ? safe_db_get_all("SELECT id, name, fees FR
 $parent = null;
 $parent_id = isset($_GET['parent_id']) ? (int)$_GET['parent_id'] : 0;
 if ($parent_id > 0) {
-    $parent = safe_db_get_one("SELECT id, name, phone, school_id FROM users WHERE id = :id AND role='parent' LIMIT 1", [':id'=>$parent_id]);
+    $parent = safe_db_get_one("SELECT id, name, phone, whatsapp_id, meta, school_id FROM users WHERE id = :id AND role='parent' LIMIT 1", [':id'=>$parent_id]);
     if (!$parent) $parent_id = 0;
 }
 
@@ -74,6 +74,8 @@ $defaults = [
 
     'parent_login_name' => $parent['name'] ?? '',
     'parent_login_phone' => $parent['phone'] ?? '',
+    'parent_login_whatsapp' => $parent['whatsapp_id'] ?? '',
+    'parent_login_email' => function_exists('parent_email_from_user_row') && $parent ? parent_email_from_user_row($parent) : '',
     'parent_login_relation' => 'parent',
     'stu_first'=>'','stu_middle'=>'','stu_last'=>'',
     'dob'=>'','gender'=>'male','place_of_birth'=>'','nationality'=>'','caste'=>'','languages'=>'',
@@ -165,7 +167,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
         $in['stamp'] = trim((string)($_POST['stamp'] ?? ''));
 
         $in['parent_login_name'] = trim((string)($_POST['parent_login_name'] ?? ''));
-        $in['parent_login_phone'] = parent_phone_last10((string)($_POST['parent_login_phone'] ?? ''));
+        $smsRaw = trim((string)($_POST['parent_login_phone'] ?? ''));
+        $waRaw = trim((string)($_POST['parent_login_whatsapp'] ?? ''));
+        $emailRaw = trim((string)($_POST['parent_login_email'] ?? ''));
+        $in['parent_login_phone'] = parent_phone_last10($smsRaw);
+        $in['parent_login_whatsapp'] = parent_phone_last10($waRaw);
+        $in['parent_login_email'] = function_exists('parent_normalize_email')
+            ? parent_normalize_email($emailRaw)
+            : strtolower($emailRaw);
         $in['parent_login_relation'] = trim((string)($_POST['parent_login_relation'] ?? 'parent'));
         if (!in_array($in['parent_login_relation'], ['father', 'mother', 'guardian', 'parent'], true)) {
             $in['parent_login_relation'] = 'parent';
@@ -175,10 +184,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
             $mn = trim($in['mother_first'] . ' ' . $in['mother_last']);
             $in['parent_login_name'] = $fn !== '' ? $fn : ($mn !== '' ? $mn : trim($in['guardian_name']));
         }
+        if (strlen($in['parent_login_phone']) !== 10) {
+            $in['parent_login_phone'] = parent_phone_last10((string)($in['father_phone'] ?: $in['mother_phone'] ?: $in['guardian_phone']));
+        }
+        if (strlen($in['parent_login_whatsapp']) !== 10) {
+            $in['parent_login_whatsapp'] = $in['parent_login_phone'];
+        }
+        if ($in['parent_login_email'] === '') {
+            foreach ([$in['father_email'] ?? '', $in['mother_email'] ?? '', $in['guardian_email'] ?? ''] as $tryEmail) {
+                $norm = function_exists('parent_normalize_email') ? parent_normalize_email((string)$tryEmail) : trim((string)$tryEmail);
+                if ($norm !== '') {
+                    $in['parent_login_email'] = $norm;
+                    break;
+                }
+            }
+        }
 
         // validations
-        if (strlen($in['parent_login_phone']) !== 10) $errors[] = 'Parent login mobile must be a 10-digit number (used for Parent Portal OTP).';
-        if ($in['parent_login_name'] === '') $errors[] = 'Parent name is required.';
+        if ($smsRaw !== '' && strlen(parent_phone_last10($smsRaw)) !== 10) {
+            $errors[] = 'SMS OTP mobile must be a 10-digit number if entered.';
+        }
+        if ($waRaw !== '' && strlen(parent_phone_last10($waRaw)) !== 10) {
+            $errors[] = 'WhatsApp OTP number must be a 10-digit number if entered.';
+        }
+        if ($emailRaw !== '' && $in['parent_login_email'] === '') {
+            $errors[] = 'Enter a valid email address for Email OTP.';
+        }
         if ($in['stu_first'] === '') $errors[] = 'Student first name required.';
         if ($in['dob'] === '') $errors[] = 'Date of birth is required.';
 
@@ -223,14 +254,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                 try {
                     $pdo->beginTransaction();
 
-                    $parentAccount = parent_find_or_create($pdo, [
-                        'name' => $in['parent_login_name'],
-                        'phone' => $in['parent_login_phone'],
-                        'school_id' => $in['school_id'] ?: 1,
-                    ]);
-                    $posted_parent_id = (int) $parentAccount['id'];
-                    if ($posted_parent_id <= 0) {
-                        throw new RuntimeException('Could not create or find parent login.');
+                    $posted_parent_id = 0;
+                    if (strlen($in['parent_login_phone']) === 10 || strlen($in['parent_login_whatsapp']) === 10) {
+                        $parentAccount = parent_find_or_create($pdo, [
+                            'name' => $in['parent_login_name'],
+                            'phone' => $in['parent_login_phone'],
+                            'whatsapp_id' => $in['parent_login_whatsapp'],
+                            'email' => $in['parent_login_email'],
+                            'school_id' => $in['school_id'] ?: 1,
+                        ]);
+                        $posted_parent_id = (int) $parentAccount['id'];
+                        if ($posted_parent_id <= 0) {
+                            throw new RuntimeException('Could not create or find parent login.');
+                        }
                     }
 
                     // discover existing student columns
@@ -246,7 +282,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                     if (in_array('school_id', $existingCols)) $dbData['school_id'] = $in['school_id'] ?: 1;
                     if (in_array('dob', $existingCols)) $dbData['dob'] = $in['dob'];
                     if (in_array('class_id', $existingCols)) $dbData['class_id'] = $in['class_id'];
-                    if (in_array('parent_id', $existingCols)) $dbData['parent_id'] = $posted_parent_id;
+                    if (in_array('parent_id', $existingCols) && $posted_parent_id > 0) $dbData['parent_id'] = $posted_parent_id;
                     if (in_array('photo_path', $existingCols)) $dbData['photo_path'] = $photo_path_db;
                     if (in_array('admission_date', $existingCols)) $dbData['admission_date'] = $in['application_date'];
 
@@ -378,8 +414,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                         'parent_login'=>[
                             'name'=>$in['parent_login_name'],
                             'phone'=>$in['parent_login_phone'],
+                            'whatsapp'=>$in['parent_login_whatsapp'],
+                            'email'=>$in['parent_login_email'],
                             'relation'=>$in['parent_login_relation'],
-                            'user_id'=>$posted_parent_id ?? null,
+                            'user_id'=>$posted_parent_id > 0 ? $posted_parent_id : null,
                         ],
                     ];
                     if (in_array('extended_json', $existingCols)) {
@@ -401,7 +439,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['action'])) {
                     $studentId = (int)$pdo->lastInsertId();
                     if ($studentId <= 0) throw new RuntimeException('Failed to insert student record.');
 
-                    parent_link_student($pdo, $posted_parent_id, $studentId, $in['parent_login_relation']);
+                    if ($posted_parent_id > 0) {
+                        parent_link_student($pdo, $posted_parent_id, $studentId, $in['parent_login_relation']);
+                    }
 
                     // write meta json file
                     $metaDir = __DIR__ . '/../uploads/students/meta/';
@@ -518,8 +558,8 @@ require_once __DIR__ . '/../includes/header.php';
       <div class="adm-section-head">
         <span class="adm-section-num">2</span>
         <div>
-          <h2>Parent login (WhatsApp OTP)</h2>
-          <p>Enter the parent’s name and 10-digit mobile. The same number on a second child links both students to one Parent Portal login.</p>
+          <h2>Parent portal login</h2>
+          <p>SMS, WhatsApp and email OTP contacts are optional. The same mobile on a second child links both students to one Parent Portal login. If SMS is blank, father/mother phone is used when available.</p>
         </div>
       </div>
       <div class="adm-section-body">
@@ -527,16 +567,11 @@ require_once __DIR__ . '/../includes/header.php';
           <div class="adm-parent-banner mb-3"><i class="bi bi-person-check-fill"></i> Prefill from existing parent: <strong><?php echo e($parent['name']); ?></strong><?php if (!empty($parent['phone'])) echo ' · '.e($parent['phone']); ?></div>
         <?php endif; ?>
         <div class="row g-3">
-          <div class="col-md-5">
-            <label class="form-label">Parent name <span class="adm-req">*</span></label>
-            <input name="parent_login_name" class="form-control" required value="<?php echo e($_POST['parent_login_name'] ?? $defaults['parent_login_name']); ?>" placeholder="Name as on Parent Portal">
+          <div class="col-md-6">
+            <label class="form-label">Parent name</label>
+            <input name="parent_login_name" class="form-control" value="<?php echo e($_POST['parent_login_name'] ?? $defaults['parent_login_name']); ?>" placeholder="Name as on Parent Portal">
           </div>
-          <div class="col-md-4">
-            <label class="form-label">Parent mobile (login) <span class="adm-req">*</span></label>
-            <input name="parent_login_phone" class="form-control" required inputmode="numeric" maxlength="15" pattern="[0-9]{10,15}" value="<?php echo e($_POST['parent_login_phone'] ?? parent_phone_last10((string)$defaults['parent_login_phone'])); ?>" placeholder="10-digit mobile">
-            <div class="form-text">This number is used for Parent Portal WhatsApp OTP. Siblings should use the same number.</div>
-          </div>
-          <div class="col-md-3">
+          <div class="col-md-6">
             <label class="form-label">Relation</label>
             <?php $rel = $_POST['parent_login_relation'] ?? $defaults['parent_login_relation']; ?>
             <select name="parent_login_relation" class="form-select">
@@ -545,6 +580,18 @@ require_once __DIR__ . '/../includes/header.php';
               <option value="mother" <?php if ($rel === 'mother') echo 'selected'; ?>>Mother</option>
               <option value="guardian" <?php if ($rel === 'guardian') echo 'selected'; ?>>Guardian</option>
             </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">SMS OTP mobile</label>
+            <input name="parent_login_phone" class="form-control" inputmode="numeric" maxlength="15" value="<?php echo e($_POST['parent_login_phone'] ?? parent_phone_last10((string)$defaults['parent_login_phone'])); ?>" placeholder="10-digit mobile">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">WhatsApp OTP</label>
+            <input name="parent_login_whatsapp" class="form-control" inputmode="numeric" maxlength="15" value="<?php echo e($_POST['parent_login_whatsapp'] ?? parent_phone_last10((string)$defaults['parent_login_whatsapp'])); ?>" placeholder="10-digit WhatsApp">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Email OTP</label>
+            <input type="email" name="parent_login_email" class="form-control" value="<?php echo e($_POST['parent_login_email'] ?? $defaults['parent_login_email']); ?>" placeholder="parent@email.com">
           </div>
         </div>
       </div>

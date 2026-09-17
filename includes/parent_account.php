@@ -53,16 +53,104 @@ function parent_find_by_last10(\PDO $pdo, string $last10, string $role = 'parent
     return $row ?: null;
 }
 
+function parent_normalize_email(string $raw): string
+{
+    $email = strtolower(trim($raw));
+    return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : '';
+}
+
+function parent_meta_with_email(?string $existingJson, string $email): ?string
+{
+    $email = parent_normalize_email($email);
+    if ($email === '') {
+        return $existingJson;
+    }
+    if (function_exists('staff_meta_with_email')) {
+        return staff_meta_with_email($existingJson, $email);
+    }
+    $meta = [];
+    if (is_string($existingJson) && $existingJson !== '') {
+        $decoded = json_decode($existingJson, true);
+        if (is_array($decoded)) {
+            $meta = $decoded;
+        }
+    }
+    $meta['email'] = $email;
+    return json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
+function parent_email_from_user_row(array $row): string
+{
+    if (function_exists('staff_user_email_from_meta')) {
+        $fromMeta = staff_user_email_from_meta($row['meta'] ?? null);
+        if ($fromMeta !== '') {
+            return $fromMeta;
+        }
+    }
+    return parent_normalize_email((string) ($row['email'] ?? ''));
+}
+
+/**
+ * First valid email on linked students (father, then mother, then guardian).
+ *
+ * @param list<int> $parentIds
+ * @return array<int,string>
+ */
+function parent_emails_from_students(array $parentIds): array
+{
+    $parentIds = array_values(array_unique(array_filter(array_map('intval', $parentIds))));
+    $out = [];
+    if ($parentIds === [] || !function_exists('table_exists') || !table_exists('students')) {
+        return $out;
+    }
+    $in = implode(',', $parentIds);
+    $rows = safe_db_get_all(
+        "SELECT parent_id, father_email, mother_email, guardian_email
+         FROM students
+         WHERE parent_id IN ($in)
+         ORDER BY id DESC"
+    ) ?: [];
+    foreach ($rows as $r) {
+        $pid = (int) ($r['parent_id'] ?? 0);
+        if ($pid <= 0 || isset($out[$pid])) {
+            continue;
+        }
+        foreach (['father_email', 'mother_email', 'guardian_email'] as $col) {
+            $email = parent_normalize_email((string) ($r[$col] ?? ''));
+            if ($email !== '') {
+                $out[$pid] = $email;
+                break;
+            }
+        }
+    }
+    return $out;
+}
+
+function parent_display_email(array $row, array $studentEmails = []): string
+{
+    $fromUser = parent_email_from_user_row($row);
+    if ($fromUser !== '') {
+        return $fromUser;
+    }
+    $id = (int) ($row['id'] ?? 0);
+    return $studentEmails[$id] ?? '';
+}
+
 /**
  * Find existing parent by mobile, or create one.
  *
- * @param array{name:string,phone:string,school_id?:int|null,whatsapp_id?:string} $data
+ * @param array{name:string,phone:string,school_id?:int|null,whatsapp_id?:string,email?:string} $data
  * @return array{id:int,created:bool,existing:bool}
  */
 function parent_find_or_create(\PDO $pdo, array $data): array
 {
     $name = trim((string) ($data['name'] ?? ''));
     $last10 = parent_phone_last10((string) ($data['phone'] ?? ''));
+    $wa = parent_phone_last10((string) ($data['whatsapp_id'] ?? ''));
+    $email = parent_normalize_email((string) ($data['email'] ?? ''));
+    if (strlen($last10) !== 10 && strlen($wa) === 10) {
+        $last10 = $wa;
+    }
     if (strlen($last10) !== 10) {
         throw new InvalidArgumentException('Enter a valid 10-digit parent mobile number.');
     }
@@ -71,6 +159,9 @@ function parent_find_or_create(\PDO $pdo, array $data): array
     }
 
     $variants = parent_phone_variants($last10);
+    if (strlen($wa) === 10) {
+        $variants = array_values(array_unique(array_merge($variants, parent_phone_variants($wa))));
+    }
     $ph = implode(',', array_fill(0, count($variants), '?'));
     $stmt = $pdo->prepare("SELECT id, name, role, is_active FROM users WHERE phone IN ($ph) OR whatsapp_id IN ($ph) ORDER BY id ASC LIMIT 1");
     $stmt->execute(array_merge($variants, $variants));
@@ -80,6 +171,9 @@ function parent_find_or_create(\PDO $pdo, array $data): array
     }
 
     $found = parent_find_by_last10($pdo, $last10, 'parent');
+    if (!$found && strlen($wa) === 10) {
+        $found = parent_find_by_last10($pdo, $wa, 'parent');
+    }
     if ($found) {
         $id = (int) $found['id'];
         $sets = [];
@@ -99,6 +193,14 @@ function parent_find_or_create(\PDO $pdo, array $data): array
             $sets[] = 'phone_last10 = :p10';
             $params[':p10'] = $last10;
         }
+        if (strlen($wa) === 10) {
+            $sets[] = 'whatsapp_id = :wa';
+            $params[':wa'] = '91' . $wa;
+        }
+        if ($email !== '') {
+            $sets[] = 'meta = :meta';
+            $params[':meta'] = parent_meta_with_email($found['meta'] ?? null, $email);
+        }
         if ($sets) {
             $pdo->prepare('UPDATE users SET ' . implode(', ', $sets) . ', updated_at = NOW() WHERE id = :id')->execute($params);
         }
@@ -112,8 +214,8 @@ function parent_find_or_create(\PDO $pdo, array $data): array
         $schoolId = 1;
     }
     $storePhone = $last10;
-    $wa = parent_phone_last10((string) ($data['whatsapp_id'] ?? ''));
     $waStore = strlen($wa) === 10 ? ('91' . $wa) : ('91' . $last10);
+    $metaJson = $email !== '' ? parent_meta_with_email(null, $email) : null;
 
     $hasLast10 = false;
     try {
@@ -125,22 +227,24 @@ function parent_find_or_create(\PDO $pdo, array $data): array
 
     if ($hasLast10) {
         $ins = $pdo->prepare("INSERT INTO users (school_id, name, phone, role, whatsapp_id, is_active, phone_last10, meta, created_at, updated_at)
-            VALUES (:school_id, :name, :phone, 'parent', :whatsapp, 1, :p10, NULL, NOW(), NOW())");
+            VALUES (:school_id, :name, :phone, 'parent', :whatsapp, 1, :p10, :meta, NOW(), NOW())");
         $ins->execute([
             ':school_id' => $schoolId,
             ':name' => $name,
             ':phone' => $storePhone,
             ':whatsapp' => $waStore,
             ':p10' => $last10,
+            ':meta' => $metaJson,
         ]);
     } else {
         $ins = $pdo->prepare("INSERT INTO users (school_id, name, phone, role, whatsapp_id, is_active, meta, created_at, updated_at)
-            VALUES (:school_id, :name, :phone, 'parent', :whatsapp, 1, NULL, NOW(), NOW())");
+            VALUES (:school_id, :name, :phone, 'parent', :whatsapp, 1, :meta, NOW(), NOW())");
         $ins->execute([
             ':school_id' => $schoolId,
             ':name' => $name,
             ':phone' => $storePhone,
             ':whatsapp' => $waStore,
+            ':meta' => $metaJson,
         ]);
     }
 

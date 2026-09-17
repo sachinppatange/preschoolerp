@@ -66,7 +66,9 @@ if ($action === 'export') {
     }
     $whereSql = 'WHERE ' . implode(' AND ', $where);
     $rows = safe_db_get_all("SELECT u.id, u.name, u.phone, u.whatsapp_id, u.is_active, u.meta, u.created_at FROM users u $whereSql ORDER BY u.name ASC", $params) ?: [];
-    $kids = staff_children_by_parent_ids(array_map(static fn($r) => (int) ($r['id'] ?? 0), $rows), $ay);
+    $exportIds = array_map(static fn($r) => (int) ($r['id'] ?? 0), $rows);
+    $kids = staff_children_by_parent_ids($exportIds, $ay);
+    $studentEmails = function_exists('parent_emails_from_students') ? parent_emails_from_students($exportIds) : [];
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename=parents_' . date('Ymd_His') . '.csv');
     $out = fopen('php://output', 'w');
@@ -79,7 +81,7 @@ if ($action === 'export') {
             $r['name'] ?? '',
             $r['phone'] ?? '',
             $r['whatsapp_id'] ?? '',
-            staff_user_email_from_meta($r['meta'] ?? null),
+            function_exists('parent_display_email') ? parent_display_email($r, $studentEmails) : staff_user_email_from_meta($r['meta'] ?? null),
             implode('; ', $labels),
             count($labels),
             !empty($r['is_active']) ? 'Yes' : 'No',
@@ -103,7 +105,9 @@ if ($action === 'view' && !empty($_GET['id'])) {
     echo '<dt class="col-sm-3">Name</dt><dd class="col-sm-9">' . e((string) $row['name']) . '</dd>';
     echo '<dt class="col-sm-3">Mobile</dt><dd class="col-sm-9">' . e((string) $row['phone']) . '</dd>';
     echo '<dt class="col-sm-3">WhatsApp</dt><dd class="col-sm-9">' . e((string) ($row['whatsapp_id'] ?? '')) . '</dd>';
-    echo '<dt class="col-sm-3">Email</dt><dd class="col-sm-9">' . e(staff_user_email_from_meta($row['meta'] ?? null) ?: '—') . '</dd>';
+    $viewEmails = function_exists('parent_emails_from_students') ? parent_emails_from_students([$id]) : [];
+    $viewEmail = function_exists('parent_display_email') ? parent_display_email($row, $viewEmails) : staff_user_email_from_meta($row['meta'] ?? null);
+    echo '<dt class="col-sm-3">Email</dt><dd class="col-sm-9">' . e($viewEmail !== '' ? $viewEmail : '—') . '</dd>';
     echo '<dt class="col-sm-3">Login</dt><dd class="col-sm-9">' . ((int) $row['is_active'] ? 'Active' : 'Inactive') . '</dd>';
     echo '<dt class="col-sm-3">Children</dt><dd class="col-sm-9">';
     $list = $kids[$id] ?? [];
@@ -201,7 +205,9 @@ try {
     $errors[] = $DEBUG ? $e->getMessage() : 'Could not load parents.';
 }
 
-$kids = staff_children_by_parent_ids(array_map(static fn($r) => (int) ($r['id'] ?? 0), $parents), $panelAy);
+$parentIdsOnPage = array_map(static fn($r) => (int) ($r['id'] ?? 0), $parents);
+$kids = staff_children_by_parent_ids($parentIdsOnPage, $panelAy);
+$studentEmails = function_exists('parent_emails_from_students') ? parent_emails_from_students($parentIdsOnPage) : [];
 $totalPages = (int) ceil(max(0, $total) / $perPage);
 $studentView = function_exists('site_url') ? site_url('/owner/students_view.php') : 'students_view.php';
 $admissionUrl = function_exists('site_url') ? site_url('/reception/admission.php') : '../reception/admission.php';
@@ -291,7 +297,7 @@ require_once __DIR__ . '/../includes/header.php';
               <div class="small text-muted"><?php echo $esc((string) $p['whatsapp_id']); ?></div>
             <?php endif; ?>
           </td>
-          <td><?php echo $esc(staff_user_email_from_meta($p['meta'] ?? null) ?: '—'); ?></td>
+          <td><?php echo $esc((function_exists('parent_display_email') ? parent_display_email($p, $studentEmails) : staff_user_email_from_meta($p['meta'] ?? null)) ?: '—'); ?></td>
           <td>
             <?php if ($clist === []): ?>
               <span class="text-muted">None linked</span>

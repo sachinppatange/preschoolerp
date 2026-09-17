@@ -68,7 +68,7 @@ if (!empty($_GET['added'])) {
     $messages[] = 'Staff user added after OTP verification.';
 }
 if (!empty($_GET['updated'])) {
-    $messages[] = 'User updated.';
+    $messages[] = 'User updated after OTP verification.';
 }
 
 /* OTP send / verify (AJAX) */
@@ -81,7 +81,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($action, ['staff_otp_send'
         $jsonOut(staff_send_add_otps(
             (string) ($_POST['phone'] ?? ''),
             (string) ($_POST['whatsapp_id'] ?? ''),
-            (string) ($_POST['email'] ?? '')
+            (string) ($_POST['email'] ?? ''),
+            (int) ($_POST['except_id'] ?? 0)
         ));
     }
     $jsonOut(staff_verify_add_otp(
@@ -120,12 +121,12 @@ if ($action === 'add' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Enter a valid email address.';
     }
     if ($role === '' || !isset($addRoles[$role])) {
-        $errors[] = 'Choose Accounts, Teacher, Reception, or Staff. Parents are added from New Admission.';
+        $errors[] = 'Choose Owner, Accounts, Teacher, Reception, or Staff. Parents are added from New Admission.';
     }
-    if ($errors === [] && !staff_add_otp_matches($phone10, $whatsapp10, $email)) {
+    if ($errors === [] && !staff_add_otp_matches($phone10, $whatsapp10, $email, 0)) {
         $errors[] = 'Verify mobile, WhatsApp, and email OTPs before adding this user.';
     }
-    $dup = $errors === [] ? staff_find_by_phone10($phone10) : null;
+    $dup = $errors === [] ? staff_find_by_phone10($phone10, 0) : null;
     if ($dup) {
         $errors[] = 'This mobile number is already in use.';
     }
@@ -204,13 +205,7 @@ if ($action === 'view' && !empty($_GET['id'])) {
     echo '<dt class="col-sm-3">Email</dt><dd class="col-sm-9">'.e(staff_user_email_from_meta($row['meta'] ?? null) ?: '—').'</dd>';
     echo '<dt class="col-sm-3">Role</dt><dd class="col-sm-9">'.e(ucfirst($row['role'] ?? '')).'</dd>';
     echo '<dt class="col-sm-3">Active</dt><dd class="col-sm-9">'.((int)$row['is_active'] ? 'Yes' : 'No').'</dd>';
-    $metaDisplay = '';
-    if (!empty($row['meta'])) {
-        $m = @json_decode($row['meta'], true);
-        if (json_last_error() === JSON_ERROR_NONE && is_array($m)) $metaDisplay = '<pre style="white-space:pre-wrap;">' . e(json_encode($m, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) . '</pre>';
-        else $metaDisplay = '<pre style="white-space:pre-wrap;">' . e($row['meta']) . '</pre>';
-    } else $metaDisplay = '—';
-    echo '<dt class="col-12">Meta</dt><dd class="col-12">' . $metaDisplay . '</dd>';
+    echo '<dt class="col-sm-3">Created</dt><dd class="col-sm-9">'.e((string)($row['created_at'] ?? '')).'</dd>';
     echo '</dl>';
     exit;
 }
@@ -236,13 +231,33 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($id <= 0) $errors[] = 'Invalid user id.';
     if ($name === '') $errors[] = 'Name is required.';
     if (strlen($phone10) !== 10) $errors[] = 'Enter a valid 10-digit mobile number.';
-    if ($role === '' || !isset($roles[$role])) $errors[] = 'Invalid role selected.';
-    if ($role === 'parent') $errors[] = 'Parent accounts are managed from admission, not from this page.';
-    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Enter a valid email address.';
+    if (strlen($whatsapp10) !== 10) $errors[] = 'Enter a valid 10-digit WhatsApp number.';
+    if ($role === '' || !isset($addRoles[$role])) $errors[] = 'Choose Owner, Accounts, Teacher, Reception, or Staff.';
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Enter a valid email address.';
 
-    $existing = $id > 0 ? safe_db_get_one('SELECT meta, role FROM users WHERE id = :id LIMIT 1', [':id' => $id]) : null;
-    if ($existing && strtolower((string) ($existing['role'] ?? '')) === 'parent' && $role !== 'parent') {
-        $errors[] = 'Do not change a parent login into a staff role here.';
+    $existing = $id > 0 ? safe_db_get_one('SELECT meta, role, is_active FROM users WHERE id = :id LIMIT 1', [':id' => $id]) : null;
+    if ($existing && strtolower((string) ($existing['role'] ?? '')) === 'parent') {
+        $errors[] = 'Parent accounts are managed from the Parents page.';
+    }
+    $selfId = staff_current_user_id();
+    if ($existing && strtolower((string) ($existing['role'] ?? '')) === 'owner' && $role !== 'owner' && staff_count_owners(true) <= 1) {
+        $errors[] = 'Cannot change the last owner to another role.';
+    }
+    if ($id === $selfId && $role !== 'owner') {
+        $errors[] = 'You cannot remove the owner role from your own login.';
+    }
+    if ($id === $selfId && $is_active === 0) {
+        $errors[] = 'You cannot deactivate your own login.';
+    }
+    if ($existing && strtolower((string) ($existing['role'] ?? '')) === 'owner' && $is_active === 0 && staff_count_owners(true) <= 1) {
+        $errors[] = 'Cannot deactivate the last owner.';
+    }
+    if ($errors === [] && !staff_add_otp_matches($phone10, $whatsapp10, $email, $id)) {
+        $errors[] = 'Verify mobile, WhatsApp, and email OTPs before saving.';
+    }
+    $dup = ($errors === [] && $id > 0) ? staff_find_by_phone10($phone10, $id) : null;
+    if ($dup) {
+        $errors[] = 'This mobile number is already in use.';
     }
 
     if (empty($errors)) {
@@ -265,6 +280,7 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $ok = safe_db_run($sql, $params);
             if ($ok) {
+                staff_add_otp_clear();
                 header('Location: ?updated=1'); exit;
             } else {
                 $errors[] = 'Failed to update user.';
@@ -280,11 +296,20 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($action === 'toggle' && !empty($_GET['id'])) {
     $id = (int)$_GET['id'];
     $set = isset($_GET['to']) && ($_GET['to'] === '1' || $_GET['to'] === '0') ? (int)$_GET['to'] : null;
-    if ($id > 0 && $set !== null) {
+    $row = $id > 0 ? safe_db_get_one('SELECT id, role FROM users WHERE id = :id LIMIT 1', [':id' => $id]) : null;
+    if ($id <= 0 || $set === null || !$row) {
+        $errors[] = 'Invalid parameters.';
+    } elseif (strtolower((string) ($row['role'] ?? '')) === 'parent') {
+        $errors[] = 'Change parent login from the Parents page.';
+    } elseif ($set === 0 && $id === staff_current_user_id()) {
+        $errors[] = 'You cannot deactivate your own login.';
+    } elseif ($set === 0 && strtolower((string) ($row['role'] ?? '')) === 'owner' && staff_count_owners(true) <= 1) {
+        $errors[] = 'Cannot deactivate the last owner.';
+    } else {
         $ok = safe_db_run("UPDATE users SET is_active = :a, updated_at = NOW() WHERE id = :id", [':a'=>$set, ':id'=>$id]);
         if ($ok) $messages[] = 'Status updated.';
         else $errors[] = 'Failed to update status.';
-    } else $errors[] = 'Invalid parameters.';
+    }
 }
 
 /* DELETE */
@@ -296,11 +321,14 @@ if (function_exists('secure_delete_blocked_get') && secure_delete_blocked_get($a
 $deleteId = function_exists('secure_delete_id') ? secure_delete_id() : 0;
 if ($deleteId > 0) {
     $id = $deleteId;
-    if ($id > 0) {
+    $block = staff_delete_block_reason($id);
+    if ($block !== null) {
+        $errors[] = $block;
+    } else {
         $ok = safe_db_run("DELETE FROM users WHERE id = :id", [':id'=>$id]);
         if ($ok) $messages[] = 'User deleted.';
         else $errors[] = 'Failed to delete user.';
-    } else $errors[] = 'Invalid id.';
+    }
 }
 
 /* EXPORT CSV */
@@ -394,6 +422,7 @@ function build_qs(array $over = []): string {
 
 /* Data for forms */
 $rolesList = $roles;
+$selfId = staff_current_user_id();
 
 /* Render header/footer if available */
 $pageTitle = 'Staff';
@@ -404,7 +433,7 @@ require_once __DIR__ . '/../includes/header.php';
 <?php staff_people_nav('staff'); ?>
 
 <div class="d-flex justify-content-end gap-2 mb-3">
-<button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addUserModal">Add staff</button>
+<button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addUserModal">Add staff / owner</button>
       <a class="btn btn-outline-secondary" href="?">Refresh</a>
     </div>
 
@@ -470,7 +499,7 @@ require_once __DIR__ . '/../includes/header.php';
               <td><?php echo (int)$u['is_active'] ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>'; ?></td>
               <td><?php echo $esc(substr($u['created_at'] ?? '',0,16)); ?></td>
               <td><?php echo $esc(substr($u['updated_at'] ?? '',0,16)); ?></td>
-              <td>
+              <td class="text-nowrap">
                 <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#viewUserModal" data-id="<?php echo (int)$u['id']; ?>">View</button>
                 <?php if (($u['role'] ?? '') !== 'parent'): ?>
                 <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#editUserModal" data-id="<?php echo (int)$u['id']; ?>">Edit</button>
@@ -480,7 +509,9 @@ require_once __DIR__ . '/../includes/header.php';
                 <?php else: ?>
                   <a class="btn btn-sm btn-outline-success" href="?action=toggle&id=<?php echo (int)$u['id']; ?>&to=1">Activate</a>
                 <?php endif; ?>
-                <?php echo render_secure_delete_button((int)$u['id'], 'Delete', 'Delete user?'); ?>
+                <?php if (staff_delete_block_reason((int)$u['id']) === null): ?>
+                  <?php echo render_secure_delete_button((int)$u['id'], 'Delete', 'Delete this user? This cannot be undone.'); ?>
+                <?php endif; ?>
               </td>
             </tr>
           <?php endforeach; else: ?>
@@ -510,11 +541,11 @@ require_once __DIR__ . '/../includes/header.php';
       <form method="post" action="?action=add" id="addStaffForm">
         <input type="hidden" name="csrf" value="<?php echo $esc($csrf); ?>">
         <div class="modal-header">
-          <h5 class="modal-title">Add staff</h5>
+          <h5 class="modal-title">Add staff / owner</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <p class="small text-muted mb-3">Add Accounts, Teacher, Reception, or Staff. Mobile, WhatsApp, and email must be verified by OTP first. Parent logins are created from New Admission.</p>
+          <p class="small text-muted mb-3">Add Owner, Accounts, Teacher, Reception, or Staff. Mobile, WhatsApp, and email must be verified by OTP. Parent logins are on the Parents page.</p>
           <div class="row g-2">
             <div class="col-md-6"><label class="form-label">Name *</label><input name="name" id="add_name" class="form-control" required></div>
             <div class="col-md-6">
@@ -584,31 +615,75 @@ require_once __DIR__ . '/../includes/header.php';
 <div class="modal fade" id="editUserModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
-      <form method="post" action="?action=edit" id="editUserForm">
+      <form method="post" action="?action=edit" id="editStaffForm">
         <input type="hidden" name="csrf" value="<?php echo $esc($csrf); ?>">
+        <input type="hidden" name="id" id="edit_id">
         <div class="modal-header">
-          <h5 class="modal-title">Edit user</h5>
+          <h5 class="modal-title">Edit staff / owner</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <input type="hidden" name="id" id="edit_id">
+          <p class="small text-muted mb-3">Same as Add: verify mobile, WhatsApp, and email with OTP before saving. Existing users can complete OTP now.</p>
           <div class="row g-2">
             <div class="col-md-6"><label class="form-label">Name *</label><input name="name" id="edit_name" class="form-control" required></div>
-            <div class="col-md-6"><label class="form-label">Mobile number *</label><input name="phone" id="edit_phone" class="form-control" required inputmode="numeric" maxlength="15"></div>
-            <div class="col-md-4">
-              <label class="form-label">Role</label>
-              <select name="role" id="edit_role" class="form-select">
-                <?php foreach ($rolesList as $rk=>$rv): if ($rk === 'parent') continue; ?>
-                  <option value="<?php echo $esc($rk); ?>"><?php echo $esc($rv); ?></option>
-                <?php endforeach; ?>
+            <div class="col-md-6">
+              <label class="form-label">Role *</label>
+              <select name="role" id="edit_role" class="form-select" required>
+                <?php foreach ($addRoles as $rk=>$rv): ?><option value="<?php echo $esc($rk); ?>"><?php echo $esc($rv); ?></option><?php endforeach; ?>
               </select>
             </div>
-            <div class="col-md-4"><label class="form-label">WhatsApp number</label><input name="whatsapp_id" id="edit_whatsapp" class="form-control" inputmode="numeric" maxlength="15"></div>
-            <div class="col-md-4"><label class="form-label">Active</label><div class="form-check mt-2"><input class="form-check-input" id="edit_active" name="is_active" type="checkbox"><label class="form-check-label" for="edit_active">Active</label></div></div>
-            <div class="col-12"><label class="form-label">Email ID</label><input type="email" name="email" id="edit_email" class="form-control"></div>
+            <div class="col-md-6"><label class="form-label">Mobile number *</label><input name="phone" id="edit_phone" class="form-control" required inputmode="numeric" maxlength="15" placeholder="10-digit mobile"></div>
+            <div class="col-md-6"><label class="form-label">Email ID *</label><input type="email" name="email" id="edit_email" class="form-control" required placeholder="name@example.com"></div>
+            <div class="col-md-6">
+              <label class="form-label">WhatsApp number *</label>
+              <input name="whatsapp_id" id="edit_whatsapp" class="form-control" inputmode="numeric" maxlength="15" placeholder="10-digit WhatsApp">
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+              <label class="form-check-label mb-2">
+                <input class="form-check-input me-2" type="checkbox" id="edit_wa_same" checked>
+                WhatsApp is the same as mobile
+              </label>
+            </div>
+            <div class="col-md-6"><label class="form-check-label"><input class="form-check-input me-2" type="checkbox" id="edit_active" name="is_active"> Active</label></div>
+          </div>
+          <div class="border rounded-3 p-3 mt-3 bg-light">
+            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+              <strong>OTP verification</strong>
+              <button type="button" class="btn btn-sm btn-outline-primary" id="btnSendEditOtp">Send OTPs</button>
+            </div>
+            <div id="editOtpMsg" class="small mb-2"></div>
+            <div class="row g-2">
+              <div class="col-md-4">
+                <label class="form-label">Mobile OTP (SMS)</label>
+                <div class="input-group">
+                  <input class="form-control" id="eotp_phone" maxlength="8" inputmode="numeric" autocomplete="one-time-code">
+                  <button type="button" class="btn btn-outline-secondary btn-verify-edit-otp" data-channel="phone">Verify</button>
+                </div>
+                <div class="small" id="eotp_phone_status"></div>
+              </div>
+              <div class="col-md-4" id="editOtpWaWrap">
+                <label class="form-label">WhatsApp OTP</label>
+                <div class="input-group">
+                  <input class="form-control" id="eotp_whatsapp" maxlength="8" inputmode="numeric">
+                  <button type="button" class="btn btn-outline-secondary btn-verify-edit-otp" data-channel="whatsapp">Verify</button>
+                </div>
+                <div class="small" id="eotp_whatsapp_status"></div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Email OTP</label>
+                <div class="input-group">
+                  <input class="form-control" id="eotp_email" maxlength="8" inputmode="numeric">
+                  <button type="button" class="btn btn-outline-secondary btn-verify-edit-otp" data-channel="email">Verify</button>
+                </div>
+                <div class="small" id="eotp_email_status"></div>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Cancel</button><button class="btn btn-primary" type="submit">Save changes</button></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Cancel</button>
+          <button class="btn btn-primary" type="submit" id="btnSaveEdit" disabled>Save after OTP verify</button>
+        </div>
       </form>
     </div>
   </div>
@@ -628,44 +703,11 @@ require_once __DIR__ . '/../includes/header.php';
 <script>
 document.addEventListener('DOMContentLoaded', function(){
   var csrf = <?php echo json_encode($csrf); ?>;
-  var verified = { phone: false, whatsapp: false, email: false };
 
   function last10(v) {
     var d = String(v || '').replace(/\D+/g, '');
     return d.length >= 10 ? d.slice(-10) : d;
   }
-  function waSame() {
-    return document.getElementById('add_wa_same').checked;
-  }
-  function syncWa() {
-    var phone = document.getElementById('add_phone');
-    var wa = document.getElementById('add_whatsapp');
-    var wrap = document.getElementById('otpWaWrap');
-    if (waSame()) {
-      wa.value = last10(phone.value);
-      wa.readOnly = true;
-      wrap.style.display = 'none';
-    } else {
-      wa.readOnly = false;
-      wrap.style.display = '';
-    }
-  }
-  function setStatus(id, ok, text) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    el.textContent = text || '';
-    el.className = 'small ' + (ok ? 'text-success' : 'text-danger');
-  }
-  function refreshAddBtn() {
-    var all = verified.phone && verified.whatsapp && verified.email;
-    document.getElementById('btnAddStaff').disabled = !all;
-  }
-  document.getElementById('add_wa_same').addEventListener('change', syncWa);
-  document.getElementById('add_phone').addEventListener('input', function () {
-    if (waSame()) document.getElementById('add_whatsapp').value = last10(this.value);
-  });
-  syncWa();
-
   function postOtp(action, extra) {
     var body = new URLSearchParams(Object.assign({ action: action, csrf: csrf }, extra || {}));
     return fetch('staff_manage.php', {
@@ -675,82 +717,152 @@ document.addEventListener('DOMContentLoaded', function(){
       body: body.toString()
     }).then(function (r) { return r.json(); });
   }
-
-  document.getElementById('btnSendStaffOtp').addEventListener('click', function () {
-    var msg = document.getElementById('staffOtpMsg');
-    msg.className = 'small mb-2 text-muted';
-    msg.textContent = 'Sending OTPs…';
-    verified = { phone: false, whatsapp: false, email: false };
-    refreshAddBtn();
-    setStatus('otp_phone_status', false, '');
-    setStatus('otp_whatsapp_status', false, '');
-    setStatus('otp_email_status', false, '');
-    postOtp('staff_otp_send', {
-      phone: document.getElementById('add_phone').value,
-      whatsapp_id: waSame() ? document.getElementById('add_phone').value : document.getElementById('add_whatsapp').value,
-      email: document.getElementById('add_email').value
-    }).then(function (json) {
-      if (json && json.ok) {
-        msg.className = 'small mb-2 text-success';
-        msg.textContent = json.info || 'OTPs sent.';
-        if (json.same_phone) {
-          verified.whatsapp = false;
-        }
+  function bindOtpPanel(opt) {
+    var verified = { phone: false, whatsapp: false, email: false };
+    function setStatus(id, ok, text) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = text || '';
+      el.className = 'small ' + (ok ? 'text-success' : 'text-danger');
+    }
+    function refresh() {
+      var all = verified.phone && verified.whatsapp && verified.email;
+      var btn = document.getElementById(opt.saveBtn);
+      if (btn) btn.disabled = !all;
+    }
+    function waSame() {
+      return document.getElementById(opt.sameChk).checked;
+    }
+    function syncWa() {
+      var phone = document.getElementById(opt.phone);
+      var wa = document.getElementById(opt.whatsapp);
+      var wrap = document.getElementById(opt.waWrap);
+      if (!phone || !wa) return;
+      if (waSame()) {
+        wa.value = last10(phone.value);
+        wa.readOnly = true;
+        if (wrap) wrap.style.display = 'none';
       } else {
-        msg.className = 'small mb-2 text-danger';
-        msg.textContent = (json && json.error) ? json.error : 'Failed to send OTPs.';
+        wa.readOnly = false;
+        if (wrap) wrap.style.display = '';
       }
-    }).catch(function () {
-      msg.className = 'small mb-2 text-danger';
-      msg.textContent = 'Failed to send OTPs.';
+    }
+    document.getElementById(opt.sameChk).addEventListener('change', syncWa);
+    document.getElementById(opt.phone).addEventListener('input', function () {
+      if (waSame()) document.getElementById(opt.whatsapp).value = last10(this.value);
     });
-  });
-
-  document.querySelectorAll('.btn-verify-otp').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var channel = btn.getAttribute('data-channel');
-      var input = document.getElementById('otp_' + channel);
-      postOtp('staff_otp_verify', { channel: channel, otp: input ? input.value : '' }).then(function (json) {
+    syncWa();
+    document.getElementById(opt.sendBtn).addEventListener('click', function () {
+      var msg = document.getElementById(opt.msg);
+      msg.className = 'small mb-2 text-muted';
+      msg.textContent = 'Sending OTPs…';
+      verified = { phone: false, whatsapp: false, email: false };
+      refresh();
+      setStatus(opt.stPhone, false, '');
+      setStatus(opt.stWa, false, '');
+      setStatus(opt.stEmail, false, '');
+      postOtp('staff_otp_send', {
+        phone: document.getElementById(opt.phone).value,
+        whatsapp_id: waSame() ? document.getElementById(opt.phone).value : document.getElementById(opt.whatsapp).value,
+        email: document.getElementById(opt.email).value,
+        except_id: opt.exceptId ? String(document.getElementById(opt.exceptId).value || '0') : '0'
+      }).then(function (json) {
         if (json && json.ok) {
-          verified.phone = !!json.phone_ok;
-          verified.whatsapp = !!json.wa_ok;
-          verified.email = !!json.email_ok;
-          setStatus('otp_' + channel + '_status', true, 'Verified');
-          if (channel === 'phone' && json.wa_ok) {
-            setStatus('otp_whatsapp_status', true, 'Verified with mobile');
-          }
-          refreshAddBtn();
+          msg.className = 'small mb-2 text-success';
+          msg.textContent = json.info || 'OTPs sent.';
         } else {
-          setStatus('otp_' + channel + '_status', false, (json && json.error) ? json.error : 'Failed');
+          msg.className = 'small mb-2 text-danger';
+          msg.textContent = (json && json.error) ? json.error : 'Failed to send OTPs.';
         }
+      }).catch(function () {
+        msg.className = 'small mb-2 text-danger';
+        msg.textContent = 'Failed to send OTPs.';
       });
     });
+    document.querySelectorAll(opt.verifyBtn).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var channel = btn.getAttribute('data-channel');
+        var input = document.getElementById(opt.otpPrefix + channel);
+        postOtp('staff_otp_verify', { channel: channel, otp: input ? input.value : '' }).then(function (json) {
+          if (json && json.ok) {
+            verified.phone = !!json.phone_ok;
+            verified.whatsapp = !!json.wa_ok;
+            verified.email = !!json.email_ok;
+            setStatus(opt.otpPrefix + channel + '_status', true, 'Verified');
+            if (channel === 'phone' && json.wa_ok) {
+              setStatus(opt.stWa, true, 'Verified with mobile');
+            }
+            refresh();
+          } else {
+            setStatus(opt.otpPrefix + channel + '_status', false, (json && json.error) ? json.error : 'Failed');
+          }
+        });
+      });
+    });
+    document.getElementById(opt.form).addEventListener('submit', function (ev) {
+      if (waSame()) {
+        document.getElementById(opt.whatsapp).value = last10(document.getElementById(opt.phone).value);
+        document.getElementById(opt.whatsapp).readOnly = false;
+      }
+      if (!(verified.phone && verified.whatsapp && verified.email)) {
+        ev.preventDefault();
+        alert('Verify mobile, WhatsApp, and email OTPs first.');
+      }
+    });
+    return { reset: function () { verified = { phone: false, whatsapp: false, email: false }; refresh(); syncWa(); } };
+  }
+
+  bindOtpPanel({
+    form: 'addStaffForm',
+    phone: 'add_phone',
+    whatsapp: 'add_whatsapp',
+    email: 'add_email',
+    sameChk: 'add_wa_same',
+    waWrap: 'otpWaWrap',
+    sendBtn: 'btnSendStaffOtp',
+    msg: 'staffOtpMsg',
+    saveBtn: 'btnAddStaff',
+    verifyBtn: '.btn-verify-otp',
+    otpPrefix: 'otp_',
+    stPhone: 'otp_phone_status',
+    stWa: 'otp_whatsapp_status',
+    stEmail: 'otp_email_status',
+    exceptId: null
   });
 
-  document.getElementById('addStaffForm').addEventListener('submit', function (ev) {
-    if (waSame()) {
-      document.getElementById('add_whatsapp').value = last10(document.getElementById('add_phone').value);
-      document.getElementById('add_whatsapp').readOnly = false;
-    }
-    if (!(verified.phone && verified.whatsapp && verified.email)) {
-      ev.preventDefault();
-      alert('Verify mobile, WhatsApp, and email OTPs before adding.');
-    }
+  var editOtp = bindOtpPanel({
+    form: 'editStaffForm',
+    phone: 'edit_phone',
+    whatsapp: 'edit_whatsapp',
+    email: 'edit_email',
+    sameChk: 'edit_wa_same',
+    waWrap: 'editOtpWaWrap',
+    sendBtn: 'btnSendEditOtp',
+    msg: 'editOtpMsg',
+    saveBtn: 'btnSaveEdit',
+    verifyBtn: '.btn-verify-edit-otp',
+    otpPrefix: 'eotp_',
+    stPhone: 'eotp_phone_status',
+    stWa: 'eotp_whatsapp_status',
+    stEmail: 'eotp_email_status',
+    exceptId: 'edit_id'
   });
 
   var editModal = document.getElementById('editUserModal');
   if (editModal) {
     editModal.addEventListener('show.bs.modal', function(event){
-      var id = event.relatedTarget.getAttribute('data-id');
-      ['edit_id','edit_name','edit_phone','edit_role','edit_whatsapp','edit_email'].forEach(function(idn){ var el = document.getElementById(idn); if (el) el.value = ''; });
+      var id = event.relatedTarget && event.relatedTarget.getAttribute('data-id');
+      ['edit_id','edit_name','edit_phone','edit_role','edit_whatsapp','edit_email','eotp_phone','eotp_whatsapp','eotp_email'].forEach(function(idn){ var el = document.getElementById(idn); if (el) el.value = ''; });
       document.getElementById('edit_active').checked = false;
+      document.getElementById('editOtpMsg').textContent = '';
+      editOtp.reset();
       fetch('?action=get&id=' + encodeURIComponent(id), { credentials:'same-origin' })
         .then(function(resp){ return resp.ok ? resp.json() : Promise.reject(); })
         .then(function(json){
           if (json && json.ok && json.data) {
             var d = json.data;
             if (d.role === 'parent') {
-              alert('Parent accounts are managed from admission. They cannot be edited here.');
+              alert('Parent accounts are managed on the Parents page.');
               var mdl = bootstrap.Modal.getInstance(editModal);
               if (mdl) mdl.hide();
               return;
@@ -762,6 +874,8 @@ document.addEventListener('DOMContentLoaded', function(){
             document.getElementById('edit_whatsapp').value = last10(d.whatsapp_id || '');
             document.getElementById('edit_email').value = d.email || '';
             document.getElementById('edit_active').checked = (parseInt(d.is_active) === 1);
+            document.getElementById('edit_wa_same').checked = last10(d.phone || '') === last10(d.whatsapp_id || '') || !d.whatsapp_id;
+            editOtp.reset();
           } else {
             alert(json.error || 'Failed to load user for edit.');
             var mdl = bootstrap.Modal.getInstance(editModal);
