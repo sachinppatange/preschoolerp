@@ -185,41 +185,73 @@ function otp_user_email(array $user): string
 function otp_http_json(string $url, array $headers, $body, int $timeout = 20): array
 {
     $json = is_string($body) ? $body : json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    $headerLines = array_merge(['Content-Type: application/json', 'Accept: application/json'], $headers);
-    $headerLines[] = 'Content-Length: ' . strlen((string) $json);
-    $opts = [
-        'http' => [
-            'method' => 'POST',
-            'header' => implode("\r\n", $headerLines),
-            'content' => $json,
-            'timeout' => $timeout,
-            'ignore_errors' => true,
-        ],
-        'ssl' => [
-            'verify_peer' => true,
-            'verify_peer_name' => true,
-        ],
-    ];
-    $context = stream_context_create($opts);
-    $resp = @file_get_contents($url, false, $context);
+    if (!is_string($json) || $json === '') {
+        return ['ok' => false, 'http' => 0, 'resp' => null, 'error' => 'Failed to encode JSON body', 'raw' => null];
+    }
+
+    $headerLines = array_merge(['Accept: application/json', 'Content-Type: application/json'], $headers);
+    $resp = false;
     $httpCode = 0;
-    if (isset($http_response_header) && is_array($http_response_header)) {
-        foreach ($http_response_header as $hdr) {
-            if (preg_match('#HTTP/\d+\.\d+\s+(\d{3})#', $hdr, $m)) {
-                $httpCode = (int) $m[1];
-                break;
+    $error = null;
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $json,
+            CURLOPT_HTTPHEADER => $headerLines,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => false,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => 12,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_USERAGENT => 'apppreschool-otp/1.0',
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+        ]);
+        $resp = curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr = (string) curl_error($ch);
+        curl_close($ch);
+        if ($resp === false) {
+            $error = $curlErr !== '' ? ('cURL: ' . $curlErr) : 'HTTP request failed or timed out';
+            $resp = '';
+        }
+    } else {
+        $headerLines[] = 'Content-Length: ' . strlen($json);
+        $opts = [
+            'http' => [
+                'method' => 'POST',
+                'header' => implode("\r\n", $headerLines),
+                'content' => $json,
+                'timeout' => $timeout,
+                'ignore_errors' => true,
+            ],
+            'ssl' => [
+                'verify_peer' => true,
+                'verify_peer_name' => true,
+            ],
+        ];
+        $context = stream_context_create($opts);
+        $resp = @file_get_contents($url, false, $context);
+        if (isset($http_response_header) && is_array($http_response_header)) {
+            foreach ($http_response_header as $hdr) {
+                if (preg_match('#HTTP/\d+\.\d+\s+(\d{3})#', $hdr, $m)) {
+                    $httpCode = (int) $m[1];
+                    break;
+                }
             }
         }
-    }
-    $decoded = null;
-    $error = null;
-    if ($resp === false) {
-        $error = 'HTTP request failed or timed out';
-    } else {
-        $decoded = json_decode($resp, true);
-        if ($decoded === null) {
-            $decoded = $resp;
+        if ($resp === false) {
+            $error = 'HTTP request failed or timed out';
+            $resp = '';
         }
+    }
+
+    $decoded = null;
+    if (is_string($resp) && $resp !== '') {
+        $try = json_decode($resp, true);
+        $decoded = is_array($try) ? $try : $resp;
     }
     $ok = $httpCode >= 200 && $httpCode < 300;
     return [
@@ -227,8 +259,53 @@ function otp_http_json(string $url, array $headers, $body, int $timeout = 20): a
         'http' => $httpCode,
         'resp' => $decoded,
         'error' => $error,
-        'raw' => $resp,
+        'raw' => is_string($resp) ? $resp : null,
     ];
+}
+
+function otp_zeptomail_error_text(array $res): string
+{
+    $resp = $res['resp'] ?? null;
+    $parts = [];
+    if (is_array($resp)) {
+        $err = isset($resp['error']) && is_array($resp['error']) ? $resp['error'] : $resp;
+        foreach (['code', 'message'] as $k) {
+            if (!empty($err[$k]) && is_string($err[$k])) {
+                $parts[] = $err[$k];
+            }
+        }
+        if (!empty($err['details']) && is_array($err['details'])) {
+            foreach ($err['details'] as $d) {
+                if (!is_array($d)) {
+                    continue;
+                }
+                $line = trim((string) ($d['code'] ?? '') . ' ' . (string) ($d['message'] ?? '') . ' ' . (string) ($d['target'] ?? ''));
+                if ($line !== '') {
+                    $parts[] = $line;
+                }
+            }
+        }
+        if (isset($resp['data']) && is_array($resp['data']) && !empty($resp['data']['error_code'])) {
+            $parts[] = trim((string) $resp['data']['error_code'] . ' ' . (string) ($resp['data']['message'] ?? ''));
+        }
+    }
+    $parts = array_values(array_unique(array_filter($parts)));
+    if ($parts !== []) {
+        return implode(' | ', $parts);
+    }
+    $sum = otp_summarize_resp($resp);
+    if ($sum !== '') {
+        return $sum;
+    }
+    $raw = trim((string) ($res['raw'] ?? ''));
+    if ($raw !== '') {
+        return strlen($raw) > 280 ? substr($raw, 0, 277) . '...' : $raw;
+    }
+    if (!empty($res['error'])) {
+        return (string) $res['error'];
+    }
+    $http = (int) ($res['http'] ?? 0);
+    return $http > 0 ? ('HTTP ' . $http . ' empty response from ZeptoMail') : 'No response from ZeptoMail';
 }
 
 function otp_summarize_resp($resp): string
@@ -478,54 +555,126 @@ function otp_zeptomail_url(string $dc): string
     return $map[$k] ?? $map['in'];
 }
 
+function otp_zeptomail_token(string $token): string
+{
+    $token = trim($token);
+    $token = preg_replace('/^Zoho-enczapikey\s+/i', '', $token) ?? $token;
+    return trim($token);
+}
+
+function otp_zeptomail_bounce(?string $bounce, string $from): string
+{
+    $bounce = strtolower(trim((string) $bounce));
+    $from = strtolower(trim($from));
+    if ($bounce === '' || !filter_var($bounce, FILTER_VALIDATE_EMAIL)) {
+        return '';
+    }
+    // Same as From is not a ZeptoMail bounce mailbox (causes SM_111 / empty HTTP 500).
+    if ($bounce === $from) {
+        return '';
+    }
+    $local = (string) strstr($bounce, '@', true);
+    $host = (string) substr(strstr($bounce, '@') ?: '', 1);
+    if ($local === 'bounce' || str_starts_with($host, 'bounce.')) {
+        return $bounce;
+    }
+    return '';
+}
+
 function otp_send_email(string $toEmail, string $otp, ?array $cfg = null): array
 {
     $cfg = $cfg ?? otp_settings_load();
     $em = is_array($cfg['email'] ?? null) ? $cfg['email'] : [];
     $toEmail = trim($toEmail);
-    $token = trim((string) ($em['send_mail_token'] ?? ''));
+    $token = otp_zeptomail_token((string) ($em['send_mail_token'] ?? ''));
     $from = trim((string) ($em['from_email'] ?? ''));
     if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
         $msg = 'Email skipped: no valid recipient address.';
         otp_log_send('email', false, $toEmail, $msg, 0);
         return ['ok' => false, 'http' => 0, 'resp' => null, 'error' => $msg, 'channel' => 'email', 'message' => $msg];
     }
-    if ($token === '' || $from === '') {
-        $msg = 'Email skipped: ZeptoMail token or from address is missing.';
+    if ($token === '' || $from === '' || !filter_var($from, FILTER_VALIDATE_EMAIL)) {
+        $msg = 'Email skipped: ZeptoMail token or verified from address is missing.';
         otp_log_send('email', false, $toEmail, $msg, 0);
         return ['ok' => false, 'http' => 0, 'resp' => null, 'error' => $msg, 'channel' => 'email', 'message' => $msg];
     }
     $minutes = (string) otp_validity_minutes($cfg);
     $html = (string) ($em['html'] ?? '');
-    $html = str_replace(['{otp}', '{minutes}'], [htmlspecialchars($otp, ENT_QUOTES, 'UTF-8'), htmlspecialchars($minutes, ENT_QUOTES, 'UTF-8')], $html);
-    $subject = str_replace(['{otp}', '{minutes}'], [$otp, $minutes], (string) ($em['subject'] ?? 'Your login OTP'));
-    $fromName = trim((string) ($em['from_name'] ?? ''));
-    $payload = [
-        'from' => ['address' => $from, 'name' => $fromName],
-        'to' => [['email_address' => ['address' => $toEmail, 'name' => '']]],
-        'subject' => $subject,
-        'htmlbody' => $html,
-    ];
-    $reply = trim((string) ($em['reply_to'] ?? ''));
-    if ($reply !== '') {
-        $payload['reply_to'] = [['address' => $reply, 'name' => $fromName]];
+    if (function_exists('mb_check_encoding') && !mb_check_encoding($html, 'UTF-8')) {
+        $html = (string) mb_convert_encoding($html, 'UTF-8', 'UTF-8');
     }
-    $bounce = trim((string) ($em['bounce_email'] ?? ''));
+    $html = str_replace(['{otp}', '{minutes}'], [htmlspecialchars($otp, ENT_QUOTES, 'UTF-8'), htmlspecialchars($minutes, ENT_QUOTES, 'UTF-8')], $html);
+    $subject = trim(str_replace(['{otp}', '{minutes}'], [$otp, $minutes], (string) ($em['subject'] ?? 'Your login OTP')));
+    if ($subject === '') {
+        $subject = 'Your login OTP';
+    }
+    $fromName = trim((string) ($em['from_name'] ?? ''));
+    $text = 'Your login OTP is ' . $otp . '. Valid for ' . $minutes . ' minutes. Do not share it.';
+    $fromObj = ['address' => $from];
+    if ($fromName !== '') {
+        $fromObj['name'] = $fromName;
+    }
+    $payload = [
+        'from' => $fromObj,
+        'to' => [['email_address' => ['address' => $toEmail]]],
+        'subject' => $subject,
+    ];
+    if (trim(strip_tags($html)) !== '') {
+        $payload['htmlbody'] = $html;
+    } else {
+        $payload['textbody'] = $text;
+    }
+    $reply = trim((string) ($em['reply_to'] ?? ''));
+    if ($reply !== '' && filter_var($reply, FILTER_VALIDATE_EMAIL) && strcasecmp($reply, $from) !== 0) {
+        $replyObj = ['address' => $reply];
+        if ($fromName !== '') {
+            $replyObj['name'] = $fromName;
+        }
+        $payload['reply_to'] = [$replyObj];
+    }
+    $bounce = otp_zeptomail_bounce((string) ($em['bounce_email'] ?? ''), $from);
     if ($bounce !== '') {
         $payload['bounce_address'] = $bounce;
     }
+
     $url = otp_zeptomail_url((string) ($em['data_center'] ?? 'in'));
-    $res = otp_http_json($url, ['Authorization: Zoho-enczapikey ' . $token], $payload);
+    $headers = ['Authorization: Zoho-enczapikey ' . $token];
+    $res = otp_http_json($url, $headers, $payload);
+
+    if (empty($res['ok']) && (isset($payload['bounce_address']) || isset($payload['reply_to']))) {
+        unset($payload['bounce_address'], $payload['reply_to']);
+        $retry = otp_http_json($url, $headers, $payload);
+        if (!empty($retry['ok']) || ((int) ($retry['http'] ?? 0) > 0 && (int) ($retry['http'] ?? 0) !== 500)) {
+            $res = $retry;
+        }
+    }
+
+    if (empty($res['ok']) && isset($payload['htmlbody'])) {
+        unset($payload['htmlbody']);
+        $payload['textbody'] = $text;
+        $retry = otp_http_json($url, $headers, $payload);
+        if (!empty($retry['ok']) || otp_zeptomail_error_text($retry) !== otp_zeptomail_error_text($res)) {
+            $res = $retry;
+        }
+    }
+
     $ok = !empty($res['ok']);
+    if ($ok && is_array($res['resp'] ?? null)) {
+        $errCode = (string) (($res['resp']['error']['code'] ?? '') ?: ($res['resp']['data']['error_code'] ?? ''));
+        if ($errCode !== '' && strncasecmp($errCode, 'EM_', 3) !== 0) {
+            $ok = false;
+        }
+    }
+    $detail = otp_zeptomail_error_text($res);
     $msg = $ok
         ? ('OTP email sent via ZeptoMail ' . otp_summarize_resp($res['resp']))
-        : ('Email failed: ' . ($res['error'] ?? otp_summarize_resp($res['resp'])));
+        : ('Email failed: ' . $detail);
     otp_log_send('email', $ok, $toEmail, $msg, (int) ($res['http'] ?? 0));
     return [
         'ok' => $ok,
         'http' => (int) ($res['http'] ?? 0),
         'resp' => $res['resp'] ?? null,
-        'error' => $ok ? null : (string) ($res['error'] ?? $msg),
+        'error' => $ok ? null : $detail,
         'channel' => 'email',
         'message' => $msg,
     ];

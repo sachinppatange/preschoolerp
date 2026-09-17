@@ -291,7 +291,7 @@ require_once __DIR__ . '/../includes/header.php';
     <div class="col-md-6">
       <label class="form-label fw-semibold">Bounce address</label>
       <input type="email" class="form-control" name="email_bounce" value="<?php echo e((string) $em['bounce_email']); ?>">
-      <div class="otp-hint">Bounce / return-path from the Agent. Can be left blank.</div>
+      <div class="otp-hint">Use the Agent bounce mailbox only (example: bounce@bounce.yourdomain.com). Do not use the From address — that causes ZeptoMail SM_111 / HTTP 500. Leave blank if unsure.</div>
     </div>
     <div class="col-md-6">
       <label class="form-label fw-semibold">Reply-to email</label>
