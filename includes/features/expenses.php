@@ -1,31 +1,49 @@
 <?php
 /**
- * Shared feature: expenses
- * Loaded via feature_run() after panel_bootstrap().
+ * School expenses — add, list, edit, delete. Preschool categories.
  */
 declare(strict_types=1);
 
 $cfg = $GLOBALS['FEATURE_CONFIG'] ?? [];
-$panel = (string)($cfg['panel'] ?? 'owner');
-$pageTitle = (string)($cfg['page_title'] ?? 'Expenses');
-$createdByUserId = (int)(auth_user_id() ?? 0);
+$panel = (string) ($cfg['panel'] ?? 'owner');
+$page_title = (string) ($cfg['page_title'] ?? 'Expenses');
+$pageTitle = $page_title;
+$createdByUserId = (int) (auth_user_id() ?? 0);
 
-/* Provide harmless stub for static analyzers if project doesn't define db_connect() */
-if (!function_exists('db_connect')) {
-    function db_connect() { return null; }
+$selfPath = $panel === 'accounts' ? '/accounts/expenses.php' : '/owner/expense.php';
+$selfUrl = function_exists('site_url') ? site_url($selfPath) : $selfPath;
+
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
 }
+$CSRF = function_exists('get_csrf_token') ? get_csrf_token() : (string) $_SESSION['csrf_token'];
 
-/* Simple authentication guard (replace with your app's auth) */
-/* Debug flag: define DEV_SHOW_ERRORS = true in includes/config.php to surface exceptions in JSON responses */
+$categories = [
+    'Rent' => 'Rent / premises',
+    'Salary' => 'Staff salary',
+    'Electricity' => 'Electricity',
+    'Water' => 'Water',
+    'Housekeeping' => 'Housekeeping / cleaning',
+    'Food' => 'Food / snacks / milk',
+    'Learning' => 'Toys & learning material',
+    'Stationery' => 'Stationery / printing',
+    'Events' => 'Events / celebrations',
+    'Transport' => 'Transport',
+    'Maintenance' => 'Maintenance / repairs',
+    'Internet' => 'Internet / phone',
+    'Medical' => 'Medical / first aid',
+    'Uniforms' => 'Uniforms / ID cards',
+    'Marketing' => 'Marketing',
+    'Licence' => 'Licence / government fees',
+    'Other' => 'Other',
+];
+$payMethods = ['Cash', 'UPI', 'Online', 'Cheque', 'Bank'];
 
-/* ---------------------------
-   Ensure expenses table exists (best-effort)
-   --------------------------- */
 try {
     $pdo = pdo_connect();
-    if ($pdo instanceof PDO && !table_exists('expenses')) {
-        $pdo->exec("
-            CREATE TABLE IF NOT EXISTS expenses (
+    if ($pdo instanceof PDO && function_exists('table_exists') && !table_exists('expenses')) {
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS expenses (
               id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
               title VARCHAR(255) NOT NULL,
               amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -37,441 +55,341 @@ try {
               updated_at DATETIME NULL,
               created_by INT NULL,
               INDEX (expense_date),
-              INDEX (category),
-              INDEX (created_by)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-        ");
+              INDEX (category)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
     }
 } catch (Throwable $e) {
-    if ($DEBUG) error_log('Could not ensure expenses table: ' . $e->getMessage());
+    // table may already exist
 }
 
-/* ---------------------------
-   CSRF token
-   --------------------------- */
-if (empty($_SESSION['csrf_token'])) $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
-$CSRF = $_SESSION['csrf_token'];
+$yearLocked = function_exists('ay_can_edit') && !ay_can_edit();
 
-/* ---------------------------
-   Routing
-   --------------------------- */
-$action = $_REQUEST['action'] ?? 'list';
-$messages = []; $errors = [];
-
-/* Helper send JSON and exit */
-function json_exit($data) {
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($data);
-    exit;
+$messages = [];
+$errors = [];
+if (!empty($_SESSION['ex_ok'])) {
+    $messages[] = (string) $_SESSION['ex_ok'];
+    unset($_SESSION['ex_ok']);
+}
+if (!empty($_SESSION['ex_err'])) {
+    $errors[] = (string) $_SESSION['ex_err'];
+    unset($_SESSION['ex_err']);
 }
 
-/* ---------------------------
-   GET: JSON for edit modal
-   --------------------------- */
-if ($action === 'get' && !empty($_GET['id'])) {
-    $id = (int) $_GET['id'];
-    if ($id <= 0) json_exit(['ok'=>false,'error'=>'Invalid id']);
-    $row = safe_db_get_one("SELECT * FROM expenses WHERE id = :id LIMIT 1", [':id'=>$id]);
-    if (!$row) json_exit(['ok'=>false,'error'=>'Not found']);
-    json_exit(['ok'=>true,'data'=>$row]);
-}
+$csrfOk = static function (string $token) use ($CSRF): bool {
+    if (function_exists('validate_csrf_token') && validate_csrf_token($token)) {
+        return true;
+    }
+    return hash_equals((string) ($_SESSION['csrf_token'] ?? ''), $token);
+};
 
-/* ---------------------------
-   GET: view fragment
-   --------------------------- */
-if ($action === 'view' && !empty($_GET['id'])) {
-    $id = (int) $_GET['id'];
-    if ($id <= 0) { echo '<div class="text-danger p-3">Invalid id</div>'; exit; }
-    $r = safe_db_get_one("SELECT * FROM expenses WHERE id = :id LIMIT 1", [':id'=>$id]);
-    if (!$r) { echo '<div class="text-muted p-3">Expense not found</div>'; exit; }
+$action = (string) ($_REQUEST['action'] ?? 'list');
 
-    echo '<div class="p-3"><dl class="row">';
-    echo '<dt class="col-sm-3">ID</dt><dd class="col-sm-9">'.(int)$r['id'].'</dd>';
-    echo '<dt class="col-sm-3">Title</dt><dd class="col-sm-9">'.e($r['title']).'</dd>';
-    echo '<dt class="col-sm-3">Amount</dt><dd class="col-sm-9">'.e(number_format((float)$r['amount'],2)).'</dd>';
-    echo '<dt class="col-sm-3">Category</dt><dd class="col-sm-9">'.e($r['category'] ?? '—').'</dd>';
-    echo '<dt class="col-sm-3">Expense Date</dt><dd class="col-sm-9">'.e($r['expense_date']).'</dd>';
-    echo '<dt class="col-sm-3">Payment Method</dt><dd class="col-sm-9">'.e($r['payment_method'] ?? '—').'</dd>';
-    echo '<dt class="col-sm-3">Created At</dt><dd class="col-sm-9">'.e($r['created_at'] ?? '').'</dd>';
-    echo '<dt class="col-sm-3">Updated At</dt><dd class="col-sm-9">'.e($r['updated_at'] ?? '—').'</dd>';
-    echo '<dt class="col-sm-3">Notes</dt><dd class="col-sm-9"><pre style="white-space:pre-wrap;">'.e($r['notes'] ?? '').'</pre></dd>';
-    echo '</dl></div>';
-    exit;
-}
-
-/* ---------------------------
-   POST: save (add or update) - AJAX-friendly
-   --------------------------- */
-if ($action === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $isAjax = (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') ||
-              (strpos($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json') !== false);
-
-    $token = $_POST['csrf_token'] ?? '';
-    if (!hash_equals($_SESSION['csrf_token'] ?? '', $token)) {
-        if ($isAjax) json_exit(['ok'=>false,'error'=>'Invalid CSRF token']);
-        $errors[] = 'Invalid CSRF token';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($action, ['save', 'delete'], true)) {
+    if (!$csrfOk((string) ($_POST['csrf_token'] ?? ''))) {
+        $_SESSION['ex_err'] = 'Please reload the page and try again.';
+        header('Location: ?');
+        exit;
+    }
+    if ($yearLocked) {
+        $_SESSION['ex_err'] = 'This academic year is locked.';
+        header('Location: ?');
+        exit;
+    }
+    if ($action === 'delete') {
+        $id = (int) ($_POST['id'] ?? 0);
+        $ok = $id > 0 && safe_db_run('DELETE FROM expenses WHERE id = :id', [':id' => $id]);
+        $_SESSION[$ok ? 'ex_ok' : 'ex_err'] = $ok ? 'Expense deleted.' : 'Could not delete.';
+        header('Location: ?');
+        exit;
     }
 
-    $id = isset($_POST['id']) ? (int) $_POST['id'] : 0;
-    $title = trim((string)($_POST['title'] ?? ''));
-    $amount = trim((string)($_POST['amount'] ?? '0'));
-    $category = trim((string)($_POST['category'] ?? ''));
-    $expense_date = trim((string)($_POST['expense_date'] ?? ''));
-    $payment_method = trim((string)($_POST['payment_method'] ?? ''));
-    $notes = trim((string)($_POST['notes'] ?? ''));
-
-    $errs = [];
-    if ($title === '') $errs[] = 'Title is required.';
-    if ($expense_date === '' || !DateTime::createFromFormat('Y-m-d', $expense_date)) $errs[] = 'Valid expense date (YYYY-MM-DD) required.';
-    // allow comma thousand separators
-    $amountClean = str_replace(',', '', $amount);
-    if (!is_numeric($amountClean)) $errs[] = 'Amount must be a valid number.';
-    $amountVal = (float) $amountClean;
-
-    if (!empty($errs)) {
-        if ($isAjax) json_exit(['ok'=>false,'errors'=>$errs]);
-        $errors = array_merge($errors, $errs);
+    $id = (int) ($_POST['id'] ?? 0);
+    $title = trim((string) ($_POST['title'] ?? ''));
+    $amount = (float) str_replace(',', '', trim((string) ($_POST['amount'] ?? '0')));
+    $category = trim((string) ($_POST['category'] ?? ''));
+    $expense_date = trim((string) ($_POST['expense_date'] ?? '')) ?: date('Y-m-d');
+    $payment_method = trim((string) ($_POST['payment_method'] ?? 'Cash'));
+    $notes = trim((string) ($_POST['notes'] ?? ''));
+    if ($title === '') {
+        $_SESSION['ex_err'] = 'Write what you paid for.';
+        header('Location: ?');
+        exit;
+    }
+    if ($amount <= 0) {
+        $_SESSION['ex_err'] = 'Enter an amount greater than 0.';
+        header('Location: ?');
+        exit;
+    }
+    if ($category === '' || !isset($categories[$category])) {
+        $category = 'Other';
+    }
+    if (!in_array($payment_method, $payMethods, true)) {
+        $payment_method = 'Cash';
+    }
+    if (!DateTime::createFromFormat('Y-m-d', $expense_date)) {
+        $expense_date = date('Y-m-d');
+    }
+    $params = [
+        ':title' => $title,
+        ':amount' => $amount,
+        ':category' => $category,
+        ':expense_date' => $expense_date,
+        ':payment_method' => $payment_method,
+        ':notes' => $notes !== '' ? $notes : null,
+    ];
+    if ($id > 0) {
+        $params[':id'] = $id;
+        $ok = safe_db_run(
+            'UPDATE expenses SET title=:title, amount=:amount, category=:category, expense_date=:expense_date, payment_method=:payment_method, notes=:notes, updated_at=NOW() WHERE id=:id',
+            $params
+        );
+        $_SESSION[$ok ? 'ex_ok' : 'ex_err'] = $ok ? 'Expense updated.' : 'Could not update.';
     } else {
-        try {
-            $pdo = pdo_connect();
-            if (!($pdo instanceof PDO)) throw new RuntimeException('Database connection not available.');
-
-            if ($id > 0) {
-                $stmt = $pdo->prepare("UPDATE expenses SET title = :title, amount = :amount, category = :category, expense_date = :expense_date, payment_method = :payment_method, notes = :notes, updated_at = NOW() WHERE id = :id");
-                $ok = $stmt->execute([
-                    ':title'=>$title,
-                    ':amount'=>$amountVal,
-                    ':category'=>$category !== '' ? $category : null,
-                    ':expense_date'=>$expense_date,
-                    ':payment_method'=>$payment_method !== '' ? $payment_method : null,
-                    ':notes'=>$notes !== '' ? $notes : null,
-                    ':id'=>$id
-                ]);
-            } else {
-                $stmt = $pdo->prepare("INSERT INTO expenses (title, amount, category, expense_date, payment_method, notes, created_by) VALUES (:title, :amount, :category, :expense_date, :payment_method, :notes, :created_by)");
-                $ok = $stmt->execute([
-                    ':title'=>$title,
-                    ':amount'=>$amountVal,
-                    ':category'=>$category !== '' ? $category : null,
-                    ':expense_date'=>$expense_date,
-                    ':payment_method'=>$payment_method !== '' ? $payment_method : null,
-                    ':notes'=>$notes !== '' ? $notes : null,
-                    ':created_by'=>$createdByUserId
-                ]);
-            }
-
-            if ($ok) {
-                if ($isAjax) json_exit(['ok'=>true,'message'=>'Saved']);
-                $messages[] = $id > 0 ? 'Expense updated.' : 'Expense added.';
-                header('Location: ?'); exit;
-            } else {
-                throw new RuntimeException('Database returned false on save.');
-            }
-        } catch (Throwable $e) {
-            error_log('Expense save error: ' . $e->getMessage());
-            if ($isAjax) {
-                $resp = ['ok'=>false,'error'=>'Failed to save expense'];
-                if ($DEBUG) { $resp['exception'] = $e->getMessage(); $resp['trace'] = $e->getTraceAsString(); }
-                json_exit($resp);
-            } else {
-                $errors[] = 'Failed to save expense. Check logs.';
-            }
-        }
+        $params[':created_by'] = $createdByUserId ?: null;
+        $ok = safe_db_run(
+            'INSERT INTO expenses (title, amount, category, expense_date, payment_method, notes, created_by, created_at) VALUES (:title, :amount, :category, :expense_date, :payment_method, :notes, :created_by, NOW())',
+            $params
+        );
+        $_SESSION[$ok ? 'ex_ok' : 'ex_err'] = $ok ? 'Expense saved.' : 'Could not save.';
     }
+    header('Location: ?');
+    exit;
 }
 
-/* ---------------------------
-   POST: delete
-   --------------------------- */
-if ($action === 'delete' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $token = $_POST['csrf_token'] ?? '';
-    if (!hash_equals($_SESSION['csrf_token'] ?? '', $token)) { $errors[] = 'Invalid CSRF token'; }
-    $id = isset($_POST['id']) ? (int) $_POST['id'] : 0;
-    if ($id <= 0) $errors[] = 'Invalid id';
-    else {
-        $ok = safe_db_run("DELETE FROM expenses WHERE id = :id", [':id'=>$id]);
-        if ($ok) { $messages[] = 'Expense deleted.'; header('Location: ?'); exit; } else $errors[] = 'Delete failed.';
-    }
+$edit = null;
+$editId = (int) ($_GET['edit'] ?? 0);
+if ($editId > 0) {
+    $edit = safe_db_get_one('SELECT * FROM expenses WHERE id = :id LIMIT 1', [':id' => $editId]);
 }
 
-/* ---------------------------
-   GET: export CSV
-   --------------------------- */
-if ($action === 'export') {
-    $where = []; $params = [];
-    if (!empty($_GET['from'])) { $where[] = "expense_date >= :from"; $params[':from'] = $_GET['from'] . ' 00:00:00'; }
-    if (!empty($_GET['to']))   { $where[] = "expense_date <= :to";   $params[':to']   = $_GET['to'] . ' 23:59:59'; }
-    if (!empty($_GET['category'])) { $where[] = "category = :category"; $params[':category'] = trim($_GET['category']); }
-    if (!empty($_GET['q'])) { $where[] = "(title LIKE :q OR notes LIKE :q)"; $params[':q'] = '%' . trim($_GET['q']) . '%'; }
-    if (function_exists('ay_apply_date_filter')) {
-        ay_apply_date_filter($where, $params, 'expense_date');
-    }
-    $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
-    $rows = safe_db_get_all("SELECT * FROM expenses $whereSql ORDER BY expense_date DESC", $params);
+$monthStart = date('Y-m-01');
+$monthEnd = date('Y-m-t');
+$from = trim((string) ($_GET['from'] ?? $monthStart));
+$to = trim((string) ($_GET['to'] ?? $monthEnd));
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+    $from = $monthStart;
+}
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+    $to = $monthEnd;
+}
+$q = trim((string) ($_GET['q'] ?? ''));
+$catFilter = trim((string) ($_GET['category'] ?? ''));
 
+$where = ['expense_date >= :from', 'expense_date <= :to'];
+$params = [':from' => $from, ':to' => $to];
+if ($q !== '') {
+    $where[] = '(title LIKE :q OR notes LIKE :q)';
+    $params[':q'] = '%' . $q . '%';
+}
+if ($catFilter !== '' && isset($categories[$catFilter])) {
+    $where[] = 'category = :category';
+    $params[':category'] = $catFilter;
+}
+if (function_exists('ay_apply_date_filter')) {
+    ay_apply_date_filter($where, $params, 'expense_date');
+}
+$whereSql = 'WHERE ' . implode(' AND ', $where);
+
+if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=expenses_' . date('Ymd_His') . '.csv');
+    header('Content-Disposition: attachment; filename=expenses_' . $from . '_' . $to . '.csv');
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['ID','Title','Amount','Category','Expense Date','Payment Method','Notes','Created At','Updated At','Created By']);
-    foreach ($rows as $r) {
+    fputcsv($out, ['Date', 'What', 'Category', 'Amount', 'Paid by', 'Paid to / bill']);
+    $all = safe_db_get_all("SELECT * FROM expenses {$whereSql} ORDER BY expense_date DESC, id DESC", $params) ?: [];
+    foreach ($all as $r) {
         fputcsv($out, [
-            $r['id'] ?? '',
-            $r['title'] ?? '',
-            isset($r['amount']) ? number_format((float)$r['amount'],2) : '',
-            $r['category'] ?? '',
             $r['expense_date'] ?? '',
+            $r['title'] ?? '',
+            $r['category'] ?? '',
+            number_format((float) ($r['amount'] ?? 0), 2, '.', ''),
             $r['payment_method'] ?? '',
-            preg_replace("/\r\n|\r|\n/"," ", $r['notes'] ?? ''),
-            $r['created_at'] ?? '',
-            $r['updated_at'] ?? '',
-            $r['created_by'] ?? ''
+            preg_replace("/\s+/", ' ', (string) ($r['notes'] ?? '')),
         ]);
     }
     fclose($out);
     exit;
 }
 
-/* ---------------------------
-   Listing: filters & pagination
-   --------------------------- */
-$page = max(1, (int)($_GET['page'] ?? 1));
-$perPage = 25;
+$sumRow = safe_db_get_one("SELECT COALESCE(SUM(amount),0) AS s, COUNT(*) AS c FROM expenses {$whereSql}", $params) ?: ['s' => 0, 'c' => 0];
+$listTotal = (float) ($sumRow['s'] ?? 0);
+$listCount = (int) ($sumRow['c'] ?? 0);
+
+$byCat = safe_db_get_all(
+    "SELECT COALESCE(category,'Other') AS category, COALESCE(SUM(amount),0) AS amt FROM expenses {$whereSql} GROUP BY category ORDER BY amt DESC",
+    $params
+) ?: [];
+
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$perPage = 40;
+$totalPages = max(1, (int) ceil($listCount / $perPage));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
 $offset = ($page - 1) * $perPage;
+$rows = safe_db_get_all(
+    "SELECT * FROM expenses {$whereSql} ORDER BY expense_date DESC, id DESC LIMIT {$perPage} OFFSET {$offset}",
+    $params
+) ?: [];
 
-$where = []; $params = [];
-$filter_q = trim((string)($_GET['q'] ?? ''));
-if ($filter_q !== '') { $where[] = "(title LIKE :q OR notes LIKE :q)"; $params[':q'] = '%' . $filter_q . '%'; }
-if (!empty($_GET['category'])) { $where[] = "category = :category"; $params[':category'] = trim($_GET['category']); }
-if (!empty($_GET['from'])) { $where[] = "expense_date >= :from"; $params[':from'] = $_GET['from'] . ' 00:00:00'; }
-if (!empty($_GET['to']))   { $where[] = "expense_date <= :to";   $params[':to']   = $_GET['to'] . ' 23:59:59'; }
-if (function_exists('ay_apply_date_filter')) {
-    ay_apply_date_filter($where, $params, 'expense_date');
-}
-$whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+$filterQs = array_filter([
+    'from' => $from,
+    'to' => $to,
+    'q' => $q !== '' ? $q : null,
+    'category' => $catFilter !== '' ? $catFilter : null,
+], static fn ($v) => $v !== null);
 
-try {
-    $cRow = safe_db_get_one("SELECT COUNT(*) AS c FROM expenses " . ($whereSql ? $whereSql : ''), $params);
-    $total = intval($cRow['c'] ?? 0);
-} catch (Throwable $e) {
-    $total = 0;
-    $errors[] = 'Count failed: ' . ($DEBUG ? $e->getMessage() : 'Internal error');
-}
-
-$rows = [];
-try {
-    $sql = "SELECT * FROM expenses " . ($whereSql ? $whereSql : '') . " ORDER BY expense_date DESC LIMIT :limit OFFSET :offset";
-    $pdo = pdo_connect();
-    if ($pdo instanceof PDO) {
-        $stmt = $pdo->prepare($sql);
-        foreach ($params as $k=>$v) $stmt->bindValue($k, $v);
-        $stmt->bindValue(':limit', (int)$perPage, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', (int)$offset, PDO::PARAM_INT);
-        $stmt->execute();
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    } else {
-        $rows = safe_db_get_all($sql, array_merge($params, [':limit'=>$perPage, ':offset'=>$offset]));
-    }
-} catch (Throwable $e) {
-    $errors[] = 'List fetch failed: ' . ($DEBUG ? $e->getMessage() : 'Internal error');
-}
-
-$totalPages = (int) ceil(max(0, $total) / $perPage);
-
-/* Helper to build querystring preserving filters */
-function build_qs(array $over = []): string {
-    $qs = $_GET;
-    foreach ($over as $k=>$v) {
-        if ($v === null) unset($qs[$k]); else $qs[$k] = $v;
-    }
-    return http_build_query($qs);
-}
-
-/* Optional header include */
 require_once __DIR__ . '/../header.php';
 ?>
+<style>
+.ex-card { background:#fff; border:1px solid #dbe7fb; border-radius:14px; padding:14px 16px; margin-bottom:12px; }
+.ex-stat { font-size:1.4rem; font-weight:800; color:#b42318; }
+</style>
 
-  <?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo e($m); ?></div><?php endforeach; ?>
-  <?php foreach ($errors as $err): ?><div class="alert alert-danger"><?php echo e($err); ?></div><?php endforeach; ?>
+<p class="text-muted mb-3">Record money the school spent (rent, salary, snacks, bills). This is not fee collection.</p>
 
-  <div class="card mb-3 p-3">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-md-3"><label class="form-label">Search</label><input name="q" class="form-control" value="<?php echo e($filter_q); ?>" placeholder="Title or notes"></div>
-      <div class="col-md-2"><label class="form-label">Category</label><input name="category" class="form-control" value="<?php echo e($_GET['category'] ?? ''); ?>"></div>
-      <div class="col-md-2"><label class="form-label">From</label><input type="date" name="from" class="form-control" value="<?php echo e($_GET['from'] ?? ''); ?>"></div>
-      <div class="col-md-2"><label class="form-label">To</label><input type="date" name="to" class="form-control" value="<?php echo e($_GET['to'] ?? ''); ?>"></div>
-      <div class="col-md-3 text-end"><button class="btn btn-primary">Filter</button></div>
-    </form>
+<?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo e($m); ?></div><?php endforeach; ?>
+<?php foreach ($errors as $er): ?><div class="alert alert-danger"><?php echo e($er); ?></div><?php endforeach; ?>
+<?php if ($yearLocked): ?><div class="alert alert-warning">This academic year is locked. You can view expenses but not change them.</div><?php endif; ?>
+
+<div class="row g-2 mb-3">
+  <div class="col-md-4">
+    <div class="ex-card">
+      <div class="small text-muted">Total in this list</div>
+      <div class="ex-stat">₹ <?php echo number_format($listTotal, 2); ?></div>
+      <div class="small"><?php echo $listCount; ?> entries</div>
+    </div>
   </div>
+  <div class="col-md-8">
+    <div class="ex-card">
+      <div class="small text-muted mb-1">By category</div>
+      <?php if ($byCat === []): ?>
+        <div class="text-muted">No expenses in this date range.</div>
+      <?php else: ?>
+        <div class="row">
+          <?php foreach ($byCat as $c): ?>
+            <div class="col-6 col-md-4 d-flex justify-content-between"><span><?php echo e($categories[$c['category']] ?? (string) $c['category']); ?></span><strong>₹ <?php echo number_format((float) $c['amt'], 2); ?></strong></div>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
+    </div>
+  </div>
+</div>
 
-  <div class="card">
-    <div class="table-responsive">
-      <table class="table table-striped mb-0">
-        <thead>
+<div class="ex-card">
+  <h2 class="h6 fw-bold mb-3"><?php echo $edit ? 'Edit expense' : 'Add expense'; ?></h2>
+  <form method="post" action="?action=save" class="row g-2 align-items-end">
+    <input type="hidden" name="csrf_token" value="<?php echo e($CSRF); ?>">
+    <input type="hidden" name="id" value="<?php echo $edit ? (int) $edit['id'] : 0; ?>">
+    <div class="col-md-2">
+      <label class="form-label">Date</label>
+      <input type="date" name="expense_date" class="form-control" required value="<?php echo e((string) ($edit['expense_date'] ?? date('Y-m-d'))); ?>" <?php echo $yearLocked ? 'disabled' : ''; ?>>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Category</label>
+      <select name="category" class="form-select" required <?php echo $yearLocked ? 'disabled' : ''; ?>>
+        <?php $selCat = (string) ($edit['category'] ?? 'Other'); ?>
+        <?php foreach ($categories as $key => $lab): ?>
+          <option value="<?php echo e($key); ?>" <?php echo $selCat === $key ? 'selected' : ''; ?>><?php echo e($lab); ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">What did you pay for?</label>
+      <input name="title" class="form-control" required placeholder="e.g. April teacher salary" value="<?php echo e((string) ($edit['title'] ?? '')); ?>" <?php echo $yearLocked ? 'disabled' : ''; ?>>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Amount</label>
+      <input name="amount" class="form-control" inputmode="decimal" required placeholder="0.00" value="<?php echo e($edit ? number_format((float) $edit['amount'], 2, '.', '') : ''); ?>" <?php echo $yearLocked ? 'disabled' : ''; ?>>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Paid by</label>
+      <select name="payment_method" class="form-select" <?php echo $yearLocked ? 'disabled' : ''; ?>>
+        <?php $selPay = (string) ($edit['payment_method'] ?? 'Cash'); ?>
+        <?php foreach ($payMethods as $pm): ?>
+          <option value="<?php echo e($pm); ?>" <?php echo $selPay === $pm ? 'selected' : ''; ?>><?php echo e($pm); ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Paid to / bill no. (optional)</label>
+      <input name="notes" class="form-control" placeholder="Vendor name or bill number" value="<?php echo e((string) ($edit['notes'] ?? '')); ?>" <?php echo $yearLocked ? 'disabled' : ''; ?>>
+    </div>
+    <div class="col-md-4 d-flex gap-2">
+      <?php if (!$yearLocked): ?>
+        <button class="btn btn-primary" type="submit"><?php echo $edit ? 'Update' : 'Save expense'; ?></button>
+      <?php endif; ?>
+      <?php if ($edit): ?>
+        <a class="btn btn-outline-secondary" href="<?php echo e($selfUrl); ?>">Cancel</a>
+      <?php endif; ?>
+    </div>
+  </form>
+</div>
+
+<div class="ex-card">
+  <form method="get" class="row g-2 align-items-end mb-3">
+    <div class="col-md-2"><label class="form-label">From</label><input type="date" name="from" class="form-control" value="<?php echo e($from); ?>"></div>
+    <div class="col-md-2"><label class="form-label">To</label><input type="date" name="to" class="form-control" value="<?php echo e($to); ?>"></div>
+    <div class="col-md-3">
+      <label class="form-label">Category</label>
+      <select name="category" class="form-select">
+        <option value="">All</option>
+        <?php foreach ($categories as $key => $lab): ?>
+          <option value="<?php echo e($key); ?>" <?php echo $catFilter === $key ? 'selected' : ''; ?>><?php echo e($lab); ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="col-md-3"><label class="form-label">Search</label><input name="q" class="form-control" value="<?php echo e($q); ?>" placeholder="What / vendor"></div>
+    <div class="col-md-2 d-flex flex-wrap gap-2">
+      <button class="btn btn-outline-primary" type="submit">Show</button>
+      <a class="btn btn-outline-secondary" href="<?php echo e($selfUrl); ?>">This month</a>
+    </div>
+  </form>
+  <div class="d-flex justify-content-end mb-2">
+    <a class="btn btn-sm btn-outline-secondary" href="?<?php echo e(http_build_query(array_merge($filterQs, ['export' => 'csv']))); ?>">CSV</a>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead><tr><th>Date</th><th>What</th><th>Category</th><th class="text-end">Amount</th><th></th></tr></thead>
+      <tbody>
+        <?php if ($rows === []): ?>
+          <tr><td colspan="5" class="text-center text-muted py-4">No expenses yet. Add one above (salary, electricity, snacks…).</td></tr>
+        <?php endif; ?>
+        <?php foreach ($rows as $r): ?>
           <tr>
-            <th style="width:70px">ID</th>
-            <th>Date</th>
-            <th>Title</th>
-            <th style="width:130px">Amount</th>
-            <th>Category</th>
-            <th>Payment</th>
-            <th style="width:240px">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php if (!empty($rows)): foreach ($rows as $r): ?>
-            <tr id="row-<?php echo (int)$r['id']; ?>">
-              <td><?php echo (int)$r['id']; ?></td>
-              <td><?php echo e($r['expense_date'] ?? ''); ?></td>
-              <td><?php echo e($r['title']); ?></td>
-              <td><?php echo e(number_format((float)($r['amount'] ?? 0),2)); ?></td>
-              <td><?php echo e($r['category'] ?? ''); ?></td>
-              <td><?php echo e($r['payment_method'] ?? ''); ?></td>
-              <td>
-                <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#viewModal" data-id="<?php echo (int)$r['id']; ?>">View</button>
-                <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#editModal" data-id="<?php echo (int)$r['id']; ?>">Edit</button>
-                <form method="post" class="d-inline" onsubmit="return confirm('Delete expense?');">
-                  <input type="hidden" name="action" value="delete">
-                  <input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>">
+            <td class="small text-muted"><?php echo e((string) ($r['expense_date'] ?? '')); ?></td>
+            <td>
+              <div class="fw-semibold"><?php echo e((string) ($r['title'] ?? '')); ?></div>
+              <div class="small text-muted"><?php echo e((string) ($r['payment_method'] ?? '')); ?><?php echo !empty($r['notes']) ? ' · ' . e((string) $r['notes']) : ''; ?></div>
+            </td>
+            <td><?php echo e($categories[$r['category'] ?? ''] ?? (string) ($r['category'] ?? '—')); ?></td>
+            <td class="text-end fw-bold">₹ <?php echo number_format((float) ($r['amount'] ?? 0), 2); ?></td>
+            <td class="text-nowrap text-end">
+              <?php if (!$yearLocked): ?>
+                <a class="btn btn-sm btn-outline-secondary" href="?edit=<?php echo (int) $r['id']; ?>">Edit</a>
+                <form method="post" action="?action=delete" class="d-inline" onsubmit="return confirm('Delete this expense?');">
                   <input type="hidden" name="csrf_token" value="<?php echo e($CSRF); ?>">
-                  <button class="btn btn-sm btn-danger" type="submit">Delete</button>
+                  <input type="hidden" name="id" value="<?php echo (int) $r['id']; ?>">
+                  <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
                 </form>
-              </td>
-            </tr>
-          <?php endforeach; else: ?>
-            <tr><td colspan="7" class="text-center text-muted">No expenses found.</td></tr>
-          <?php endif; ?>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="p-3 d-flex justify-content-between align-items-center">
-      <div>Showing <?php echo $total ? ($offset+1) : 0; ?> - <?php echo min($total, $offset + count($rows)); ?> of <?php echo $total; ?></div>
-      <nav>
-        <ul class="pagination mb-0">
-          <?php for ($p = 1; $p <= max(1,$totalPages); $p++): ?>
-            <li class="page-item <?php if ($p === $page) echo 'active'; ?>"><a class="page-link" href="?<?php echo build_qs(['page'=>$p]); ?>"><?php echo $p; ?></a></li>
-          <?php endfor; ?>
-        </ul>
-      </nav>
-    </div>
+              <?php endif; ?>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
   </div>
-</div>
-
-<!-- View Modal -->
-<div class="modal fade" id="viewModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Expense details</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body" id="viewModalBody"><div class="text-center text-muted">Loading…</div></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+  <?php if ($totalPages > 1): ?>
+    <div class="pt-3">
+      <ul class="pagination pagination-sm mb-0">
+        <?php for ($p = 1; $p <= $totalPages; $p++): ?>
+          <li class="page-item <?php echo $p === $page ? 'active' : ''; ?>">
+            <a class="page-link" href="?<?php echo e(http_build_query(array_merge($filterQs, ['page' => $p]))); ?>"><?php echo $p; ?></a>
+          </li>
+        <?php endfor; ?>
+      </ul>
     </div>
-  </div>
+  <?php endif; ?>
 </div>
-
-<!-- Add / Edit Modal -->
-<div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <form id="editForm">
-        <div class="modal-header"><h5 class="modal-title">Add / Edit Expense</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-          <input type="hidden" name="action" value="save">
-          <input type="hidden" name="id" id="edit_id" value="">
-          <input type="hidden" name="csrf_token" value="<?php echo e($CSRF); ?>">
-
-          <div class="mb-3"><label class="form-label">Title</label><input id="edit_title" name="title" class="form-control" required></div>
-          <div class="row g-2 mb-3">
-            <div class="col"><label class="form-label">Amount</label><input id="edit_amount" name="amount" class="form-control" required></div>
-            <div class="col"><label class="form-label">Date</label><input id="edit_expense_date" name="expense_date" type="date" class="form-control" required></div>
-          </div>
-          <div class="row g-2 mb-3">
-            <div class="col"><label class="form-label">Category</label><input id="edit_category" name="category" class="form-control"></div>
-            <div class="col"><label class="form-label">Payment method</label><input id="edit_payment_method" name="payment_method" class="form-control"></div>
-          </div>
-          <div class="mb-3"><label class="form-label">Notes</label><textarea id="edit_notes" name="notes" rows="4" class="form-control"></textarea></div>
-
-          <div id="editErrors" class="text-danger small"></div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
-          <button class="btn btn-primary" type="submit">Save</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  // View modal: load detail fragment
-  var viewModal = document.getElementById('viewModal');
-  if (viewModal) {
-    viewModal.addEventListener('show.bs.modal', function(event){
-      var id = event.relatedTarget.getAttribute('data-id');
-      var body = document.getElementById('viewModalBody');
-      body.innerHTML = '<div class="text-center text-muted">Loading…</div>';
-      fetch('?action=view&id=' + encodeURIComponent(id), { credentials: 'same-origin' })
-        .then(resp => resp.ok ? resp.text() : Promise.reject())
-        .then(html => body.innerHTML = html)
-        .catch(() => body.innerHTML = '<div class="text-danger">Failed to load details.</div>');
-    });
-  }
-
-  // Edit modal: populate fields for edit; clear for add
-  var editModal = document.getElementById('editModal');
-  if (editModal) {
-    editModal.addEventListener('show.bs.modal', function(event){
-      var id = event.relatedTarget.getAttribute('data-id') || '';
-      document.getElementById('editErrors').innerHTML = '';
-      ['edit_id','edit_title','edit_amount','edit_category','edit_expense_date','edit_payment_method','edit_notes'].forEach(function(i){ var el=document.getElementById(i); if (el) el.value=''; });
-      if (!id) return;
-      fetch('?action=get&id=' + encodeURIComponent(id), { credentials: 'same-origin' })
-        .then(resp => resp.ok ? resp.json() : Promise.reject())
-        .then(json => {
-          if (!json || !json.ok || !json.data) { alert(json.error || 'Failed to load'); var m = bootstrap.Modal.getInstance(editModal); if (m) m.hide(); return; }
-          var d = json.data;
-          document.getElementById('edit_id').value = d.id || '';
-          document.getElementById('edit_title').value = d.title || '';
-          document.getElementById('edit_amount').value = d.amount || '';
-          document.getElementById('edit_category').value = d.category || '';
-          document.getElementById('edit_expense_date').value = d.expense_date || '';
-          document.getElementById('edit_payment_method').value = d.payment_method || '';
-          document.getElementById('edit_notes').value = d.notes || '';
-        })
-        .catch(() => { alert('Failed to load record for edit.'); var m = bootstrap.Modal.getInstance(editModal); if (m) m.hide(); });
-    });
-
-    // AJAX submit for save
-    var editForm = document.getElementById('editForm');
-    editForm.addEventListener('submit', function(ev){
-      ev.preventDefault();
-      document.getElementById('editErrors').innerHTML = '';
-      var fd = new FormData(editForm);
-      fetch('?action=save', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: fd,
-        headers: { 'X-Requested-With': 'XMLHttpRequest' }
-      }).then(resp => resp.ok ? resp.json() : Promise.reject())
-        .then(json => {
-          if (json.ok) {
-            var m = bootstrap.Modal.getInstance(editModal);
-            if (m) m.hide();
-            location.reload();
-          } else {
-            if (json.errors) document.getElementById('editErrors').innerHTML = json.errors.map(x => '<div>'+x+'</div>').join('');
-            else document.getElementById('editErrors').innerHTML = '<div>' + (json.error || 'Failed to save') + '</div>';
-          }
-        })
-        .catch(err => {
-          document.getElementById('editErrors').innerHTML = '<div class="text-danger">Failed to save changes.</div>';
-          console.error(err);
-        });
-    });
-  }
-});
-</script>
-
 <?php
 require_once __DIR__ . '/../footer.php';
-?>
