@@ -39,6 +39,24 @@ $categories = [
 ];
 $payMethods = ['Cash', 'UPI', 'Online', 'Cheque', 'Bank'];
 
+$staff = [];
+if (function_exists('table_exists') && table_exists('users')) {
+    $staff = safe_db_get_all(
+        "SELECT id, name, role FROM users
+         WHERE role IN ('teacher','reception','staff','accounts')
+           AND COALESCE(is_active,1) = 1
+         ORDER BY name ASC"
+    ) ?: [];
+}
+$vendorHints = [];
+if (function_exists('table_exists') && table_exists('expenses')) {
+    $vendorHints = safe_db_get_all(
+        "SELECT DISTINCT notes AS n FROM expenses
+         WHERE notes IS NOT NULL AND TRIM(notes) <> '' AND notes NOT LIKE '[Demo]%'
+         ORDER BY notes ASC LIMIT 50"
+    ) ?: [];
+}
+
 try {
     $pdo = pdo_connect();
     if ($pdo instanceof PDO && function_exists('table_exists') && !table_exists('expenses')) {
@@ -111,6 +129,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($action, ['save', 'delete'
     $expense_date = trim((string) ($_POST['expense_date'] ?? '')) ?: date('Y-m-d');
     $payment_method = trim((string) ($_POST['payment_method'] ?? 'Cash'));
     $notes = trim((string) ($_POST['notes'] ?? ''));
+    $staffId = (int) ($_POST['staff_id'] ?? 0);
+    $staffName = '';
+    if ($staffId > 0) {
+        foreach ($staff as $st) {
+            if ((int) $st['id'] === $staffId) {
+                $staffName = trim((string) ($st['name'] ?? ''));
+                break;
+            }
+        }
+    }
+    if ($category === 'Salary' && $staffName !== '') {
+        if ($title === '') {
+            $title = 'Salary — ' . $staffName;
+        }
+        if ($notes === '') {
+            $notes = $staffName;
+        }
+    }
     if ($title === '') {
         $_SESSION['ex_err'] = 'Write what you paid for.';
         header('Location: ?');
@@ -246,7 +282,7 @@ require_once __DIR__ . '/../header.php';
 .ex-stat { font-size:1.4rem; font-weight:800; color:#b42318; }
 </style>
 
-<p class="text-muted mb-3">Record money the school spent (rent, salary, snacks, bills). This is not fee collection.</p>
+<p class="text-muted mb-3">One list for school spend. Salary: pick a staff member. Other bills: type who you paid (no separate vendor menu).</p>
 
 <?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo e($m); ?></div><?php endforeach; ?>
 <?php foreach ($errors as $er): ?><div class="alert alert-danger"><?php echo e($er); ?></div><?php endforeach; ?>
@@ -287,16 +323,33 @@ require_once __DIR__ . '/../header.php';
     </div>
     <div class="col-md-3">
       <label class="form-label">Category</label>
-      <select name="category" class="form-select" required <?php echo $yearLocked ? 'disabled' : ''; ?>>
+      <select name="category" id="exCategory" class="form-select" required <?php echo $yearLocked ? 'disabled' : ''; ?>>
         <?php $selCat = (string) ($edit['category'] ?? 'Other'); ?>
         <?php foreach ($categories as $key => $lab): ?>
           <option value="<?php echo e($key); ?>" <?php echo $selCat === $key ? 'selected' : ''; ?>><?php echo e($lab); ?></option>
         <?php endforeach; ?>
       </select>
     </div>
+    <div class="col-md-3" id="exStaffWrap" <?php echo ($selCat === 'Salary') ? '' : 'hidden'; ?>>
+      <label class="form-label">Staff (for salary)</label>
+      <select name="staff_id" id="exStaff" class="form-select" <?php echo $yearLocked ? 'disabled' : ''; ?>>
+        <option value="">Select staff</option>
+        <?php
+        $editNote = (string) ($edit['notes'] ?? '');
+        $editTitle = (string) ($edit['title'] ?? '');
+        foreach ($staff as $st):
+            $nm = (string) ($st['name'] ?? '');
+            $picked = $nm !== '' && ($editNote === $nm || str_contains($editTitle, $nm));
+        ?>
+          <option value="<?php echo (int) $st['id']; ?>" <?php echo $picked ? 'selected' : ''; ?>>
+            <?php echo e($nm . ' (' . (string) ($st['role'] ?? '') . ')'); ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
+    </div>
     <div class="col-md-4">
       <label class="form-label">What did you pay for?</label>
-      <input name="title" class="form-control" required placeholder="e.g. April teacher salary" value="<?php echo e((string) ($edit['title'] ?? '')); ?>" <?php echo $yearLocked ? 'disabled' : ''; ?>>
+      <input name="title" id="exTitle" class="form-control" required placeholder="e.g. Electricity bill August" value="<?php echo e((string) ($edit['title'] ?? '')); ?>" <?php echo $yearLocked ? 'disabled' : ''; ?>>
     </div>
     <div class="col-md-3">
       <label class="form-label">Amount</label>
@@ -311,9 +364,14 @@ require_once __DIR__ . '/../header.php';
         <?php endforeach; ?>
       </select>
     </div>
-    <div class="col-md-6">
-      <label class="form-label">Paid to / bill no. (optional)</label>
-      <input name="notes" class="form-control" placeholder="Vendor name or bill number" value="<?php echo e((string) ($edit['notes'] ?? '')); ?>" <?php echo $yearLocked ? 'disabled' : ''; ?>>
+    <div class="col-md-6" id="exVendorWrap" <?php echo ($selCat === 'Salary') ? 'hidden' : ''; ?>>
+      <label class="form-label">Paid to (optional)</label>
+      <input name="notes" id="exNotes" class="form-control" list="exVendorList" placeholder="Shop / vendor / bill no. — type only, no extra menu" value="<?php echo e((string) ($edit['notes'] ?? '')); ?>" <?php echo $yearLocked ? 'disabled' : ''; ?>>
+      <datalist id="exVendorList">
+        <?php foreach ($vendorHints as $vh): ?>
+          <option value="<?php echo e((string) ($vh['n'] ?? '')); ?>"></option>
+        <?php endforeach; ?>
+      </datalist>
     </div>
     <div class="col-md-4 d-flex gap-2">
       <?php if (!$yearLocked): ?>
@@ -391,5 +449,32 @@ require_once __DIR__ . '/../header.php';
     </div>
   <?php endif; ?>
 </div>
+<script>
+(function () {
+  var cat = document.getElementById('exCategory');
+  var staffWrap = document.getElementById('exStaffWrap');
+  var vendorWrap = document.getElementById('exVendorWrap');
+  var staff = document.getElementById('exStaff');
+  var title = document.getElementById('exTitle');
+  function sync() {
+    var isSalary = cat && cat.value === 'Salary';
+    if (staffWrap) staffWrap.hidden = !isSalary;
+    if (vendorWrap) vendorWrap.hidden = !!isSalary;
+  }
+  if (cat) cat.addEventListener('change', sync);
+  if (staff) {
+    staff.addEventListener('change', function () {
+      if (!title || staff.value === '') return;
+      var opt = staff.options[staff.selectedIndex];
+      var name = (opt.textContent || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+      if (name && (!title.value || title.value.indexOf('Salary') === 0)) {
+        title.value = 'Salary — ' + name;
+      }
+    });
+  }
+  sync();
+})();
+</script>
 <?php
 require_once __DIR__ . '/../footer.php';
+
