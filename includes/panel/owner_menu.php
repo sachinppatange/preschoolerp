@@ -86,7 +86,7 @@ function owner_panel_menu(): array
                 ['url' => $owner . '/feedbacks.php', 'icon' => 'bi-chat-dots', 'label' => 'Feedbacks', 'match' => 'feedbacks'],
                 ['url' => $owner . '/complaints.php', 'icon' => 'bi-exclamation-triangle', 'label' => 'Complaints', 'match' => 'complaints'],
                 ['url' => $owner . '/pending_alerts.php', 'icon' => 'bi-bell-fill', 'label' => 'Alerts', 'match' => 'pending_alerts'],
-                ['url' => $owner . '/pending_notifications.php', 'icon' => 'bi-bell', 'label' => 'Notifications', 'match' => 'pending_notifications'],
+                ['url' => $owner . '/pending_notifications.php', 'icon' => 'bi-bell', 'label' => 'Staff reminders', 'match' => 'pending_notifications'],
             ],
         ],
         [
