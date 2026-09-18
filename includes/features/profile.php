@@ -319,8 +319,8 @@ require_once __DIR__ . '/../header.php';
 
           <?php if ($hasCol('password_hash')): ?>
             <hr>
-            <h6>Password (optional)</h6>
-            <p class="small text-muted">Login is WhatsApp OTP. Set a password only if your panel also uses password login.</p>
+            <h6>Password login</h6>
+            <p class="small text-muted">Use User ID (your 10-digit mobile) and this password when OTP gateways are off. You can also open <a href="<?php echo e(function_exists('site_url') ? site_url('/account/password.php') : '/account/password.php'); ?>">User ID &amp; Password</a>.</p>
             <?php if (!empty($user['password_hash'])): ?>
               <div class="mb-3">
                 <label class="form-label">Current password</label>
@@ -353,6 +353,7 @@ require_once __DIR__ . '/../header.php';
       <div class="card-body">
         <h6 class="mb-2">Account</h6>
         <div class="small text-muted mb-1">User ID: <?php echo (int) ($user['id'] ?? 0); ?></div>
+        <div class="small text-muted mb-1">Login User ID: <?php echo e(function_exists('user_login_id_from_row') ? user_login_id_from_row($user) : (string)($user['phone'] ?? '')); ?></div>
         <div class="small text-muted mb-1">Role: <?php echo e((string) ($user['role'] ?? $defaultRoleLabel)); ?></div>
         <div class="small text-muted mb-1">School ID: <?php echo e((string) ($user['school_id'] ?? '—')); ?></div>
         <div class="small text-muted mb-1">Status: <?php echo !empty($user['is_active']) ? 'Active' : 'Inactive'; ?></div>

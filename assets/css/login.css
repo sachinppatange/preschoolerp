@@ -87,11 +87,27 @@ body.login-page {
   font-weight: 700;
   border-radius: var(--ps-radius-sm);
 }
-.login-card .otp-sent-box {
-  background: var(--ps-bg);
+.login-or {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.15rem 0;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.login-or::before,
+.login-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--ps-border);
+}
+.login-card .btn-outline-secondary {
+  font-weight: 700;
   border-radius: var(--ps-radius-sm);
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--ps-border);
+  padding: 0.65rem;
 }
 
 .login-back {

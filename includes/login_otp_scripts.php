@@ -42,5 +42,15 @@
       }, 1000);
     }
   }
+
+  const togglePw = document.getElementById('toggleLoginPw');
+  const pwInput = document.getElementById('login_password');
+  if (togglePw && pwInput) {
+    togglePw.addEventListener('click', function () {
+      const show = pwInput.type === 'password';
+      pwInput.type = show ? 'text' : 'password';
+      togglePw.innerHTML = show ? '<i class="bi bi-eye-slash"></i>' : '<i class="bi bi-eye"></i>';
+    });
+  }
 })();
 </script>

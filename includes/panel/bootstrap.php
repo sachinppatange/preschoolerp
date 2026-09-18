@@ -45,6 +45,9 @@ function panel_bootstrap(?string $role = null, array $options = []): void
     if (file_exists($includesDir . '/otp_settings.php')) {
         require_once $includesDir . '/otp_settings.php';
     }
+    if (file_exists($includesDir . '/password_login.php')) {
+        require_once $includesDir . '/password_login.php';
+    }
     require_once __DIR__ . '/helpers.php';
     require_once __DIR__ . '/scope.php';
     require_once __DIR__ . '/academic_year.php';
@@ -65,6 +68,14 @@ function panel_bootstrap(?string $role = null, array $options = []): void
         $fn = 'require_' . $role . '_auth';
         if (function_exists($fn)) {
             $fn();
+        }
+        if (!empty($_SESSION['force_set_password'])) {
+            $uri = (string) ($_SERVER['REQUEST_URI'] ?? '');
+            if (stripos($uri, '/account/password.php') === false) {
+                $pw = function_exists('site_url') ? site_url('/account/password.php') : '/account/password.php';
+                header('Location: ' . $pw);
+                exit;
+            }
         }
     }
 }

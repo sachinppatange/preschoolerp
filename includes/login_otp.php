@@ -53,6 +53,9 @@ function login_otp_bootstrap(): void
     if (file_exists(__DIR__ . '/otp_settings.php')) {
         require_once __DIR__ . '/otp_settings.php';
     }
+    if (file_exists(__DIR__ . '/password_login.php')) {
+        require_once __DIR__ . '/password_login.php';
+    }
 
     if (file_exists(__DIR__ . '/whatsapp_config.php')) {
         require_once __DIR__ . '/whatsapp_config.php';
@@ -117,7 +120,7 @@ function login_otp_role_clause(array $roles): array
 
 /**
  * @param array<string,mixed> $config
- * @return array{msg_error:string,msg_info:string,otp_active:bool,cooldownRemaining:int,ctx:array}
+ * @return array{msg_error:string,msg_info:string,otp_active:bool,cooldownRemaining:int,ctx:array,login_mode:string,otp_gateways_ok:bool,remembered_login_id:string}
  */
 function login_otp_process(array $config): array
 {
@@ -149,6 +152,15 @@ function login_otp_process(array $config): array
     $appEnv = defined('APP_ENV') ? (string) constant('APP_ENV') : 'production';
     $appDebug = ($appEnv === 'development') || (defined('APP_DEBUG') && constant('APP_DEBUG'));
 
+    if (function_exists('user_password_column_ready')) {
+        user_password_column_ready();
+    }
+    $otpGatewaysOk = function_exists('otp_login_channels_ready') ? otp_login_channels_ready() : true;
+    $loginMode = strtolower(trim((string) ($_POST['login_mode'] ?? $_GET['mode'] ?? '')));
+    if (!in_array($loginMode, ['otp', 'password', 'forgot'], true)) {
+        $loginMode = $otpGatewaysOk ? 'otp' : 'password';
+    }
+
     if (!isset($_SESSION[$ctxKey]) || !is_array($_SESSION[$ctxKey])) {
         login_otp_reset_ctx($ctxKey);
     }
@@ -159,9 +171,10 @@ function login_otp_process(array $config): array
 
     $findUser = function (string $phonePlus, string $phonePlain, bool $fullRow = false) use ($roles): ?array {
         [$roleSql, $roleParams] = login_otp_role_clause($roles);
+        $hasPw = function_exists('user_password_column_ready') && user_password_column_ready();
         $cols = $fullRow
-            ? 'id, name, phone, role, school_id, whatsapp_id, is_active, meta'
-            : 'id, name, role, is_active, meta';
+            ? 'id, name, phone, role, school_id, whatsapp_id, is_active, meta' . ($hasPw ? ', password_hash' : '')
+            : 'id, name, role, is_active, meta' . ($hasPw ? ', password_hash' : '');
         $digits = preg_replace('/\D+/', '', $phonePlain) ?? '';
         $last10 = strlen($digits) >= 10 ? substr($digits, -10) : $digits;
         $variants = array_values(array_unique(array_filter([
@@ -182,7 +195,60 @@ function login_otp_process(array $config): array
                   )
                 ORDER BY id ASC LIMIT 1";
         $params = array_merge($roleParams, $variants, $variants, [$last10, $last10]);
-        return db_fetch_one($sql, $params);
+        return db_fetch_one($sql, $params) ?: null;
+    };
+
+    $emailFromMeta = static function (?array $user): string {
+        if (!$user) {
+            return '';
+        }
+        if (function_exists('staff_user_email_from_meta')) {
+            return staff_user_email_from_meta($user['meta'] ?? null);
+        }
+        $meta = $user['meta'] ?? null;
+        if (is_string($meta) && $meta !== '') {
+            $decoded = json_decode($meta, true);
+            $meta = is_array($decoded) ? $decoded : [];
+        }
+        $email = is_array($meta) ? strtolower(trim((string) ($meta['email'] ?? ''))) : '';
+        return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : '';
+    };
+
+    $findByLoginId = function (string $loginId) use ($findUser, $emailFromMeta, $roles, $waCountry): ?array {
+        $loginId = trim($loginId);
+        if ($loginId === '') {
+            return null;
+        }
+        if (str_contains($loginId, '@')) {
+            $want = strtolower($loginId);
+            [$roleSql, $roleParams] = login_otp_role_clause($roles);
+            $hasPw = function_exists('user_password_column_ready') && user_password_column_ready();
+            $cols = 'id, name, phone, role, school_id, whatsapp_id, is_active, meta' . ($hasPw ? ', password_hash' : '');
+            $rows = db_fetch_all("SELECT {$cols} FROM users WHERE {$roleSql} AND IFNULL(meta,'') LIKE ? ORDER BY id ASC LIMIT 25", array_merge($roleParams, ['%' . $want . '%'])) ?: [];
+            foreach ($rows as $row) {
+                if ($emailFromMeta($row) === $want) {
+                    return $row;
+                }
+            }
+            return null;
+        }
+        $digits = preg_replace('/\D+/', '', $loginId) ?? '';
+        if (strlen($digits) !== 10) {
+            return null;
+        }
+        $e164 = login_otp_to_e164($digits, $waCountry) ?? ('+91' . $digits);
+        return $findUser($e164, $digits, true);
+    };
+
+    $completeLogin = function (array $userRow, bool $remember = false) use ($redirect, $ctxKey): void {
+        login_otp_reset_ctx($ctxKey);
+        if (function_exists('login_finish_and_redirect')) {
+            login_finish_and_redirect($userRow, $redirect, $remember);
+        }
+        auth_set_session($userRow);
+        $dest = function_exists('site_url') ? site_url($redirect) : $redirect;
+        header('Location: ' . $dest);
+        exit;
     };
 
     $roleAllowed = function (?array $user) use ($roles): bool {
@@ -283,6 +349,99 @@ function login_otp_process(array $config): array
             $msgError = 'Invalid security token. Please reload the page and try again.';
         } else {
             $action = $_POST['action'] ?? '';
+
+            if ($action === 'password_login') {
+                $loginMode = 'password';
+                $loginId = trim((string) ($_POST['user_id'] ?? ''));
+                $password = (string) ($_POST['password'] ?? '');
+                $remember = !empty($_POST['remember_me']);
+                $user = $findByLoginId($loginId);
+                if (!$roleAllowed($user)) {
+                    $msgError = 'No account found for this User ID.';
+                } elseif (isset($user['is_active']) && (int) $user['is_active'] === 0) {
+                    $msgError = $inactiveMessage;
+                } elseif (!$parentYearOk($user)) {
+                    $msgError = $parentBlockedMsg;
+                } elseif (empty($user['password_hash'])) {
+                    $msgError = $otpGatewaysOk
+                        ? 'No password is set yet. Use Login using OTP, then create a password. Or ask the school to set one.'
+                        : 'No password is set for this User ID. Ask the school to set a password, or wait until OTP is available.';
+                } elseif (!password_verify($password, (string) $user['password_hash'])) {
+                    $msgError = 'Incorrect password.';
+                } else {
+                    $completeLogin($user, $remember);
+                }
+            }
+
+            if ($action === 'forgot_send') {
+                $loginMode = 'forgot';
+                $loginId = trim((string) ($_POST['user_id'] ?? ''));
+                $user = $findByLoginId($loginId);
+                if (!$otpGatewaysOk) {
+                    $msgError = 'OTP gateways are off, so password reset by OTP is not available. Contact the school to set a password.';
+                } elseif (!$roleAllowed($user)) {
+                    $msgError = 'No account found for this User ID.';
+                } elseif (isset($user['is_active']) && (int) $user['is_active'] === 0) {
+                    $msgError = $inactiveMessage;
+                } elseif (!$parentYearOk($user)) {
+                    $msgError = $parentBlockedMsg;
+                } else {
+                    $digits = preg_replace('/\D+/', '', (string) ($user['phone'] ?? '')) ?? '';
+                    $last10 = strlen($digits) >= 10 ? substr($digits, -10) : '';
+                    if (strlen($last10) !== 10) {
+                        $msgError = 'This account has no mobile number for OTP. Contact the school.';
+                    } else {
+                        $toE164 = login_otp_to_e164($last10, $waCountry);
+                        if ($toE164 === null) {
+                            $msgError = 'Invalid phone number on this account.';
+                        } else {
+                            $result = $sendOtp($toE164, $user);
+                            if (!empty($result['ok'])) {
+                                $ctx['purpose'] = 'reset';
+                                $ctx['reset_user_id'] = (int) $user['id'];
+                                $msgInfo = $result['info'] ?? 'OTP sent. Enter it below to set a new password.';
+                                $loginMode = 'forgot';
+                            } else {
+                                $msgError = $result['error'] ?? 'Failed to send OTP.';
+                            }
+                        }
+                    }
+                }
+            }
+
+            if ($action === 'forgot_save') {
+                $loginMode = 'forgot';
+                $otpInput = preg_replace('/\D+/', '', (string) ($_POST['otp'] ?? ''));
+                $newPw = (string) ($_POST['new_password'] ?? '');
+                $newPw2 = (string) ($_POST['new_password_confirm'] ?? '');
+                $minLen = function_exists('login_password_min_length') ? login_password_min_length() : 6;
+                if (!preg_match('/^\d{' . $otpLength . '}$/', $otpInput)) {
+                    $msgError = 'Please enter the ' . $otpLength . '-digit OTP.';
+                } elseif (empty($ctx['hash']) || empty($ctx['mobile_e164']) || ($ctx['purpose'] ?? '') !== 'reset') {
+                    $msgError = 'Request a password-reset OTP first.';
+                } elseif (time() > (int) $ctx['expires_at']) {
+                    $msgError = 'OTP expired. Please request a new one.';
+                } elseif ($newPw !== $newPw2) {
+                    $msgError = 'New password and confirmation do not match.';
+                } elseif (strlen($newPw) < $minLen) {
+                    $msgError = 'Password must be at least ' . $minLen . ' characters.';
+                } elseif (!password_verify($otpInput, (string) $ctx['hash'])) {
+                    $msgError = 'Incorrect OTP. Please try again.';
+                } else {
+                    $phonePlus = $ctx['mobile_e164'];
+                    $userRow = $findUser($phonePlus, ltrim($phonePlus, '+'), true);
+                    if ($userRow && $roleAllowed($userRow) && (int) ($userRow['is_active'] ?? 1) === 1 && $parentYearOk($userRow)) {
+                        if (function_exists('login_set_user_password')) {
+                            login_set_user_password((int) $userRow['id'], $newPw);
+                            $userRow['password_hash'] = 'set';
+                        }
+                        login_otp_reset_ctx($ctxKey);
+                        $completeLogin($userRow, false);
+                    } else {
+                        $msgError = $verifyFailMessage;
+                    }
+                }
+            }
 
             if ($action === 'send_otp') {
                 $mobileInput = trim((string) ($_POST['mobile'] ?? ''));
@@ -388,11 +547,7 @@ function login_otp_process(array $config): array
                             $userRow = $findUser($phonePlus, $phonePlain, true);
 
                             if ($userRow && $roleAllowed($userRow) && (int) ($userRow['is_active'] ?? 1) === 1 && $parentYearOk($userRow)) {
-                                auth_set_session($userRow);
-                                login_otp_reset_ctx($ctxKey);
-                                $dest = function_exists('site_url') ? site_url($redirect) : $redirect;
-                                header('Location: ' . $dest);
-                                exit;
+                                $completeLogin($userRow, false);
                             }
 
                             $msgError = $verifyFailMessage;
@@ -417,5 +572,8 @@ function login_otp_process(array $config): array
         'otp_active' => $otpActive,
         'cooldownRemaining' => $cooldownRemaining,
         'ctx' => $ctx,
+        'login_mode' => $loginMode,
+        'otp_gateways_ok' => $otpGatewaysOk,
+        'remembered_login_id' => function_exists('login_remember_read') ? login_remember_read() : '',
     ];
 }
