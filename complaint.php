@@ -1,295 +1,285 @@
 <?php
 /**
- * /pioneerplayschool01/complaint.php
- *
- * Public Complaint Register page styled to match index.php.
- * - Anyone can submit a complaint.
- * - Saves to `complaints` table: id, name, phone, email, message, source, created_at
- * - Uses project includes if present (includes/config.php, includes/db.php, includes/functions.php).
- * - Falls back to minimal PDO helpers when necessary.
- * - On success redirects to ?ok=1 and shows a friendly success panel with a reference code and print option.
- *
- * Place this file at: /pioneerplayschool01/complaint.php
+ * Public parent complaint form.
  */
-
 declare(strict_types=1);
-if (session_status() === PHP_SESSION_NONE) session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
-/* Optional app includes (may provide DB constants / helpers) */
-if (file_exists(__DIR__ . '/includes/config.php')) require_once __DIR__ . '/includes/config.php';
-if (file_exists(__DIR__ . '/includes/db.php'))     require_once __DIR__ . '/includes/db.php';
-if (file_exists(__DIR__ . '/includes/functions.php')) require_once __DIR__ . '/includes/functions.php';
+if (file_exists(__DIR__ . '/includes/config.php')) {
+    require_once __DIR__ . '/includes/config.php';
+}
+if (file_exists(__DIR__ . '/includes/db.php')) {
+    require_once __DIR__ . '/includes/db.php';
+}
+if (file_exists(__DIR__ . '/includes/functions.php')) {
+    require_once __DIR__ . '/includes/functions.php';
+}
+if (file_exists(__DIR__ . '/includes/csrf.php')) {
+    require_once __DIR__ . '/includes/csrf.php';
+}
+require_once __DIR__ . '/includes/simple_captcha.php';
 
-/* ---------------------------
-   Minimal compatible helpers (compatible with index.php)
-   --------------------------- */
 if (!function_exists('ensure_pdo')) {
-    function ensure_pdo(): ?\PDO {
-        foreach (['pdo','db','dbh','DB'] as $g) {
-            if (!empty($GLOBALS[$g]) && $GLOBALS[$g] instanceof \PDO) { $GLOBALS['pdo'] = $GLOBALS[$g]; return $GLOBALS[$g]; }
-        }
-        if (defined('DB_DSN')) {
-            try {
-                $user = defined('DB_USER') ? constant('DB_USER') : null;
-                $pass = defined('DB_PASS') ? constant('DB_PASS') : null;
-                $pdo = new \PDO(constant('DB_DSN'), $user, $pass, [
-                    \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
-                    \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
-                ]);
-                $GLOBALS['pdo'] = $pdo;
-                return $pdo;
-            } catch (\PDOException $e) { error_log('ensure_pdo: ' . $e->getMessage()); return null; }
+    function ensure_pdo(): ?\PDO
+    {
+        foreach (['pdo', 'db', 'dbh', 'DB'] as $g) {
+            if (!empty($GLOBALS[$g]) && $GLOBALS[$g] instanceof \PDO) {
+                $GLOBALS['pdo'] = $GLOBALS[$g];
+                return $GLOBALS[$g];
+            }
         }
         if (defined('DB_HOST') && defined('DB_NAME')) {
-            $host = DB_HOST; $port = defined('DB_PORT') ? DB_PORT : 3306; $name = DB_NAME;
-            $user = defined('DB_USER') ? DB_USER : null; $pass = defined('DB_PASS') ? DB_PASS : null;
-            $dsn = "mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4";
+            $host = DB_HOST;
+            $port = defined('DB_PORT') ? DB_PORT : 3306;
+            $name = DB_NAME;
+            $user = defined('DB_USER') ? DB_USER : null;
+            $pass = defined('DB_PASS') ? DB_PASS : null;
             try {
-                $pdo = new \PDO($dsn, $user, $pass, [
+                $pdo = new \PDO("mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4", $user, $pass, [
                     \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
                     \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
                 ]);
                 $GLOBALS['pdo'] = $pdo;
                 return $pdo;
-            } catch (\PDOException $e) { error_log('ensure_pdo fallback: ' . $e->getMessage()); return null; }
+            } catch (\PDOException $e) {
+                return null;
+            }
         }
         return null;
     }
 }
-
-if (!function_exists('db_run')) {
-    function db_run(string $sql, array $params = []): bool {
-        if (is_callable('db_execute')) {
-            try { return (bool) call_user_func('db_execute', $sql, $params); } catch (Throwable $e) {}
-        }
-        $pdo = ensure_pdo();
-        if (!($pdo instanceof \PDO)) return false;
-        try { $stmt = $pdo->prepare($sql); return (bool)$stmt->execute($params); }
-        catch (Throwable $e) { error_log('db_run error: ' . $e->getMessage()); return false; }
-    }
-}
-
 if (!function_exists('db_get_one')) {
-    function db_get_one(string $sql, array $params = []) {
+    function db_get_one(string $sql, array $params = [])
+    {
         if (is_callable('db_fetch_one')) {
-            try { return call_user_func('db_fetch_one', $sql, $params); } catch (Throwable $e) {}
+            try {
+                return call_user_func('db_fetch_one', $sql, $params);
+            } catch (Throwable $e) {
+            }
         }
         $pdo = ensure_pdo();
-        if (!($pdo instanceof \PDO)) return null;
-        try { $stmt = $pdo->prepare($sql); $stmt->execute($params); $row = $stmt->fetch(); return $row === false ? null : $row; }
-        catch (Throwable $e) { error_log('db_get_one error: ' . $e->getMessage()); return null; }
-    }
-}
-
-if (!function_exists('e')) { function e(string $v): string { return htmlspecialchars($v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); } }
-
-if (!function_exists('table_exists')) {
-    function table_exists(string $name): bool {
+        if (!($pdo instanceof \PDO)) {
+            return null;
+        }
         try {
-            $r = db_get_one("SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :t", [':t'=>$name]);
-            return !empty($r) && intval($r['cnt']) > 0;
-        } catch (Throwable $e) { return false; }
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $row = $stmt->fetch();
+            return $row === false ? null : $row;
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+}
+if (!function_exists('e')) {
+    function e(string $v): string
+    {
+        return htmlspecialchars($v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+}
+if (!function_exists('table_exists')) {
+    function table_exists(string $name): bool
+    {
+        try {
+            $r = db_get_one(
+                'SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :t',
+                [':t' => $name]
+            );
+            return !empty($r) && (int) ($r['cnt'] ?? 0) > 0;
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 }
 
-/* ---------------------------
-   Load site branding (from schools table, fallback defaults)
-   --------------------------- */
-$school = db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id'=>1]) ?: [];
+$school = db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => 1]) ?: [];
 require_once __DIR__ . '/includes/public_site_layout.php';
 $ps = public_site_prepare($school);
-$hero_subtitle = $school['hero_subtitle'] ?? $school['short_about'] ?? 'Share your concern — we will respond promptly.';
 $homeUrl = $ps['homeUrl'];
-
-/* ---------------------------
-   Ensure complaints table exists
-   --------------------------- */
-if (!table_exists('complaints')) {
-    http_response_code(500);
-    ?>
-    <!doctype html><html><head><meta charset="utf-8"><title>Missing table</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"></head>
-    <body class="bg-light">
-    <div class="container py-5">
-      <div class="alert alert-danger">The <strong>complaints</strong> table does not exist. Please create it first.</div>
-      <p>Example SQL (run once):</p>
-      <pre>CREATE TABLE IF NOT EXISTS `complaints` (
-  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  `name` VARCHAR(191) DEFAULT NULL,
-  `phone` VARCHAR(50) DEFAULT NULL,
-  `email` VARCHAR(191) DEFAULT NULL,
-  `message` TEXT,
-  `source` VARCHAR(100) DEFAULT 'website',
-  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;</pre>
-      <a class="btn btn-primary" href="<?php echo e(function_exists('site_url') ? site_url('/') : '/'); ?>">Back to Home</a>
-    </div></body></html>
-    <?php
-    exit;
+$schoolPhone = trim((string) ($school['contact_phone'] ?? $ps['contact_phone'] ?? ''));
+$csrf = function_exists('get_csrf_token') ? get_csrf_token() : (string) ($_SESSION['csrf_token'] ?? '');
+if ($csrf === '') {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
+    $csrf = $_SESSION['csrf_token'];
 }
 
-/* ---------------------------
-   Handle submission
-   --------------------------- */
+$hasTable = table_exists('complaints');
 $errors = [];
-$old = ['name'=>'','phone'=>'','email'=>'','message'=>''];
+$old = ['name' => '', 'phone' => '', 'message' => ''];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $name = trim((string)($_POST['name'] ?? ''));
-    $phone = trim((string)($_POST['phone'] ?? ''));
-    $email = trim((string)($_POST['email'] ?? ''));
-    $message = trim((string)($_POST['message'] ?? ''));
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $hasTable) {
+    $name = trim((string) ($_POST['name'] ?? ''));
+    $phone = preg_replace('/\D+/', '', (string) ($_POST['phone'] ?? '')) ?? '';
+    $message = trim((string) ($_POST['message'] ?? ''));
+    $old = ['name' => $name, 'phone' => (string) ($_POST['phone'] ?? ''), 'message' => $message];
 
-    $old['name'] = $name; $old['phone'] = $phone; $old['email'] = $email; $old['message'] = $message;
+    $token = (string) ($_POST['csrf'] ?? $_POST['csrf_token'] ?? '');
+    $csrfOk = function_exists('validate_csrf_token')
+        ? validate_csrf_token($token)
+        : ($csrf !== '' && hash_equals($csrf, $token));
+    $honeypot = trim((string) ($_POST['website'] ?? $_POST['company'] ?? ''));
 
-    if ($message === '') $errors[] = 'Please enter your complaint or message.';
-    if ($phone === '' && $email === '') $errors[] = 'Provide a phone number or email so we can contact you.';
-    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Please provide a valid email address.';
+    if (!$csrfOk) {
+        $errors[] = 'Please refresh the page and try again.';
+    }
+    if ($honeypot !== '') {
+        $errors[] = 'Could not send. Please try again.';
+    }
+    if ($name === '') {
+        $errors[] = 'Please write your name.';
+    }
+    if (strlen($phone) < 10) {
+        $errors[] = 'Please enter a 10-digit mobile number.';
+    }
+    if ($message === '' || mb_strlen($message) < 8) {
+        $errors[] = 'Please write what happened.';
+    }
+    if (!simple_captcha_ok((string) ($_POST['captcha'] ?? ''))) {
+        $errors[] = 'Please type the correct answer from the picture.';
+    }
 
-    if (empty($errors)) {
+    if ($errors === []) {
+        $phone10 = substr($phone, -10);
+        try {
+            $recent = db_get_one(
+                "SELECT COUNT(*) AS c FROM complaints
+                 WHERE phone LIKE :p AND created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)",
+                [':p' => '%' . $phone10]
+            );
+            if ((int) ($recent['c'] ?? 0) >= 3) {
+                $errors[] = 'Please wait a few minutes before sending again.';
+            }
+        } catch (Throwable $e) {
+        }
+    }
+
+    if ($errors === []) {
         try {
             $pdo = ensure_pdo();
-            if (!($pdo instanceof \PDO)) throw new \RuntimeException('Database connection not available.');
-
-            // adapt 'source' safely to column constraints (if enum or short length)
-            $desired_source = 'website';
-            $final_source = $desired_source;
-            try {
-                $sth = $pdo->prepare("SELECT COLUMN_TYPE, CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'complaints' AND COLUMN_NAME = 'source' LIMIT 1");
-                $sth->execute();
-                $col = $sth->fetch(\PDO::FETCH_ASSOC);
-                if ($col) {
-                    $ctype = $col['COLUMN_TYPE'] ?? '';
-                    $max = !empty($col['CHARACTER_MAXIMUM_LENGTH']) ? (int)$col['CHARACTER_MAXIMUM_LENGTH'] : 0;
-                    if ($ctype && stripos($ctype,'enum(') === 0) {
-                        preg_match_all("/'([^']*)'/", $ctype, $m);
-                        $enum = $m[1] ?? [];
-                        if (!in_array($desired_source, $enum, true)) $final_source = $enum[0] ?? substr($desired_source,0,50);
-                    } elseif ($max > 0 && strlen($desired_source) > $max) {
-                        $final_source = substr($desired_source,0,$max);
-                    }
-                }
-            } catch (Throwable $t) { /* ignore and use default */ }
-
-            $stmt = $pdo->prepare("INSERT INTO complaints (name, phone, email, message, source, created_at) VALUES (:name,:phone,:email,:message,:source,NOW())");
-            $stmt->execute([
-                ':name' => $name !== '' ? $name : null,
-                ':phone' => $phone !== '' ? $phone : null,
-                ':email' => $email !== '' ? $email : null,
+            if (!($pdo instanceof \PDO)) {
+                throw new RuntimeException('no db');
+            }
+            $phoneStore = (strlen($phone) === 10) ? $phone : substr($phone, -10);
+            $hasStatus = function_exists('column_exists') && column_exists('complaints', 'status');
+            $sql = $hasStatus
+                ? 'INSERT INTO complaints (name, phone, email, message, source, status, created_at)
+                   VALUES (:name, :phone, NULL, :message, :source, :status, NOW())'
+                : 'INSERT INTO complaints (name, phone, email, message, source, created_at)
+                   VALUES (:name, :phone, NULL, :message, :source, NOW())';
+            $params = [
+                ':name' => $name,
+                ':phone' => $phoneStore,
                 ':message' => $message,
-                ':source' => $final_source
-            ]);
-            $insertId = (int)$pdo->lastInsertId();
-            $ref = 'CMP-' . date('Ymd') . '-' . str_pad((string)$insertId, 4, '0', STR_PAD_LEFT);
-            $_SESSION['complaint_ref'] = $ref;
-
+                ':source' => 'website',
+            ];
+            if ($hasStatus) {
+                $params[':status'] = 'open';
+            }
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $insertId = (int) $pdo->lastInsertId();
+            $_SESSION['complaint_ref'] = 'CMP-' . date('Ymd') . '-' . str_pad((string) $insertId, 4, '0', STR_PAD_LEFT);
             header('Location: ' . (function_exists('site_url') ? site_url('/complaint.php?ok=1') : '/complaint.php?ok=1'));
             exit;
         } catch (Throwable $e) {
-            error_log('complaint submit error: ' . $e->getMessage());
-            $errors[] = 'Database error. Please try again later.';
+            error_log('complaint submit: ' . $e->getMessage());
+            $errors[] = 'Could not send. Please try again later.';
         }
     }
 }
 
-/* after redirect show ref */
 $success = false;
 $complaint_ref = '';
 if (!empty($_GET['ok']) && !empty($_SESSION['complaint_ref'])) {
     $success = true;
-    $complaint_ref = $_SESSION['complaint_ref'];
+    $complaint_ref = (string) $_SESSION['complaint_ref'];
     unset($_SESSION['complaint_ref']);
 }
 
-/* ---------------------------
-   Render page (styled like index.php)
-   --------------------------- */
-public_site_render_head($ps, 'Complaint Register', $hero_subtitle);
+simple_captcha_ensure(true);
+$captchaSrc = function_exists('site_url') ? site_url('/captcha.php') : '/captcha.php';
+
+public_site_render_head($ps, 'Complaint', 'Tell the school if something went wrong. We will call you.');
 public_site_render_nav($ps, 'complaint');
-public_site_render_hero('Complaint Register', $hero_subtitle, $ps['hero']);
 ?>
-<section class="py-5 public-enquiry">
+<section class="py-4 public-enquiry">
   <div class="container">
     <div class="row justify-content-center">
-      <div class="col-lg-8">
+      <div class="col-lg-6">
 
-        <?php if ($success): ?>
-          <div class="public-success-panel mb-4">
-            <div class="d-flex justify-content-between align-items-start">
-              <div>
-                <h3 class="mb-1">Your complaint has been received</h3>
-                <p class="mb-1 text-muted">Thank you — your complaint has been submitted successfully. We will contact you within 48 hours.</p>
-                <p class="mb-0"><strong>Reference:</strong> <?php echo e($complaint_ref); ?></p>
-                <div class="mt-3 small text-muted">
-                  <ul class="mb-0">
-                    <li>We will acknowledge and investigate your complaint.</li>
-                    <li>If urgent, please call: <strong><?php echo e($school['contact_phone'] ?? ''); ?></strong></li>
-                  </ul>
-                </div>
-              </div>
-              <div class="text-end ms-3">
-                <button class="btn btn-print mb-2" onclick="window.print();">Print Receipt</button>
-                <a class="btn btn-outline-secondary" href="<?php echo e($homeUrl); ?>">Back to Home</a>
-              </div>
-            </div>
+        <?php if (!$hasTable): ?>
+          <div class="alert alert-danger">This form is not available right now.</div>
+        <?php elseif ($success): ?>
+          <div class="public-success-panel">
+            <h1 class="h4 mb-2">We have your complaint</h1>
+            <p class="mb-2">Thank you. The school will call you on the number you gave.</p>
+            <?php if ($schoolPhone !== ''): ?>
+              <p class="mb-2">Urgent? Call <?php echo e($schoolPhone); ?></p>
+            <?php endif; ?>
+            <p class="small text-muted mb-3">Ref <?php echo e($complaint_ref); ?></p>
+            <a class="btn btn-submit text-white" href="<?php echo e($homeUrl); ?>">Back to home</a>
           </div>
         <?php else: ?>
+          <div class="card card-soft p-4 border-0">
+            <h1 class="h4 mb-1">Tell us if something is wrong</h1>
+            <p class="text-muted mb-3">Write what happened. We will call you. For a thank-you or idea use Feedback.</p>
 
-          <div class="card card-soft p-4 mb-3 border-0">
-            <h3 class="text-center fw-bold section-title d-block mb-3">Submit a Complaint</h3>
-
-            <?php if (!empty($errors)): ?>
-              <div class="alert alert-danger"><ul class="mb-0"><?php foreach ($errors as $err) echo '<li>' . e($err) . '</li>'; ?></ul></div>
+            <?php if ($errors !== []): ?>
+              <div class="alert alert-danger py-2"><ul class="mb-0"><?php foreach ($errors as $err): ?><li><?php echo e($err); ?></li><?php endforeach; ?></ul></div>
             <?php endif; ?>
 
-            <form method="post" novalidate>
-              <div class="row g-3">
-                <div class="col-md-6">
-                  <label class="form-label">Your name</label>
-                  <input name="name" class="form-control" value="<?php echo e($old['name']); ?>" placeholder="Parent / Guardian name">
-                </div>
+            <form method="post" autocomplete="on">
+              <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+              <div class="fb-hp" aria-hidden="true">
+                <label>Website</label>
+                <input type="text" name="website" tabindex="-1" autocomplete="off">
+              </div>
 
-                <div class="col-md-6">
-                  <label class="form-label">Phone</label>
-                  <input name="phone" class="form-control" value="<?php echo e($old['phone']); ?>" placeholder="+91 98765 43210">
-                </div>
+              <div class="mb-3">
+                <label class="form-label" for="cp_name">Your name</label>
+                <input id="cp_name" name="name" class="form-control" required maxlength="80" value="<?php echo e($old['name']); ?>" placeholder="Parent name">
+              </div>
+              <div class="mb-3">
+                <label class="form-label" for="cp_phone">Mobile</label>
+                <input id="cp_phone" name="phone" class="form-control" required inputmode="numeric" maxlength="15" value="<?php echo e($old['phone']); ?>" placeholder="10-digit number">
+              </div>
+              <div class="mb-3">
+                <label class="form-label" for="cp_msg">What happened</label>
+                <textarea id="cp_msg" name="message" rows="4" class="form-control" required maxlength="2000" placeholder="When, who, and what went wrong"><?php echo e($old['message']); ?></textarea>
+              </div>
 
-                <div class="col-12">
-                  <label class="form-label">Email</label>
-                  <input name="email" class="form-control" value="<?php echo e($old['email']); ?>" placeholder="your@email.com">
+              <div class="mb-3">
+                <label class="form-label" for="cp_captcha">Type the answer from the picture</label>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                  <img id="fbCapImg" src="<?php echo e($captchaSrc); ?>" alt="Captcha" width="220" height="64" class="fb-captcha-img">
+                  <input id="cp_captcha" name="captcha" class="form-control" required inputmode="numeric" maxlength="3" placeholder="Answer" style="max-width:110px" autocomplete="off">
+                  <button type="button" class="btn btn-link btn-sm p-0" id="fbCapRefresh">New picture</button>
                 </div>
+              </div>
 
-                <div class="col-12">
-                  <label class="form-label">Complaint / Message *</label>
-                  <textarea name="message" rows="6" class="form-control" required><?php echo e($old['message']); ?></textarea>
-                </div>
-
-                <input type="hidden" name="source" value="website">
-
-                <div class="col-12">
-                  <div class="d-grid d-md-flex justify-content-md-end gap-2">
-                    <a href="<?php echo e($homeUrl); ?>" class="btn btn-outline-secondary">Back</a>
-                    <button type="submit" class="btn btn-submit btn-lg text-white">Submit Complaint</button>
-                  </div>
-                </div>
+              <div class="d-grid">
+                <button type="submit" class="btn btn-submit btn-lg text-white">Send</button>
               </div>
             </form>
           </div>
-
-          <div class="card p-3 small text-muted">
-            <strong>Tips:</strong>
-            <ul class="mb-0">
-              <li>Provide clear details (when, where, who) to help our investigation.</li>
-              <li>Include contact information so we can follow up.</li>
-            </ul>
-          </div>
-
         <?php endif; ?>
 
       </div>
     </div>
   </div>
 </section>
+<script>
+var capImg = document.getElementById('fbCapImg');
+var capBtn = document.getElementById('fbCapRefresh');
+if (capImg && capBtn) {
+  capBtn.addEventListener('click', function () {
+    var u = capImg.src.split('?')[0];
+    capImg.src = u + '?r=1&v=' + Date.now();
+  });
+}
+</script>
 <?php
 public_site_render_footer($ps);
 public_site_render_close();
