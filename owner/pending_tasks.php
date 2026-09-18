@@ -12,5 +12,5 @@ require_once __DIR__ . '/../includes/features/feature_run.php';
 feature_run('pending_tasks', [
     'panel' => 'owner',
     'task_scope' => 'all',
-    'page_title' => 'Pending Tasks',
+    'page_title' => 'Reception Tasks',
 ]);

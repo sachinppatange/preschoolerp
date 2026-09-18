@@ -12,7 +12,7 @@ require_once __DIR__ . '/../includes/features/feature_run.php';
 feature_run('pending_tasks', [
     'panel' => 'reception',
     'task_scope' => 'assigned_to_me',
-    'page_title' => 'Pending Tasks (Assigned to me)',
+    'page_title' => 'My tasks',
     'show_assign_ui' => false,
     'allow_assign_action' => false,
     'allow_delete_ui' => false,
