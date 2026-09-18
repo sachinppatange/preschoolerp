@@ -1,437 +1,371 @@
 <?php
 /**
- * Shared feature: notices_publish
- * Loaded via feature_run() after panel_bootstrap().
+ * Publish a school notice parents can see. One form, send now.
  */
 declare(strict_types=1);
 
 $cfg = $GLOBALS['FEATURE_CONFIG'] ?? [];
-$panel = (string)($cfg['panel'] ?? 'owner');
+$panel = (string) ($cfg['panel'] ?? 'reception');
+$page_title = 'Notices';
+$pageTitle = $page_title;
 
-$esc = function(string $v) { return e($v); };
-
-/* Ensure notices table exists before proceeding */
-if (!table_exists('notices')) {
-    require_once __DIR__ . '/../header.php';
-echo '<div class="container py-4"><div class="alert alert-danger">The <strong>notices</strong> table does not exist. कृपया डेटाबेस तपासा.</div></div>';
-    require_once __DIR__ . '/../footer.php';
-    exit;
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
 }
+$CSRF = function_exists('get_csrf_token') ? get_csrf_token() : (string) $_SESSION['csrf_token'];
+$userId = (int) (auth_user_id() ?? 0);
 
-/* -------------------------
-   Actions: add, edit, delete, publish, unpublish, get (json), view (fragment), export
-   ------------------------- */
-$action = $_REQUEST['action'] ?? 'list';
-$messages = []; $errors = [];
-
-/* ADD */
-if ($action === 'add' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $school_id = isset($_POST['school_id']) && $_POST['school_id'] !== '' ? (int)$_POST['school_id'] : 1;
-    $title = trim((string)($_POST['title'] ?? ''));
-    $message = trim((string)($_POST['message'] ?? ''));
-    $audience = trim((string)($_POST['audience'] ?? 'all'));
-    $published_by = isset($_POST['published_by']) && $_POST['published_by'] !== '' ? (int)$_POST['published_by'] : null;
-    $published_at = trim((string)($_POST['published_at'] ?? '')) ?: null;
-    $expires_at = trim((string)($_POST['expires_at'] ?? '')) ?: null;
-
-    if ($title === '') $errors[] = 'Title required.';
-    if ($message === '') $errors[] = 'Message required.';
-
-    if (empty($errors)) {
-        $ok = safe_db_run("INSERT INTO notices (school_id,title,message,audience,published_by,published_at,expires_at,created_at)
-                           VALUES (:school_id,:title,:message,:audience,:published_by,:published_at,:expires_at,NOW())",
-            [
-                ':school_id'=>$school_id,
-                ':title'=>$title,
-                ':message'=>$message,
-                ':audience'=>$audience,
-                ':published_by'=>$published_by,
-                ':published_at'=>$published_at,
-                ':expires_at'=>$expires_at
-            ]);
-        if ($ok) { $messages[] = 'Notice added.'; header('Location: ?'); exit; } else $errors[] = 'Insert failed.';
+$hasTable = function_exists('table_exists') && table_exists('notices');
+if (!$hasTable) {
+    try {
+        $pdo = pdo_connect();
+        if ($pdo instanceof PDO) {
+            $pdo->exec(
+                "CREATE TABLE IF NOT EXISTS notices (
+                  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  school_id INT NULL,
+                  class_id INT NULL,
+                  title VARCHAR(255) NOT NULL,
+                  message TEXT,
+                  body TEXT,
+                  audience VARCHAR(50) DEFAULT 'parents',
+                  published_by INT NULL,
+                  created_by INT NULL,
+                  published_at DATETIME NULL,
+                  expires_at DATE NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at DATETIME NULL,
+                  INDEX (published_at),
+                  INDEX (class_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+            $hasTable = true;
+        }
+    } catch (Throwable $e) {
+        $hasTable = function_exists('table_exists') && table_exists('notices');
     }
 }
 
-/* EDIT */
-if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $id = !empty($_POST['id']) ? (int)$_POST['id'] : 0;
-    $school_id = isset($_POST['school_id']) && $_POST['school_id'] !== '' ? (int)$_POST['school_id'] : 1;
-    $title = trim((string)($_POST['title'] ?? ''));
-    $message = trim((string)($_POST['message'] ?? ''));
-    $audience = trim((string)($_POST['audience'] ?? 'all'));
-    $published_by = isset($_POST['published_by']) && $_POST['published_by'] !== '' ? (int)$_POST['published_by'] : null;
-    $published_at = trim((string)($_POST['published_at'] ?? '')) ?: null;
-    $expires_at = trim((string)($_POST['expires_at'] ?? '')) ?: null;
+$col = static function (string $name) use ($hasTable): bool {
+    return $hasTable && function_exists('column_exists') && column_exists('notices', $name);
+};
 
-    if ($id <= 0) $errors[] = 'Invalid id.';
-    if ($title === '') $errors[] = 'Title required.';
-    if ($message === '') $errors[] = 'Message required.';
+$csrfOk = static function (string $token) use ($CSRF): bool {
+    return $token !== '' && hash_equals($CSRF, $token);
+};
 
-    if (empty($errors)) {
-        $ok = safe_db_run("UPDATE notices SET school_id=:school_id, title=:title, message=:message, audience=:audience, published_by=:published_by, published_at=:published_at, expires_at=:expires_at, created_at = created_at WHERE id=:id",
-            [
-                ':school_id'=>$school_id,
-                ':title'=>$title,
-                ':message'=>$message,
-                ':audience'=>$audience,
-                ':published_by'=>$published_by,
-                ':published_at'=>$published_at,
-                ':expires_at'=>$expires_at,
-                ':id'=>$id
-            ]);
-        if ($ok) { $messages[] = 'Notice updated.'; header('Location: ?'); exit; } else $errors[] = 'Update failed.';
+$classes = (function_exists('table_exists') && table_exists('classes'))
+    ? (safe_db_get_all('SELECT id, name FROM classes ORDER BY name ASC') ?: [])
+    : [];
+
+$saveNotice = static function (array $data, int $id) use ($col, $userId): bool {
+    $title = $data['title'];
+    $text = $data['message'];
+    $classId = $data['class_id'];
+    $expires = $data['expires_at'];
+    $publishNow = $data['publish'];
+
+    $fields = [];
+    $params = [];
+    if ($col('title')) {
+        $fields['title'] = $title;
+    }
+    if ($col('message')) {
+        $fields['message'] = $text;
+    }
+    if ($col('body')) {
+        $fields['body'] = $text;
+    }
+    if ($col('description') && !$col('body') && !$col('message')) {
+        $fields['description'] = $text;
+    }
+    if ($col('audience')) {
+        $fields['audience'] = 'parents';
+    }
+    if ($col('class_id')) {
+        $fields['class_id'] = $classId > 0 ? $classId : null;
+    }
+    if ($col('school_id')) {
+        $fields['school_id'] = 1;
+    }
+    if ($col('expires_at')) {
+        $fields['expires_at'] = $expires !== '' ? $expires : null;
+    }
+    if ($publishNow) {
+        if ($col('published_at')) {
+            $fields['published_at'] = date('Y-m-d H:i:s');
+        }
+        if ($col('published_by')) {
+            $fields['published_by'] = $userId > 0 ? $userId : null;
+        }
+    }
+    if ($id <= 0 && $col('created_by')) {
+        $fields['created_by'] = $userId > 0 ? $userId : null;
+    }
+    if ($id > 0 && $col('updated_at')) {
+        $fields['updated_at'] = date('Y-m-d H:i:s');
+    }
+
+    if ($fields === []) {
+        return false;
+    }
+
+    if ($id > 0) {
+        $set = [];
+        foreach ($fields as $k => $v) {
+            $set[] = $k . ' = :' . $k;
+            $params[':' . $k] = $v;
+        }
+        $params[':id'] = $id;
+        return (bool) safe_db_run('UPDATE notices SET ' . implode(', ', $set) . ' WHERE id = :id', $params);
+    }
+
+    $cols = array_keys($fields);
+    $ph = [];
+    foreach ($cols as $k) {
+        $ph[] = ':' . $k;
+        $params[':' . $k] = $fields[$k];
+    }
+    if ($col('created_at') && !isset($fields['created_at'])) {
+        return (bool) safe_db_run(
+            'INSERT INTO notices (' . implode(',', $cols) . ', created_at) VALUES (' . implode(',', $ph) . ', NOW())',
+            $params
+        );
+    }
+    return (bool) safe_db_run(
+        'INSERT INTO notices (' . implode(',', $cols) . ') VALUES (' . implode(',', $ph) . ')',
+        $params
+    );
+};
+
+if ($hasTable && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = (string) ($_POST['action'] ?? '');
+    $token = (string) ($_POST['csrf_token'] ?? '');
+    if (!$csrfOk($token)) {
+        set_flash('error', 'Could not save. Refresh and try again.');
+        header('Location: ?');
+        exit;
+    }
+
+    $id = (int) ($_POST['id'] ?? 0);
+
+    if ($action === 'delete' && $id > 0) {
+        safe_db_run('DELETE FROM notices WHERE id = :id', [':id' => $id]);
+        set_flash('success', 'Notice removed.');
+        header('Location: ?');
+        exit;
+    }
+
+    if ($action === 'hide' && $id > 0 && $col('published_at')) {
+        safe_db_run('UPDATE notices SET published_at = NULL WHERE id = :id', [':id' => $id]);
+        set_flash('success', 'Hidden from parents.');
+        header('Location: ?');
+        exit;
+    }
+
+    if ($action === 'show' && $id > 0 && $col('published_at')) {
+        $extra = '';
+        $params = [':id' => $id];
+        if ($col('published_by') && $userId > 0) {
+            $extra = ', published_by = :by';
+            $params[':by'] = $userId;
+        }
+        safe_db_run('UPDATE notices SET published_at = NOW()' . $extra . ' WHERE id = :id', $params);
+        set_flash('success', 'Parents can see this notice now.');
+        header('Location: ?');
+        exit;
+    }
+
+    if ($action === 'save') {
+        $title = trim((string) ($_POST['title'] ?? ''));
+        $message = trim((string) ($_POST['message'] ?? ''));
+        $classId = (int) ($_POST['class_id'] ?? 0);
+        $expires = trim((string) ($_POST['expires_at'] ?? ''));
+        $sendNow = !empty($_POST['send_now']) || $id <= 0;
+        if ($expires !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $expires)) {
+            $expires = '';
+        }
+        if ($title === '' || $message === '') {
+            set_flash('error', 'Write a title and a message.');
+            header('Location: ?' . ($id > 0 ? 'id=' . $id : ''));
+            exit;
+        }
+        $ok = $saveNotice([
+            'title' => $title,
+            'message' => $message,
+            'class_id' => $classId,
+            'expires_at' => $expires,
+            'publish' => $sendNow,
+        ], $id);
+        set_flash($ok ? 'success' : 'error', $ok ? ($sendNow ? 'Notice sent to parents.' : 'Draft saved.') : 'Save failed.');
+        header('Location: ?');
+        exit;
     }
 }
 
-/* PUBLISH (set published_at to now) */
-if ($action === 'publish' && !empty($_GET['id'])) {
-    $id = (int)$_GET['id'];
-    $by = auth_user_id();
-    $ok = safe_db_run("UPDATE notices SET published_by = :by, published_at = NOW() WHERE id = :id", [':by'=>$by, ':id'=>$id]);
-    if ($ok) $messages[] = 'Notice published.'; else $errors[] = 'Publish failed.';
+$edit = null;
+$editId = (int) ($_GET['id'] ?? 0);
+if ($hasTable && $editId > 0) {
+    $edit = safe_db_get_one('SELECT * FROM notices WHERE id = :id LIMIT 1', [':id' => $editId]);
 }
 
-/* UNPUBLISH (clear published_at) */
-if ($action === 'unpublish' && !empty($_GET['id'])) {
-    $id = (int)$_GET['id'];
-    $ok = safe_db_run("UPDATE notices SET published_at = NULL WHERE id = :id", [':id'=>$id]);
-    if ($ok) $messages[] = 'Notice unpublished.'; else $errors[] = 'Unpublish failed.';
-}
-
-/* DELETE */
-/* BACKUP: Phase-A — delete requires POST + CSRF (was unsafe GET) */
-if (function_exists('secure_delete_blocked_get') && secure_delete_blocked_get($action)) {
-    if (isset($errors) && is_array($errors)) { $errors[] = 'Delete requires confirmation (POST).'; }
-    elseif (isset($messages) && is_array($messages)) { $messages[] = 'Delete requires confirmation (POST).'; }
-}
-$deleteId = function_exists('secure_delete_id') ? secure_delete_id() : 0;
-if ($deleteId > 0) {
-    $id = $deleteId;
-    $ok = safe_db_run("DELETE FROM notices WHERE id = :id", [':id'=>$id]);
-    if ($ok) $messages[] = 'Notice deleted.'; else $errors[] = 'Delete failed.';
-}
-
-/* GET for edit (JSON) */
-if ($action === 'get' && !empty($_GET['id'])) {
-    $id = (int)$_GET['id'];
-    header('Content-Type: application/json; charset=utf-8');
-    $row = safe_db_get_one("SELECT id, school_id, title, message, audience, published_by, DATE_FORMAT(published_at,'%Y-%m-%d') AS published_at, DATE_FORMAT(expires_at,'%Y-%m-%d') AS expires_at, created_at FROM notices WHERE id = :id LIMIT 1", [':id'=>$id]);
-    if (!$row) { echo json_encode(['error'=>'Notice not found']); exit; }
-    echo json_encode(['ok'=>true, 'data'=>$row]); exit;
-}
-
-/* VIEW modal fragment */
-if ($action === 'view' && !empty($_GET['id'])) {
-    $id = (int)$_GET['id'];
-    if ($id <= 0) { echo '<div class="text-danger p-3">Invalid id</div>'; exit; }
-    $row = safe_db_get_one("SELECT n.*, COALESCE(u.name,'') AS publisher_name FROM notices n LEFT JOIN users u ON u.id = n.published_by WHERE n.id = :id LIMIT 1", [':id'=>$id]);
-    if (!$row) { echo '<div class="text-muted p-3">Notice not found</div>'; exit; }
-
-    echo '<dl class="row p-3">';
-    echo '<dt class="col-sm-3">ID</dt><dd class="col-sm-9">'.(int)$row['id'].'</dd>';
-    echo '<dt class="col-sm-3">Title</dt><dd class="col-sm-9">'.e($row['title']).'</dd>';
-    echo '<dt class="col-sm-3">Audience</dt><dd class="col-sm-9">'.e($row['audience']).'</dd>';
-    echo '<dt class="col-sm-3">Message</dt><dd class="col-sm-9"><pre style="white-space:pre-wrap;">'.e($row['message']).'</pre></dd>';
-    echo '<dt class="col-sm-3">Published by</dt><dd class="col-sm-9">'.($row['publisher_name'] ? e($row['publisher_name']) : '—').'</dd>';
-    echo '<dt class="col-sm-3">Published at</dt><dd class="col-sm-9">'.($row['published_at'] ?? '—').'</dd>';
-    echo '<dt class="col-sm-3">Expires at</dt><dd class="col-sm-9">'.($row['expires_at'] ?? '—').'</dd>';
-    echo '<dt class="col-sm-3">Created</dt><dd class="col-sm-9">'.e($row['created_at']).'</dd>';
-    echo '</dl>';
-    exit;
-}
-
-/* EXPORT CSV */
-if ($action === 'export') {
-    $where=[]; $params=[];
-    if (!empty($_GET['q'])) { $where[] = "(title LIKE :q OR message LIKE :q)"; $params[':q'] = '%'.trim($_GET['q']).'%'; }
-    if (!empty($_GET['audience'])) { $where[] = "audience = :audience"; $params[':audience'] = trim($_GET['audience']); }
-    $whereSql = $where ? ('WHERE '.implode(' AND ',$where)) : '';
-    $rows = safe_db_get_all("SELECT n.*, COALESCE(u.name,'') AS publisher_name FROM notices n LEFT JOIN users u ON u.id = n.published_by $whereSql ORDER BY n.created_at DESC", $params);
-
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=notices_'.date('Ymd_His').'.csv');
-    $out = fopen('php://output','w');
-    fputcsv($out, ['ID','School ID','Title','Message','Audience','Published By','Published At','Expires At','Created At']);
-    foreach ($rows as $r) {
-        fputcsv($out, [
-            $r['id'], $r['school_id'] ?? '', $r['title'] ?? '', preg_replace("/\r\n|\r|\n/"," ", $r['message'] ?? ''), $r['audience'] ?? '',
-            $r['publisher_name'] ?? '', $r['published_at'] ?? '', $r['expires_at'] ?? '', $r['created_at'] ?? ''
-        ]);
+$textOf = static function (array $n): string {
+    foreach (['message', 'body', 'description', 'content'] as $k) {
+        if (isset($n[$k]) && trim((string) $n[$k]) !== '') {
+            return (string) $n[$k];
+        }
     }
-    fclose($out); exit;
+    return '';
+};
+
+$tab = trim((string) ($_GET['tab'] ?? 'live'));
+if (!in_array($tab, ['live', 'hidden', 'all'], true)) {
+    $tab = 'live';
 }
 
-/* -------------------------
-   Filters & Pagination
-   ------------------------- */
-$page = max(1, (int)($_GET['page'] ?? 1));
-$perPage = 25; $offset = ($page - 1) * $perPage;
-$where = []; $params = [];
-$qraw = trim((string)($_GET['q'] ?? ''));
-if ($qraw !== '') { $where[] = "(n.title LIKE :q OR n.message LIKE :q)"; $params[':q'] = '%'.$qraw.'%'; }
-$audFilter = trim((string)($_GET['audience'] ?? ''));
-if ($audFilter !== '') { $where[] = "n.audience = :audience"; $params[':audience'] = $audFilter; }
-$from = trim((string)($_GET['from'] ?? '')); if ($from !== '') { $where[] = "n.created_at >= :from"; $params[':from'] = $from . ' 00:00:00'; }
-$to   = trim((string)($_GET['to'] ?? ''));   if ($to   !== '') { $where[] = "n.created_at <= :to";   $params[':to']   = $to . ' 23:59:59'; }
-$whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+$rows = $hasTable
+    ? (safe_db_get_all('SELECT * FROM notices ORDER BY COALESCE(published_at, created_at) DESC, id DESC LIMIT 80') ?: [])
+    : [];
 
-try {
-    $cRow = safe_db_get_one("SELECT COUNT(*) AS c FROM notices n " . ($whereSql ? $whereSql : ''), $params);
-    $total = intval($cRow['c'] ?? 0);
-} catch (Throwable $e) {
-    $total = 0;
-    $errors[] = 'Count query failed: ' . ($DEBUG ? $e->getMessage() : 'Internal error');
-}
-
-$notices = [];
-try {
-    $sql = "SELECT n.*, COALESCE(u.name,'') AS publisher_name FROM notices n LEFT JOIN users u ON u.id = n.published_by $whereSql ORDER BY n.created_at DESC LIMIT :limit OFFSET :offset";
-    $pdo = pdo_connect();
-    if ($pdo instanceof \PDO) {
-        $stmt = $pdo->prepare($sql);
-        foreach ($params as $k=>$v) $stmt->bindValue($k, $v);
-        $stmt->bindValue(':limit', (int)$perPage, \PDO::PARAM_INT);
-        $stmt->bindValue(':offset', (int)$offset, \PDO::PARAM_INT);
-        $stmt->execute();
-        $notices = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
-    } else {
-        $notices = safe_db_get_all($sql, array_merge($params, [':limit'=>$perPage, ':offset'=>$offset]));
+$now = date('Y-m-d H:i:s');
+$today = date('Y-m-d');
+$isLive = static function (array $n) use ($now, $today): bool {
+    $pub = $n['published_at'] ?? null;
+    if ($pub === null || $pub === '') {
+        return false;
     }
-} catch (Throwable $e) {
-    $errors[] = 'List fetch failed: ' . ($DEBUG ? $e->getMessage() : 'Internal error');
+    $exp = $n['expires_at'] ?? null;
+    if ($exp !== null && $exp !== '' && substr((string) $exp, 0, 10) < $today) {
+        return false;
+    }
+    return true;
+};
+
+$className = [];
+foreach ($classes as $c) {
+    $className[(int) $c['id']] = (string) $c['name'];
 }
 
-/* Data for forms (users list) */
-$staffList = table_exists('users') ? safe_db_get_all("SELECT id, name FROM users ORDER BY name ASC") : [];
-$audienceOptions = ['all'=>'All','students'=>'Students','parents'=>'Parents','staff'=>'Staff'];
-
-$totalPages = (int)ceil(max(0, $total) / $perPage);
-
-function build_qs(array $over = []): string {
-    $qs = $_GET;
-    foreach ($over as $k=>$v) { if ($v === null) unset($qs[$k]); else $qs[$k] = $v; }
-    return http_build_query($qs);
-}
-
-/* Render header/footer if present */
-$pageTitle = 'Notices — Publish';
 require_once __DIR__ . '/../header.php';
+
+$editTitle = $edit ? (string) ($edit['title'] ?? '') : '';
+$editText = $edit ? $textOf($edit) : '';
+$editClass = $edit ? (int) ($edit['class_id'] ?? 0) : 0;
+$editExp = $edit ? substr((string) ($edit['expires_at'] ?? ''), 0, 10) : '';
 ?>
-
-<div class="d-flex justify-content-end gap-2 mb-3">
-<button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addModal">Add Notice</button>
-      <a class="btn btn-outline-secondary" href="?">Refresh</a>
-      <a class="btn btn-sm btn-success" href="?action=export&<?php echo build_qs(); ?>">Export CSV</a>
-    </div>
-
-  <?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo $esc($m); ?></div><?php endforeach; ?>
-  <?php foreach ($errors as $er): ?><div class="alert alert-danger"><?php echo $esc($er); ?></div><?php endforeach; ?>
-
-  <!-- Filters -->
-  <div class="card mb-3 p-3">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-md-4"><label class="form-label">Search</label><input name="q" class="form-control" value="<?php echo $esc($qraw); ?>" placeholder="Title or message"></div>
-      <div class="col-md-2"><label class="form-label">Audience</label>
-        <select name="audience" class="form-select">
-          <option value="">Any</option>
-          <?php foreach ($audienceOptions as $k=>$v): ?>
-            <option value="<?php echo e($k); ?>" <?php if(($audFilter ?? '')===$k) echo 'selected'; ?>><?php echo e($v); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <div class="col-md-2"><label class="form-label">From</label><input type="date" name="from" class="form-control" value="<?php echo $esc($from); ?>"></div>
-      <div class="col-md-2"><label class="form-label">To</label><input type="date" name="to" class="form-control" value="<?php echo $esc($to); ?>"></div>
-      <div class="col-md-2 text-end"><button class="btn btn-primary">Filter</button></div>
-    </form>
-  </div>
-
-  <!-- Table -->
-  <div class="card">
-    <div class="table-responsive">
-      <table class="table table-striped mb-0">
-        <thead>
-          <tr>
-            <th style="width:60px">ID</th>
-            <th>Title / Message</th>
-            <th style="width:160px">Audience / Published</th>
-            <th style="width:140px">Expires / Created</th>
-            <th style="width:240px">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php if (!empty($notices)): foreach ($notices as $n): ?>
-            <tr>
-              <td><?php echo (int)$n['id']; ?></td>
-              <td>
-                <div class="fw-semibold"><?php echo $esc($n['title']); ?></div>
-                <div class="small text-muted"><?php echo $esc(mb_strimwidth(strip_tags($n['message'] ?? ''), 0, 180, '...')); ?></div>
-              </td>
-              <td>
-                <div class="small text-muted">Audience: <?php echo $esc($n['audience'] ?? 'all'); ?></div>
-                <div class="small text-muted">By: <?php echo $esc($n['publisher_name'] ?? '—'); ?></div>
-                <div class="small text-muted">Published: <?php echo $esc($n['published_at'] ?? '—'); ?></div>
-              </td>
-              <td>
-                <div class="small text-muted">Expires: <?php echo $esc($n['expires_at'] ?? '—'); ?></div>
-                <div class="small text-muted">Created: <?php echo $esc(substr($n['created_at'] ?? '',0,16)); ?></div>
-              </td>
-              <td>
-                <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#viewModal" data-id="<?php echo (int)$n['id']; ?>">View</button>
-                <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#editModal" data-id="<?php echo (int)$n['id']; ?>">Edit</button>
-
-                <?php if (empty($n['published_at'])): ?>
-                  <a class="btn btn-sm btn-primary" href="?action=publish&id=<?php echo (int)$n['id']; ?>">Publish</a>
-                <?php else: ?>
-                  <a class="btn btn-sm btn-outline-secondary" href="?action=unpublish&id=<?php echo (int)$n['id']; ?>">Unpublish</a>
-                <?php endif; ?>
-
-                <?php echo render_secure_delete_button((int)$n['id'], 'Delete', 'Delete notice?'); ?>
-              </td>
-            </tr>
-          <?php endforeach; else: ?>
-            <tr><td colspan="5" class="text-center text-muted">No notices found.</td></tr>
-          <?php endif; ?>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="p-3 d-flex justify-content-between align-items-center">
-      <div>Showing <?php echo $total ? ($offset+1) : 0; ?> - <?php echo min($total, $offset + count($notices)); ?> of <?php echo $total; ?></div>
-      <nav>
-        <ul class="pagination mb-0">
-          <?php for ($p = 1; $p <= max(1, $totalPages); $p++): ?>
-            <li class="page-item <?php if ($p === $page) echo 'active'; ?>"><a class="page-link" href="?<?php echo build_qs(['page'=>$p]); ?>"><?php echo $p; ?></a></li>
-          <?php endfor; ?>
-        </ul>
-      </nav>
-    </div>
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+  <div>
+    <h1 class="h4 mb-1">Parent notices</h1>
+    <p class="text-muted mb-0">Write once. Parents see it in their app. Holiday, holiday homework, or “school closed tomorrow”.</p>
   </div>
 </div>
 
-<!-- Add Modal -->
-<div class="modal fade" id="addModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <form method="post" action="?action=add">
-        <div class="modal-header"><h5 class="modal-title">Add Notice</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-          <div class="row g-2">
-            <div class="col-md-3"><label class="form-label">Audience</label>
-              <select name="audience" class="form-select">
-                <?php foreach ($audienceOptions as $k=>$v): ?><option value="<?php echo e($k); ?>"><?php echo e($v); ?></option><?php endforeach; ?>
-              </select>
-            </div>
-            <div class="col-md-9"><label class="form-label">Title</label><input name="title" class="form-control" required></div>
-            <div class="col-12"><label class="form-label">Message</label><textarea name="message" rows="6" class="form-control" required></textarea></div>
-            <div class="col-md-4"><label class="form-label">Published by (optional)</label>
-              <select name="published_by" class="form-select">
-                <option value="">--</option>
-                <?php foreach ($staffList as $s): ?><option value="<?php echo (int)$s['id']; ?>"><?php echo $esc($s['name']); ?></option><?php endforeach; ?>
-              </select>
-            </div>
-            <div class="col-md-4"><label class="form-label">Published at (optional)</label><input type="date" name="published_at" class="form-control"></div>
-            <div class="col-md-4"><label class="form-label">Expires at (optional)</label><input type="date" name="expires_at" class="form-control"></div>
+<?php if (!$hasTable): ?>
+  <div class="alert alert-danger">Could not create the notices table. Ask support to check the database.</div>
+<?php else: ?>
+<form method="post" class="card card-body mb-4">
+  <input type="hidden" name="csrf_token" value="<?php echo e($CSRF); ?>">
+  <input type="hidden" name="action" value="save">
+  <?php if ($edit): ?>
+    <input type="hidden" name="id" value="<?php echo (int) $edit['id']; ?>">
+    <p class="small text-muted mb-2">Editing notice. Tick send if it is still a draft.</p>
+  <?php endif; ?>
+  <div class="row g-2">
+    <div class="col-md-8">
+      <label class="form-label">Title</label>
+      <input name="title" class="form-control" required maxlength="180" value="<?php echo e($editTitle); ?>" placeholder="e.g. Holiday on Friday">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Who</label>
+      <select name="class_id" class="form-select">
+        <option value="0">All parents</option>
+        <?php foreach ($classes as $c): ?>
+          <option value="<?php echo (int) $c['id']; ?>" <?php echo $editClass === (int) $c['id'] ? 'selected' : ''; ?>><?php echo e((string) $c['name']); ?> only</option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Message</label>
+      <textarea name="message" class="form-control" rows="5" required placeholder="Short and clear for parents"><?php echo e($editText); ?></textarea>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Hide after (optional)</label>
+      <input type="date" name="expires_at" class="form-control" value="<?php echo e($editExp); ?>">
+    </div>
+    <div class="col-md-8 d-flex align-items-end gap-2 flex-wrap">
+      <?php if (!$edit || empty($edit['published_at'])): ?>
+        <input type="hidden" name="send_now" value="1">
+        <button class="btn btn-success btn-lg" type="submit">Send to parents</button>
+      <?php else: ?>
+        <button class="btn btn-primary" type="submit">Save changes</button>
+      <?php endif; ?>
+      <?php if ($edit): ?>
+        <a class="btn btn-outline-secondary" href="?">Cancel</a>
+      <?php endif; ?>
+    </div>
+  </div>
+</form>
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+  <a class="btn btn-sm <?php echo $tab === 'live' ? 'btn-primary' : 'btn-outline-primary'; ?>" href="?tab=live">Showing now</a>
+  <a class="btn btn-sm <?php echo $tab === 'hidden' ? 'btn-primary' : 'btn-outline-secondary'; ?>" href="?tab=hidden">Hidden / draft</a>
+  <a class="btn btn-sm <?php echo $tab === 'all' ? 'btn-primary' : 'btn-outline-secondary'; ?>" href="?tab=all">All</a>
+</div>
+
+<?php
+$shown = 0;
+foreach ($rows as $n):
+    $live = $isLive($n);
+    if ($tab === 'live' && !$live) {
+        continue;
+    }
+    if ($tab === 'hidden' && $live) {
+        continue;
+    }
+    $shown++;
+    $cid = (int) ($n['class_id'] ?? 0);
+    $who = $cid > 0 ? ($className[$cid] ?? 'One class') : 'All parents';
+    $txt = $textOf($n);
+?>
+  <div class="card mb-2">
+    <div class="card-body py-3">
+      <div class="d-flex flex-wrap justify-content-between gap-2">
+        <div>
+          <div class="fw-semibold"><?php echo e((string) ($n['title'] ?? '')); ?></div>
+          <div class="small text-muted mb-1"><?php echo e($who); ?>
+            · <?php echo $live ? 'Parents can see this' : 'Hidden'; ?>
+            <?php if (!empty($n['expires_at'])): ?> · until <?php echo e(substr((string) $n['expires_at'], 0, 10)); ?><?php endif; ?>
           </div>
+          <div style="white-space:pre-wrap"><?php echo e(mb_strimwidth($txt, 0, 280, '…')); ?></div>
         </div>
-        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-success" type="submit">Add Notice</button></div>
-      </form>
+        <div class="d-flex flex-wrap gap-1 align-items-start">
+          <a class="btn btn-sm btn-outline-primary" href="?id=<?php echo (int) $n['id']; ?>&tab=<?php echo e($tab); ?>">Edit</a>
+          <?php if ($live): ?>
+            <form method="post" class="d-inline">
+              <input type="hidden" name="csrf_token" value="<?php echo e($CSRF); ?>">
+              <input type="hidden" name="action" value="hide">
+              <input type="hidden" name="id" value="<?php echo (int) $n['id']; ?>">
+              <button class="btn btn-sm btn-outline-secondary" type="submit">Hide</button>
+            </form>
+          <?php else: ?>
+            <form method="post" class="d-inline">
+              <input type="hidden" name="csrf_token" value="<?php echo e($CSRF); ?>">
+              <input type="hidden" name="action" value="show">
+              <input type="hidden" name="id" value="<?php echo (int) $n['id']; ?>">
+              <button class="btn btn-sm btn-success" type="submit">Show</button>
+            </form>
+          <?php endif; ?>
+          <?php echo render_secure_delete_button((int) $n['id'], 'Delete', 'Delete this notice?'); ?>
+        </div>
+      </div>
     </div>
   </div>
-</div>
+<?php endforeach; ?>
 
-<!-- Edit Modal (populated via JS by GET action) -->
-<div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <form method="post" action="?action=edit" id="editForm">
-        <input type="hidden" name="id" id="edit_id">
-        <div class="modal-header"><h5 class="modal-title">Edit Notice</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body" id="editBody"><div class="text-center text-muted">Loading…</div></div>
-        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" type="submit">Save Changes</button></div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<!-- View Modal -->
-<div class="modal fade" id="viewModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Notice Details</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body" id="viewModalBody"><div class="text-center text-muted">Loading…</div></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
-    </div>
-  </div>
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  // View modal
-  var viewModal = document.getElementById('viewModal');
-  if (viewModal) {
-    viewModal.addEventListener('show.bs.modal', function (event) {
-      var id = event.relatedTarget.getAttribute('data-id');
-      var body = document.getElementById('viewModalBody');
-      body.innerHTML = '<div class="text-center text-muted">Loading…</div>';
-      fetch('?action=view&id=' + encodeURIComponent(id), { credentials: 'same-origin' })
-        .then(function(resp){ return resp.ok ? resp.text() : Promise.reject(); })
-        .then(function(html){ body.innerHTML = html; })
-        .catch(function(){ body.innerHTML = '<div class="text-danger">Failed to load details.</div>'; });
-    });
-  }
-
-  // Edit modal: fetch JSON and build form
-  var editModal = document.getElementById('editModal');
-  var staff = <?php echo json_encode($staffList, JSON_UNESCAPED_UNICODE); ?>;
-  var audienceOptions = <?php echo json_encode($audienceOptions, JSON_UNESCAPED_UNICODE); ?>;
-  if (editModal) {
-    editModal.addEventListener('show.bs.modal', function (event) {
-      var id = event.relatedTarget.getAttribute('data-id');
-      var body = document.getElementById('editBody');
-      body.innerHTML = '<div class="text-center text-muted">Loading…</div>';
-      fetch('?action=get&id=' + encodeURIComponent(id), { credentials: 'same-origin' })
-        .then(function(resp){ return resp.ok ? resp.json() : Promise.reject(); })
-        .then(function(json){
-          if (!json || !json.ok || !json.data) { body.innerHTML = '<div class="text-danger p-3">Failed to load notice.</div>'; return; }
-          var d = json.data;
-          document.getElementById('edit_id').value = d.id || '';
-
-          var html = '';
-          html += '<div class="row g-2">';
-          // audience
-          html += '<div class="col-md-3"><label class="form-label">Audience</label><select name="audience" id="edit_audience" class="form-select">';
-          for (var k in audienceOptions) {
-            html += '<option value="'+k+'">'+audienceOptions[k]+'</option>';
-          }
-          html += '</select></div>';
-          // title
-          html += '<div class="col-md-9"><label class="form-label">Title</label><input id="edit_title" name="title" class="form-control"></div>';
-          // message
-          html += '<div class="col-12"><label class="form-label">Message</label><textarea id="edit_message" name="message" rows="6" class="form-control"></textarea></div>';
-          // published_by
-          html += '<div class="col-md-4"><label class="form-label">Published by</label><select id="edit_published_by" name="published_by" class="form-select"><option value="">--</option>';
-          staff.forEach(function(s){ html += '<option value="'+s.id+'">'+s.name+'</option>'; });
-          html += '</select></div>';
-          html += '<div class="col-md-4"><label class="form-label">Published at</label><input id="edit_published_at" name="published_at" type="date" class="form-control"></div>';
-          html += '<div class="col-md-4"><label class="form-label">Expires at</label><input id="edit_expires_at" name="expires_at" type="date" class="form-control"></div>';
-          html += '</div>';
-          body.innerHTML = html;
-
-          // populate fields
-          document.getElementById('edit_audience').value = d.audience || 'all';
-          document.getElementById('edit_title').value = d.title || '';
-          document.getElementById('edit_message').value = d.message || '';
-          document.getElementById('edit_published_by').value = d.published_by || '';
-          document.getElementById('edit_published_at').value = d.published_at || '';
-          document.getElementById('edit_expires_at').value = d.expires_at || '';
-        })
-        .catch(function(){ body.innerHTML = '<div class="text-danger p-3">Failed to load.</div>'; });
-    });
-  }
-});
-</script>
+<?php if ($shown === 0): ?>
+  <div class="text-muted">No notices in this list yet.</div>
+<?php endif; ?>
+<?php endif; ?>
 
 <?php
 require_once __DIR__ . '/../footer.php';
-?>
