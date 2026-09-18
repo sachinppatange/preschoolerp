@@ -261,7 +261,7 @@ if ($action === 'create' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($isAjax) { header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok'=>true,'id'=>$newId,'receipt_no'=>$receipt_no]); exit; }
 
         $_SESSION['form_success'] = 'Payment saved. Receipt: ' . $receipt_no_base;
-        header('Location: ?saved_id=' . urlencode((string)$newId)); exit;
+        header('Location: receipt_print.php?id=' . urlencode((string)$newId) . '&print=1'); exit;
     } catch (Throwable $e) {
         $errMsg = $DEBUG ? $e->getMessage() : 'Failed to save payment.';
         error_log('[fees_collection] Create error: ' . $e->getMessage());
@@ -279,8 +279,7 @@ if (!empty($_SESSION['form_success'])) { $messages[] = $_SESSION['form_success']
 $saved_id = isset($_GET['saved_id']) ? (int)$_GET['saved_id'] : 0;
 $preselect_student = isset($_GET['student_id']) ? (int)$_GET['student_id'] : 0;
 
-$recent = safe_db_get_all("SELECT fr.id, fr.receipt_no, fr.amount, fr.paid_amount, fr.collected_by, fr.collected_at, COALESCE(s.first_name,'') AS student_first, COALESCE(s.middle_name,'') AS student_middle, COALESCE(s.last_name,'') AS student_last, COALESCE(s.academic_year,'') AS academic_year, COALESCE(u.name,'') AS collector_name FROM fees_records fr LEFT JOIN students s ON s.id = fr.student_id LEFT JOIN users u ON u.id = fr.collected_by ORDER BY fr.created_at DESC LIMIT 20") ?: [];
-$receiptPrint = function_exists('site_url') ? site_url('/accounts/receipt_print.php') : '../accounts/receipt_print.php';
+$recent = safe_db_get_all("SELECT fr.id, fr.receipt_no, fr.amount, fr.paid_amount, fr.collected_by, fr.collected_at, COALESCE(s.first_name,'') AS student_first, COALESCE(s.middle_name,'') AS student_middle, COALESCE(s.last_name,'') AS student_last, COALESCE(s.academic_year,'') AS academic_year FROM fees_records fr LEFT JOIN students s ON s.id = fr.student_id ORDER BY fr.created_at DESC LIMIT 20") ?: [];
 
 $page_title = 'Collect Fees';
 require_once __DIR__ . '/../includes/header.php';
@@ -382,8 +381,9 @@ require_once __DIR__ . '/../includes/header.php';
             <td>₹ <?php echo number_format((float) ($rr['paid_amount'] ?? 0), 2); ?></td>
             <td class="small text-muted"><?php echo e(substr((string) ($rr['collected_at'] ?? ''), 0, 16)); ?></td>
             <td class="text-nowrap">
-              <button type="button" class="btn btn-sm btn-outline-primary" onclick="openReceipt(<?php echo $rid; ?>, false)">View</button>
-              <button type="button" class="btn btn-sm btn-success" onclick="openReceipt(<?php echo $rid; ?>, true)">Print</button>
+              <a class="btn btn-sm btn-outline-primary" href="receipt_print.php?id=<?php echo $rid; ?>" target="_blank" rel="noopener">View</a>
+              <a class="btn btn-sm btn-success" href="receipt_print.php?id=<?php echo $rid; ?>&amp;print=1" target="_blank" rel="noopener">Print</a>
+              <a class="btn btn-sm btn-outline-secondary" href="receipt_print.php?id=<?php echo $rid; ?>&amp;pdf=1">PDF</a>
             </td>
           </tr>
         <?php endforeach; ?>
@@ -394,7 +394,6 @@ require_once __DIR__ . '/../includes/header.php';
 
 <script>
 (function () {
-  var receiptBase = <?php echo json_encode($receiptPrint); ?>;
   var studentSelect = document.getElementById('student_select');
   var search = document.getElementById('studentSearch');
   var pendingValue = document.getElementById('pendingValue');
@@ -439,20 +438,6 @@ require_once __DIR__ . '/../includes/header.php';
   }
   if (studentSelect) studentSelect.addEventListener('change', function () { fetchPending(this.value); });
   <?php if ($preselect_student > 0): ?>fetchPending(<?php echo (int) $preselect_student; ?>);<?php endif; ?>
-
-  window.openReceipt = function (id, doPrint) {
-    var url = receiptBase + (receiptBase.indexOf('?') >= 0 ? '&' : '?') + 'id=' + encodeURIComponent(id);
-    var w = window.open(url, '_blank');
-    if (!w) { alert('Allow pop-ups to view the receipt.'); return; }
-    if (doPrint) setTimeout(function () { try { w.focus(); w.print(); } catch (e) {} }, 800);
-  };
-  var params = new URLSearchParams(window.location.search);
-  var saved = params.get('saved_id');
-  if (saved) {
-    openReceipt(saved, true);
-    params.delete('saved_id');
-    history.replaceState(null, '', window.location.pathname + (params.toString() ? ('?' + params.toString()) : ''));
-  }
 })();
 </script>
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

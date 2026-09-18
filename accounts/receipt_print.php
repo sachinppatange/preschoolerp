@@ -12,14 +12,10 @@
  * Save at: /demopreschoolapp/accounts/receipt_print.php
  */
 declare(strict_types=1);
-if (session_status() === PHP_SESSION_NONE) session_start();
 
-/* Load project includes first (if present) */
-if (file_exists(__DIR__ . '/../includes/config.php')) require_once __DIR__ . '/../includes/config.php';
-if (file_exists(__DIR__ . '/../includes/db.php'))     require_once __DIR__ . '/../includes/db.php';
-if (file_exists(__DIR__ . '/../includes/functions.php')) require_once __DIR__ . '/../includes/functions.php';
-require_once __DIR__ . '/../includes/auth.php';
-require_accounts_or_reception_auth();
+require_once __DIR__ . '/../includes/panel/bootstrap.php';
+panel_bootstrap('accounts', ['skip_auth' => true]);
+auth_require_roles(['accounts', 'reception', 'staff', 'owner']);
 
 $DEBUG = defined('DEV_SHOW_ERRORS') && (bool) constant('DEV_SHOW_ERRORS');
 
@@ -135,32 +131,40 @@ if (!function_exists('safe_db_get_all')) {
     }
 }
 
-/* Helpers to inspect schema safely */
-function table_exists(string $table): bool {
-    $pdo = pdo_connect(); if (!($pdo instanceof \PDO)) return false;
-    try {
-        $stmt = $pdo->prepare("SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :t");
-        $stmt->execute([':t'=>$table]);
-        $r = $stmt->fetch(\PDO::FETCH_ASSOC);
-        return !empty($r) && intval($r['cnt']) > 0;
-    } catch (Throwable $e) {
-        return false;
+if (!function_exists('table_exists')) {
+    function table_exists(string $table): bool {
+        $pdo = pdo_connect(); if (!($pdo instanceof \PDO)) return false;
+        try {
+            $stmt = $pdo->prepare("SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :t");
+            $stmt->execute([':t'=>$table]);
+            $r = $stmt->fetch(\PDO::FETCH_ASSOC);
+            return !empty($r) && intval($r['cnt']) > 0;
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 }
-function table_columns(string $table): array {
-    $pdo = pdo_connect(); if (!($pdo instanceof \PDO)) return [];
-    try {
-        $stmt = $pdo->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t");
-        $stmt->execute([':t'=>$table]);
-        return $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [];
-    } catch (Throwable $e) {
-        return [];
+if (!function_exists('table_columns')) {
+    function table_columns(string $table): array {
+        if (function_exists('get_table_columns')) {
+            return get_table_columns($table);
+        }
+        $pdo = pdo_connect(); if (!($pdo instanceof \PDO)) return [];
+        try {
+            $stmt = $pdo->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t");
+            $stmt->execute([':t'=>$table]);
+            return $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [];
+        } catch (Throwable $e) {
+            return [];
+        }
     }
 }
 
 /* Read params */
 $id = isset($_GET['id']) && ctype_digit((string)$_GET['id']) ? (int)$_GET['id'] : 0;
 $receipt_no_param = isset($_GET['receipt_no']) ? trim((string)$_GET['receipt_no']) : '';
+$wantPrint = isset($_GET['print']) && (string)$_GET['print'] !== '0';
+$wantPdf = isset($_GET['pdf']) && (string)$_GET['pdf'] !== '0';
 
 /* Build SELECT: include student/class/school; for schools include requested fields only if they exist */
 $studentCols = table_columns('students');
@@ -340,7 +344,31 @@ $collector_display = '—';
 if (!empty($row['collector_name'])) $collector_display = $row['collector_name'];
 elseif (!empty($row['collected_by'])) $collector_display = is_numeric($row['collected_by']) ? 'User ID: ' . (int)$row['collected_by'] : (string)$row['collected_by'];
 
+if ($wantPdf) {
+    require_once __DIR__ . '/../includes/receipt_pdf.php';
+    $dateLabel = $collected_at ? date('d-M-Y H:i', strtotime((string) $collected_at)) : date('d-M-Y H:i');
+    receipt_pdf_output(
+        ($receipt_base !== '' ? $receipt_base : 'receipt') . '.pdf',
+        (string) ($school['name'] !== '' ? $school['name'] : 'Fee receipt'),
+        [
+            'Address' => (string) ($school['address'] ?? ''),
+            'Receipt' => (string) $receipt_base,
+            'Date' => $dateLabel,
+            'Student' => $student_name,
+            'Class' => (string) ($row['class_name'] ?? ''),
+            'Year' => (string) ($row['academic_year'] ?? ''),
+            'Paid' => 'Rs ' . number_format($paid_amount, 2),
+            'Pending' => 'Rs ' . number_format($pending !== null ? $pending : $due, 2),
+            'Paid by' => (string) ($receipt_meta['METHOD'] ?? ''),
+            'Note' => (string) ($receipt_meta['NOTE'] ?? ''),
+            'Collected by' => (string) $collector_display,
+            '' => 'System generated receipt',
+        ]
+    );
+}
+
 /* Helper to render logo: if local file exists use as relative path, else if URL use as is */
+if (!function_exists('render_logo_tag')) {
 function render_logo_tag(string $path): string {
     $path = trim($path);
     if ($path === '') return '';
@@ -364,6 +392,7 @@ function render_logo_tag(string $path): string {
     }
     // fallback to path as-is (may work if accessible)
     return '<img src="' . e($path) . '" alt="logo" style="max-height:80px;">';
+}
 }
 
 /* Render HTML */
@@ -462,10 +491,14 @@ function render_logo_tag(string $path): string {
 
     <div class="mt-3 small-muted">Receipt generated at <?php echo e(date('d-M-Y H:i')); ?>. This is a system generated receipt.</div>
 
-    <div class="mt-3 no-print">
-      <button class="btn btn-primary" onclick="window.print()">Print</button>
-      <a class="btn btn-outline-secondary" href="javascript:window.close()">Close</a>
+    <div class="mt-3 no-print d-flex flex-wrap gap-2">
+      <button class="btn btn-primary" type="button" onclick="window.print()">Print</button>
+      <a class="btn btn-success" href="?id=<?php echo (int) $id; ?>&amp;pdf=1">PDF</a>
+      <a class="btn btn-outline-secondary" href="fees_collection.php">Back to Collect Fees</a>
     </div>
   </div>
+  <?php if ($wantPrint): ?>
+  <script>window.addEventListener('load', function () { window.print(); });</script>
+  <?php endif; ?>
 </body>
 </html>
