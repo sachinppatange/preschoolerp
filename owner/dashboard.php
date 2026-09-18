@@ -364,6 +364,7 @@ require_once __DIR__ . '/../includes/header.php';
         [$ownerBase . '/class_setup.php', 'bi-book', 'Class Setup'],
         [$ownerBase . '/staff_manage.php', 'bi-person-badge', 'Staff'],
         [$ownerBase . '/parents.php', 'bi-people', 'Parents'],
+        [$ownerBase . '/whatsapp.php', 'bi-whatsapp', 'WhatsApp'],
     ];
     foreach ($quick as $q): ?>
       <div class="col-6 col-md-4 col-lg-3">

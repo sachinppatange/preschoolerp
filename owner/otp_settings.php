@@ -10,6 +10,9 @@ require_once __DIR__ . '/../includes/otp_settings.php';
 if (file_exists(__DIR__ . '/../includes/whatsapp_config.php')) {
     require_once __DIR__ . '/../includes/whatsapp_config.php';
 }
+if (file_exists(__DIR__ . '/../includes/whatsapp_inbox.php')) {
+    require_once __DIR__ . '/../includes/whatsapp_inbox.php';
+}
 
 $page_title = 'OTP Settings';
 $skip_panel_ay_banner = true;
@@ -61,6 +64,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cfg['whatsapp']['template_language'] = trim((string) ($_POST['wa_template_language'] ?? 'en'));
         $cfg['whatsapp']['url_button_param'] = trim((string) ($_POST['wa_url_button_param'] ?? ''));
         $cfg['whatsapp']['url_button_use_otp'] = !empty($_POST['wa_url_button_use_otp']);
+        $cfg['whatsapp']['verify_token'] = trim((string) ($_POST['wa_verify_token'] ?? ''));
+        if ($cfg['whatsapp']['verify_token'] === '') {
+            $cfg['whatsapp']['verify_token'] = 'preschoolapp_wa_hook';
+        }
+        $cfg['whatsapp']['app_secret'] = otp_keep_secret((string) ($_POST['wa_app_secret'] ?? ''), (string) ($cfg['whatsapp']['app_secret'] ?? ''));
+        $cfg['whatsapp']['autobot'] = !empty($_POST['wa_autobot']);
+        $cfg['whatsapp']['autobot_default'] = trim((string) ($_POST['wa_autobot_default'] ?? ''));
+        $cfg['whatsapp']['autobot_rules'] = (string) ($_POST['wa_autobot_rules'] ?? '');
         otp_settings_save($cfg);
         $msgSuccess = 'WhatsApp settings saved.';
     } elseif ($action === 'test_sms') {
@@ -142,6 +153,7 @@ $csrf = function_exists('get_csrf_token') ? get_csrf_token() : '';
 $sms = $cfg['sms'];
 $em = $cfg['email'];
 $wa = $cfg['whatsapp'];
+$waHookUrl = function_exists('wa_inbox_webhook_url') ? wa_inbox_webhook_url() : site_url('/whatsapp/webhook.php');
 
 require_once __DIR__ . '/../includes/header.php';
 ?>
@@ -380,8 +392,47 @@ require_once __DIR__ . '/../includes/header.php';
         Use OTP as URL button parameter
       </label>
     </div>
+    <div class="col-12"><hr class="my-2"></div>
+    <div class="col-12">
+      <h3 class="h6 fw-bold text-primary mb-1">Webhook (incoming messages + autobot)</h3>
+      <p class="otp-lead mb-2">In Meta → WhatsApp Business Account → Webhooks, paste this Callback URL, the Verify token, then click Verify and save. Subscribe to <strong>messages</strong>, <strong>message_echoes</strong>, and <strong>statuses</strong>.</p>
+    </div>
+    <div class="col-12">
+      <label class="form-label fw-semibold">Callback URL</label>
+      <input type="text" class="form-control" id="waCallbackUrl" readonly value="<?php echo e($waHookUrl); ?>">
+      <div class="otp-hint">Must be this live HTTPS URL. Localhost cannot receive Meta webhooks.</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label fw-semibold">Verify token</label>
+      <input type="text" class="form-control" name="wa_verify_token" value="<?php echo e((string) ($wa['verify_token'] ?? 'preschoolapp_wa_hook')); ?>">
+      <div class="otp-hint">Same value as Meta “Verify token”. Default: preschoolapp_wa_hook</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label fw-semibold">App secret</label>
+      <div class="input-group">
+        <input type="password" class="form-control js-secret" name="wa_app_secret" autocomplete="off" placeholder="<?php echo !empty($wa['app_secret']) ? e(otp_mask_secret((string) $wa['app_secret']) . ' — leave blank to keep') : 'Meta App → Settings → App secret'; ?>">
+        <button class="btn btn-outline-secondary js-toggle-secret" type="button">Show</button>
+      </div>
+      <div class="otp-hint">Used to check X-Hub-Signature-256 on incoming webhooks. Leave blank to keep the saved secret.</div>
+    </div>
+    <div class="col-12">
+      <label class="form-check-label">
+        <input type="checkbox" class="form-check-input me-2" name="wa_autobot" value="1" <?php echo !empty($wa['autobot']) ? 'checked' : ''; ?>>
+        Enable autobot (auto-reply to incoming WhatsApp text)
+      </label>
+    </div>
+    <div class="col-12">
+      <label class="form-label fw-semibold">Autobot default reply</label>
+      <textarea class="form-control" name="wa_autobot_default" rows="2"><?php echo e((string) ($wa['autobot_default'] ?? '')); ?></textarea>
+    </div>
+    <div class="col-12">
+      <label class="form-label fw-semibold">Keyword rules</label>
+      <textarea class="form-control" name="wa_autobot_rules" rows="4"><?php echo e((string) ($wa['autobot_rules'] ?? '')); ?></textarea>
+      <div class="otp-hint">One rule per line: <code>keyword, another | Reply text</code>. First matching keyword in the parent message is used; otherwise the default reply is sent.</div>
+    </div>
     <div class="col-12">
       <button type="submit" class="btn btn-primary">Save WhatsApp settings</button>
+      <a class="btn btn-outline-primary" href="<?php echo e(site_url('/owner/whatsapp.php')); ?>">Open WhatsApp inbox</a>
     </div>
   </form>
   <div class="otp-test mt-4">

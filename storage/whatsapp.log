@@ -917,3 +917,5 @@
 [2026-09-17 04:23:38] whatsapp_api_post | {"url":"https:\/\/graph.facebook.com\/v19.0\/636471032888916\/messages","http_code":200,"success":true,"response":{"messaging_product":"whatsapp","contacts":[{"input":"+919096463943","wa_id":"919096463943"}],"messages":[{"id":"wamid.HBgMOTE5MDk2NDYzOTQzFQIAERgSMDYyREE1MzdGQzQ5NDg0NTc3AA==","message_status":"accepted"}]},"error":null}
 [2026-09-17 04:23:38] owner_send_otp | {"phone":"+919096463943","user_id":1}
 [2026-09-17 04:23:52] owner_login_verify_result | {"result":"OK","attempts":1}
+[2026-09-18 12:54:27] webhook_verify_success | {"ip":"::1"}
+[2026-09-18 12:54:27] webhook_verify_failed | {"mode":"subscribe","token_ok":true}

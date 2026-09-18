@@ -61,6 +61,11 @@ function otp_settings_defaults(): array
             'template_language' => '',
             'url_button_param' => '',
             'url_button_use_otp' => false,
+            'verify_token' => 'preschoolapp_wa_hook',
+            'app_secret' => '',
+            'autobot' => false,
+            'autobot_default' => 'Thank you for messaging the school. We will reply here. For Parent Portal login use your registered mobile number.',
+            'autobot_rules' => "fees | Please check Parent Portal → Fees, or call the school office.\nadmission | New admission is done at the school reception.\notp | Use your registered 10-digit mobile on the Parent / Staff login page.",
         ],
     ];
 }
@@ -473,6 +478,26 @@ function otp_send_whatsapp(string $toPhone, string $otp): array
         $msg .= ' via Meta ' . otp_summarize_resp($res['resp']);
     }
     otp_log_send('whatsapp', $ok, otp_msisdn($toPhone), $msg, $http);
+    if (!function_exists('wa_inbox_save')) {
+        $inboxFile = __DIR__ . '/whatsapp_inbox.php';
+        if (is_file($inboxFile)) {
+            require_once $inboxFile;
+        }
+    }
+    if ($ok && function_exists('wa_inbox_save')) {
+        $waId = '';
+        if (is_array($res['resp'] ?? null)) {
+            $waId = (string) (($res['resp']['messages'][0]['id'] ?? '') ?: '');
+        }
+        wa_inbox_save([
+            'direction' => 'out',
+            'phone' => $toPhone,
+            'wa_message_id' => $waId,
+            'type' => 'template',
+            'body' => 'OTP sent',
+            'status' => 'sent',
+        ]);
+    }
     return [
         'ok' => $ok,
         'http' => $http,
