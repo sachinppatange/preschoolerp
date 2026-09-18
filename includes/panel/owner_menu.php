@@ -42,7 +42,7 @@ function owner_panel_menu(): array
                 ['url' => $owner . '/expense.php', 'icon' => 'bi-graph-down-arrow', 'label' => 'Expenses', 'match' => 'expense'],
                 ['url' => $owner . '/monthly_summary.php', 'icon' => 'bi-calendar-check', 'label' => 'Monthly Summary', 'match' => 'monthly_summary'],
                 ['url' => $owner . '/fees_setup.php', 'icon' => 'bi-sliders', 'label' => 'Fees Setup', 'match' => 'fees_setup'],
-                ['url' => $accounts . '/fees_collectionbulk.php', 'icon' => 'bi-file-earmark-arrow-up', 'label' => 'Bulk Fee Collection', 'match' => 'fees_collectionbulk'],
+                ['url' => $accounts . '/fees_collectionbulk.php', 'icon' => 'bi-people', 'label' => 'Collect by class', 'match' => 'fees_collectionbulk'],
                 ['url' => $accounts . '/reports.php', 'icon' => 'bi-bar-chart-line', 'label' => 'Accounts Reports', 'match' => 'reports'],
             ],
         ],

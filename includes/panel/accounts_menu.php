@@ -13,6 +13,7 @@ function accounts_panel_menu(): array
         ]],
         ['section' => 'Fees Collection', 'items' => [
             ['url' => $base . '/fees_collection.php', 'icon' => 'bi-cash-coin', 'label' => 'Collect Fees', 'match' => 'fees_collection'],
+            ['url' => $base . '/fees_collectionbulk.php', 'icon' => 'bi-people', 'label' => 'Collect by class', 'match' => 'fees_collectionbulk'],
             ['url' => $base . '/pending_fees.php', 'icon' => 'bi-clock-history', 'label' => 'Pending Fees', 'match' => 'pending_fees'],
             ['url' => $base . '/daily_collection.php', 'icon' => 'bi-calendar-day', 'label' => 'Daily Collection', 'match' => 'daily_collection'],
         ]],
