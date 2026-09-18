@@ -1,392 +1,441 @@
 <?php
 /**
- * Shared feature: monthly_summary
- * Loaded via feature_run() after panel_bootstrap().
+ * One-month preschool money snapshot: fees in, expenses out, leftover.
  */
 declare(strict_types=1);
 
-require_once __DIR__ . '/../cms/helpers.php';
-
 $cfg = $GLOBALS['FEATURE_CONFIG'] ?? [];
-$panel = (string)($cfg['panel'] ?? 'owner');
-$pageTitle = (string)($cfg['page_title'] ?? '');
+$panel = (string) ($cfg['panel'] ?? 'owner');
+$page_title = (string) ($cfg['page_title'] ?? 'Monthly Summary');
+$pageTitle = $page_title;
 
-/* Debug flag */
-$esc = function(string $v){ return e($v); };
+$selfPath = $panel === 'accounts' ? '/accounts/monthly_summary.php' : '/owner/monthly_summary.php';
+$selfUrl = function_exists('site_url') ? site_url($selfPath) : $selfPath;
+$dailyUrl = function_exists('site_url') ? site_url($panel === 'accounts' ? '/accounts/daily_collection.php' : '/owner/daily_collection.php') : '../accounts/daily_collection.php';
+$feesUrl = function_exists('site_url') ? site_url('/accounts/fees_collection.php') : '../accounts/fees_collection.php';
+$expPath = $panel === 'accounts' ? '/accounts/expenses.php' : '/owner/expense.php';
+$expUrl = function_exists('site_url') ? site_url($expPath) : $expPath;
+$pendingUrl = function_exists('site_url') ? site_url($panel === 'accounts' ? '/accounts/pending_fees.php' : '/owner/pending_fees.php') : '../accounts/pending_fees.php';
 
+$categoryLabels = [
+    'Rent' => 'Rent / premises',
+    'Salary' => 'Staff salary',
+    'Electricity' => 'Electricity',
+    'Water' => 'Water',
+    'Housekeeping' => 'Housekeeping / cleaning',
+    'Food' => 'Food / snacks / milk',
+    'Learning' => 'Toys & learning material',
+    'Stationery' => 'Stationery / printing',
+    'Events' => 'Events / celebrations',
+    'Transport' => 'Transport',
+    'Maintenance' => 'Maintenance / repairs',
+    'Internet' => 'Internet / phone',
+    'Medical' => 'Medical / first aid',
+    'Uniforms' => 'Uniforms / ID cards',
+    'Marketing' => 'Marketing',
+    'Licence' => 'Licence / government fees',
+    'Other' => 'Other',
+];
 
-/* -------------------------
-   Validate fees_records table exists
-   ------------------------- */
-if (!table_exists('fees_records')) {
-    require_once __DIR__ . '/../header.php';
-echo '<div class="container py-4"><div class="alert alert-danger">The <strong>fees_records</strong> table does not exist. कृपया डेटाबेस तपासा.</div></div>';
-    require_once __DIR__ . '/../footer.php';
-    exit;
+$ym = trim((string) ($_GET['month'] ?? date('Y-m')));
+if (!preg_match('/^(\d{4})-(\d{2})$/', $ym, $m)) {
+    $ym = date('Y-m');
+    $year = (int) date('Y');
+    $month = (int) date('n');
+} else {
+    $year = (int) $m[1];
+    $month = (int) $m[2];
+    if ($month < 1 || $month > 12 || $year < 2000 || $year > 2100) {
+        $year = (int) date('Y');
+        $month = (int) date('n');
+        $ym = sprintf('%04d-%02d', $year, $month);
+    }
 }
-
-/* -------------------------
-   Page inputs (month/year) and filters
-   ------------------------- */
-$year = (int)($_GET['year'] ?? date('Y'));
-$month = (int)($_GET['month'] ?? date('n')); // 1-12
-
-// normalize
-if ($month < 1 || $month > 12) $month = (int)date('n');
-if ($year < 2000 || $year > 2100) $year = (int)date('Y');
 
 $fromDate = sprintf('%04d-%02d-01', $year, $month);
-$toDate = date('Y-m-d', strtotime($fromDate . ' +1 month -1 day'));
+$toDate = date('Y-m-t', strtotime($fromDate));
+$monthLabel = date('F Y', strtotime($fromDate));
+$prevYm = date('Y-m', strtotime($fromDate . ' -1 month'));
+$nextYm = date('Y-m', strtotime($fromDate . ' +1 month'));
+$fromDt = $fromDate . ' 00:00:00';
+$toDt = $toDate . ' 23:59:59';
 
-$page = max(1, (int)($_GET['page'] ?? 1));
-$perPage = 25;
-$offset = ($page - 1) * $perPage;
+$hasFees = function_exists('table_exists') && table_exists('fees_records');
+$hasExp = function_exists('table_exists') && table_exists('expenses');
+$hasStudents = function_exists('table_exists') && table_exists('students');
 
-$where = [];
-$params = [];
-// restrict by selected month on COALESCE(collected_at, created_at)
-$where[] = "DATE(COALESCE(fr.collected_at, fr.created_at)) BETWEEN :from_date AND :to_date";
-$params[':from_date'] = $fromDate;
-$params[':to_date'] = $toDate;
+$feeReceipts = $hasFees
+    ? (safe_db_get_all(
+        "SELECT fr.id, fr.receipt_no, fr.paid_amount, fr.collected_at,
+                COALESCE(s.first_name,'') AS first_name,
+                COALESCE(s.middle_name,'') AS middle_name,
+                COALESCE(s.last_name,'') AS last_name,
+                COALESCE(c.name,'') AS class_name
+         FROM fees_records fr
+         LEFT JOIN students s ON s.id = fr.student_id
+         LEFT JOIN classes c ON c.id = s.class_id
+         WHERE fr.collected_at IS NOT NULL
+           AND fr.collected_at >= :from
+           AND fr.collected_at <= :to
+         ORDER BY fr.collected_at DESC, fr.id DESC",
+        [':from' => $fromDt, ':to' => $toDt]
+    ) ?: [])
+    : [];
 
-// optional filters: school_id, class_id, status, q (receipt_no / student name / receipt_no / amount)
-if (!empty($_GET['school_id'])) { $where[] = "fr.school_id = :school_id"; $params[':school_id'] = (int)$_GET['school_id']; }
-if (!empty($_GET['class_id'])) { $where[] = "fr.class_id = :class_id"; $params[':class_id'] = (int)$_GET['class_id']; }
-if (!empty($_GET['status'])) { $where[] = "fr.status = :status"; $params[':status'] = $_GET['status']; }
-$qraw = trim((string)($_GET['q'] ?? ''));
-if ($qraw !== '') {
-    $where[] = "(fr.receipt_no LIKE :q OR CAST(fr.amount AS CHAR) LIKE :q OR CAST(fr.paid_amount AS CHAR) LIKE :q OR st.first_name LIKE :q OR st.last_name LIKE :q)";
-    $params[':q'] = '%' . $qraw . '%';
-}
-if (function_exists('ay_apply_student_filter')) {
-    ay_apply_student_filter($where, $params, 'st');
-}
-$whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+$expenses = $hasExp
+    ? (safe_db_get_all(
+        "SELECT id, title, amount, category, expense_date, payment_method, notes
+         FROM expenses
+         WHERE expense_date BETWEEN :from AND :to
+         ORDER BY expense_date DESC, id DESC",
+        [':from' => $fromDate, ':to' => $toDate]
+    ) ?: [])
+    : [];
 
-/* -------------------------
-   Totals for the month
-   ------------------------- */
-try {
-    $totRow = safe_db_get_one("
-        SELECT
-          COUNT(*) AS records_count,
-          SUM(fr.amount) AS total_amount,
-          SUM(fr.paid_amount) AS total_paid,
-          SUM(fr.amount - fr.paid_amount) AS total_due
-        FROM fees_records fr
-        LEFT JOIN students st ON st.id = fr.student_id
-        $whereSql
-    ", $params);
-} catch (Throwable $e) {
-    $totRow = null;
-    $errors[] = 'Totals query failed: ' . ($DEBUG ? $e->getMessage() : 'Internal error');
-}
-$records_count = intval($totRow['records_count'] ?? 0);
-$total_amount = $totRow['total_amount'] !== null ? (float)$totRow['total_amount'] : 0.0;
-$total_paid = $totRow['total_paid'] !== null ? (float)$totRow['total_paid'] : 0.0;
-$total_due = $totRow['total_due'] !== null ? (float)$totRow['total_due'] : 0.0;
-
-/* -------------------------
-   Fetch records list (with joins)
-   ------------------------- */
-$fees = [];
-try {
-    $sql = "SELECT fr.*, 
-                   COALESCE(s.name,'') AS school_name,
-                   CONCAT(COALESCE(st.first_name,''), ' ', COALESCE(st.last_name,'')) AS student_name,
-                   COALESCE(c.name,'') AS class_name,
-                   COALESCE(u.name,'') AS collector_name,
-                   COALESCE(fr.collected_at, fr.created_at) AS effective_collected_at
-            FROM fees_records fr
-            LEFT JOIN schools s ON s.id = fr.school_id
-            LEFT JOIN students st ON st.id = fr.student_id
-            LEFT JOIN classes c ON c.id = fr.class_id
-            LEFT JOIN users u ON u.id = fr.collected_by
-            $whereSql
-            ORDER BY effective_collected_at DESC
-            LIMIT :limit OFFSET :offset";
-    $pdo = pdo_connect();
-    if ($pdo instanceof \PDO) {
-        $stmt = $pdo->prepare($sql);
-        foreach ($params as $k=>$v) $stmt->bindValue($k, $v);
-        $stmt->bindValue(':limit', (int)$perPage, \PDO::PARAM_INT);
-        $stmt->bindValue(':offset', (int)$offset, \PDO::PARAM_INT);
-        $stmt->execute();
-        $fees = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
-    } else {
-        $fees = safe_db_get_all($sql, array_merge($params, [':limit'=>$perPage, ':offset'=>$offset]));
+$totalIn = 0.0;
+$byClass = [];
+$byPay = [];
+foreach ($feeReceipts as $r) {
+    $amt = (float) ($r['paid_amount'] ?? 0);
+    $totalIn += $amt;
+    $cls = trim((string) ($r['class_name'] ?? ''));
+    if ($cls === '') {
+        $cls = 'No class';
     }
-} catch (Throwable $e) {
-    $errors[] = 'List fetch failed: ' . ($DEBUG ? $e->getMessage() : 'Internal error');
+    $byClass[$cls] = ($byClass[$cls] ?? 0) + $amt;
+    $method = 'Other';
+    $raw = (string) ($r['receipt_no'] ?? '');
+    if (preg_match('/METHOD:([^|]+)/', $raw, $mm)) {
+        $method = trim($mm[1]) ?: 'Other';
+    }
+    $byPay[$method] = ($byPay[$method] ?? 0) + $amt;
+}
+arsort($byClass);
+arsort($byPay);
+
+$totalOut = 0.0;
+$byCat = [];
+foreach ($expenses as $ex) {
+    $amt = (float) ($ex['amount'] ?? 0);
+    $totalOut += $amt;
+    $cat = trim((string) ($ex['category'] ?? ''));
+    if ($cat === '') {
+        $cat = 'Other';
+    }
+    $byCat[$cat] = ($byCat[$cat] ?? 0) + $amt;
+}
+arsort($byCat);
+
+$net = $totalIn - $totalOut;
+$receiptCount = count($feeReceipts);
+$expenseCount = count($expenses);
+
+$admissions = 0;
+$activeKids = 0;
+$pendingNow = 0.0;
+$pendingKids = 0;
+if ($hasStudents) {
+    $admCol = function_exists('column_exists') && column_exists('students', 'admission_date')
+        ? 'admission_date' : 'created_at';
+    $admRow = safe_db_get_one(
+        "SELECT COUNT(*) AS c FROM students
+         WHERE DATE({$admCol}) BETWEEN :from AND :to
+           AND LOWER(COALESCE(status,'active')) IN ('active','pending')",
+        [':from' => $fromDate, ':to' => $toDate]
+    );
+    $admissions = (int) ($admRow['c'] ?? 0);
+
+    $actRow = safe_db_get_one(
+        "SELECT COUNT(*) AS c FROM students WHERE LOWER(COALESCE(status,'active')) = 'active'"
+    );
+    $activeKids = (int) ($actRow['c'] ?? 0);
+
+    $hasDues = function_exists('column_exists') && column_exists('students', 'dues_status');
+    $duesSql = $hasDues ? " AND LOWER(COALESCE(s.dues_status,'open')) <> 'written_off'" : '';
+    $pendRows = $hasFees
+        ? (safe_db_get_all(
+            "SELECT s.id, COALESCE(s.total_fees,0) AS total_fees,
+                    COALESCE((SELECT SUM(fr.paid_amount) FROM fees_records fr WHERE fr.student_id = s.id),0) AS paid
+             FROM students s
+             WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') {$duesSql}"
+        ) ?: [])
+        : [];
+    foreach ($pendRows as $pr) {
+        $due = max(0, (float) $pr['total_fees'] - (float) $pr['paid']);
+        if ($due > 0.009) {
+            $pendingNow += $due;
+            $pendingKids++;
+        }
+    }
 }
 
-/* -------------------------
-   Count for pagination
-   ------------------------- */
-try {
-    $cRow = safe_db_get_one("SELECT COUNT(*) AS c FROM fees_records fr LEFT JOIN students st ON st.id = fr.student_id $whereSql", $params);
-    $totalRows = intval($cRow['c'] ?? 0);
-} catch (Throwable $e) {
-    $totalRows = 0;
-}
+$stuName = static function (array $r): string {
+    return trim(preg_replace('/\s+/', ' ', trim(($r['first_name'] ?? '') . ' ' . ($r['middle_name'] ?? '') . ' ' . ($r['last_name'] ?? ''))));
+};
 
-/* -------------------------
-   Data for filters (schools, classes)
-   ------------------------- */
-$schoolList = table_exists('schools') ? safe_db_get_all("SELECT id, name FROM schools ORDER BY name ASC") : [];
-$classList = table_exists('classes') ? safe_db_get_all("SELECT id, name FROM classes ORDER BY name ASC") : [];
-$statusOptions = ['due','partial','paid','overdue'];
-
-/* -------------------------
-   Export CSV for the selected month
-   ------------------------- */
-if (!empty($_GET['action']) && $_GET['action'] === 'export') {
-    $rows = safe_db_get_all("SELECT fr.*, COALESCE(s.name,'') AS school_name, CONCAT(COALESCE(st.first_name,''),' ',COALESCE(st.last_name,'')) AS student_name, COALESCE(c.name,'') AS class_name, COALESCE(u.name,'') AS collector_name, COALESCE(fr.collected_at, fr.created_at) AS effective_collected_at
-                             FROM fees_records fr
-                             LEFT JOIN schools s ON s.id = fr.school_id
-                             LEFT JOIN students st ON st.id = fr.student_id
-                             LEFT JOIN classes c ON c.id = fr.class_id
-                             LEFT JOIN users u ON u.id = fr.collected_by
-                             $whereSql
-                             ORDER BY effective_collected_at DESC", $params);
+if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=monthly_collection_' . $year . sprintf('%02d',$month) . '.csv');
-    $out = fopen('php://output','w');
-    fputcsv($out, ['ID','School','Student','Class','Amount','Paid Amount','Due','Status','Receipt No','Collected By','Collected At','Created At','Notes']);
-    foreach ($rows as $r) {
-        fputcsv($out, [
-            $r['id'],
-            $r['school_name'] ?? '',
-            $r['student_name'] ?? '',
-            $r['class_name'] ?? '',
-            $r['amount'] ?? '',
-            $r['paid_amount'] ?? '',
-            (isset($r['amount']) && isset($r['paid_amount'])) ? ($r['amount'] - $r['paid_amount']) : '',
-            $r['status'] ?? '',
-            $r['receipt_no'] ?? '',
-            $r['collector_name'] ?? '',
-            $r['collected_at'] ?? '',
-            $r['created_at'] ?? '',
-            preg_replace("/\r\n|\r|\n/"," ", $r['notes'] ?? '')
-        ]);
+    header('Content-Disposition: attachment; filename=monthly_summary_' . $ym . '.csv');
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Monthly summary', $monthLabel]);
+    fputcsv($out, ['Fees collected', number_format($totalIn, 2, '.', ''), $receiptCount . ' receipts']);
+    fputcsv($out, ['Expenses', number_format($totalOut, 2, '.', ''), $expenseCount . ' bills']);
+    fputcsv($out, ['Leftover', number_format($net, 2, '.', '')]);
+    fputcsv($out, ['New admissions this month', $admissions]);
+    fputcsv($out, ['Active children now', $activeKids]);
+    fputcsv($out, ['Pending fees now', number_format($pendingNow, 2, '.', ''), $pendingKids . ' children']);
+    fputcsv($out, []);
+    fputcsv($out, ['Fees by class']);
+    fputcsv($out, ['Class', 'Amount']);
+    foreach ($byClass as $k => $v) {
+        fputcsv($out, [$k, number_format($v, 2, '.', '')]);
+    }
+    fputcsv($out, []);
+    fputcsv($out, ['Fees by payment']);
+    fputcsv($out, ['Method', 'Amount']);
+    foreach ($byPay as $k => $v) {
+        fputcsv($out, [$k, number_format($v, 2, '.', '')]);
+    }
+    fputcsv($out, []);
+    fputcsv($out, ['Expenses by type']);
+    fputcsv($out, ['Type', 'Amount']);
+    foreach ($byCat as $k => $v) {
+        fputcsv($out, [$categoryLabels[$k] ?? $k, number_format($v, 2, '.', '')]);
     }
     fclose($out);
     exit;
 }
 
-/* -------------------------
-   View fragment (AJAX) - single record details
-   ------------------------- */
-if (!empty($_GET['action']) && $_GET['action'] === 'view' && !empty($_GET['id'])) {
-    $id = (int)$_GET['id'];
-    if ($id <= 0) { echo '<div class="text-danger">Invalid id</div>'; exit; }
-    $row = safe_db_get_one("SELECT fr.*, COALESCE(s.name,'') AS school_name, CONCAT(COALESCE(st.first_name,''),' ',COALESCE(st.last_name,'')) AS student_name, COALESCE(c.name,'') AS class_name, COALESCE(u.name,'') AS collector_name
-                             FROM fees_records fr
-                             LEFT JOIN schools s ON s.id = fr.school_id
-                             LEFT JOIN students st ON st.id = fr.student_id
-                             LEFT JOIN classes c ON c.id = fr.class_id
-                             LEFT JOIN users u ON u.id = fr.collected_by
-                             WHERE fr.id = :id LIMIT 1", [':id'=>$id]);
-    if (!$row) { echo '<div class="text-muted">Record not found</div>'; exit; }
+$printQs = http_build_query(['month' => $ym, 'print' => '1']);
+$isPrint = isset($_GET['print']) && $_GET['print'] === '1';
 
-    echo '<dl class="row">';
-    echo '<dt class="col-sm-3">ID</dt><dd class="col-sm-9">'.(int)$row['id'].'</dd>';
-    echo '<dt class="col-sm-3">School</dt><dd class="col-sm-9">'.($row['school_name'] ? $esc($row['school_name']) : '—').'</dd>';
-    echo '<dt class="col-sm-3">Student</dt><dd class="col-sm-9">'.($row['student_name'] ? $esc($row['student_name']) : '—').'</dd>';
-    echo '<dt class="col-sm-3">Class</dt><dd class="col-sm-9">'.($row['class_name'] ? $esc($row['class_name']) : '—').'</dd>';
-    echo '<dt class="col-sm-3">Receipt</dt><dd class="col-sm-9">'.($row['receipt_no'] ? $esc($row['receipt_no']) : '—').'</dd>';
-    echo '<dt class="col-sm-3">Amount</dt><dd class="col-sm-9">₹ '.number_format((float)($row['amount'] ?? 0),2).'</dd>';
-    echo '<dt class="col-sm-3">Paid Amount</dt><dd class="col-sm-9">₹ '.number_format((float)($row['paid_amount'] ?? 0),2).'</dd>';
-    $due = (isset($row['amount']) && isset($row['paid_amount'])) ? (float)$row['amount'] - (float)$row['paid_amount'] : 0;
-    echo '<dt class="col-sm-3">Due</dt><dd class="col-sm-9">₹ '.number_format($due,2).'</dd>';
-    echo '<dt class="col-sm-3">Status</dt><dd class="col-sm-9">'.($row['status'] ? $esc($row['status']) : '—').'</dd>';
-    echo '<dt class="col-sm-3">Collected By</dt><dd class="col-sm-9">'.($row['collector_name'] ? $esc($row['collector_name']) : '—').'</dd>';
-    echo '<dt class="col-sm-3">Collected At</dt><dd class="col-sm-9">'.($row['collected_at'] ?? $row['created_at'] ?? '').'</dd>';
-    echo '<dt class="col-sm-3">Created At</dt><dd class="col-sm-9">'.($row['created_at'] ?? '').'</dd>';
-    echo '<dt class="col-12">Notes</dt><dd class="col-12"><pre style="white-space:pre-wrap;">'.e($row['notes'] ?? '').'</pre></dd>';
-    echo '</dl>';
-    exit;
-}
-
-/* -------------------------
-   Pagination math
-   ------------------------- */
-$totalPages = (int)ceil(max(0, $totalRows) / $perPage);
-function build_qs(array $over = []): string {
-    $qs = $_GET;
-    foreach ($over as $k=>$v) { if ($v === null) unset($qs[$k]); else $qs[$k] = $v; }
-    return http_build_query($qs);
-}
-
-$pageTitle = (string)($cfg['page_title'] ?? 'Page');
 require_once __DIR__ . '/../header.php';
 ?>
+<style>
+.ms-stat { border: 0; border-radius: 12px; }
+.ms-stat .n { font-size: 1.45rem; font-weight: 700; }
+.ms-in { background: #ecfdf3; }
+.ms-out { background: #fef2f2; }
+.ms-net-ok { background: #eff6ff; }
+.ms-net-bad { background: #fff7ed; }
+.ms-mini { background: #f8fafc; }
+@media print {
+  .ms-no-print, .sidebar, nav, .navbar, footer { display: none !important; }
+  .ms-stat { border: 1px solid #ccc !important; }
+}
+</style>
 
-  <?php if (!empty($errors)): foreach ($errors as $err): ?><div class="alert alert-danger"><?php echo $esc($err); ?></div><?php endforeach; endif; ?>
+<?php if ($isPrint): ?>
+<script>window.addEventListener('load', function () { window.print(); });</script>
+<?php endif; ?>
 
-  <!-- Filters & month selector -->
-  <div class="card mb-3 p-3">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-md-2">
-        <label class="form-label">Year</label>
-        <select name="year" class="form-select">
-          <?php for ($y = date('Y')-3; $y <= date('Y')+1; $y++): ?>
-            <option value="<?php echo $y; ?>" <?php if($y===$year) echo 'selected'; ?>><?php echo $y; ?></option>
-          <?php endfor; ?>
-        </select>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label">Month</label>
-        <select name="month" class="form-select">
-          <?php for ($m=1;$m<=12;$m++): $mlabel = date('F', mktime(0,0,0,$m,1)); ?>
-            <option value="<?php echo $m; ?>" <?php if($m===$month) echo 'selected'; ?>><?php echo $mlabel; ?></option>
-          <?php endfor; ?>
-        </select>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">School</label>
-        <select name="school_id" class="form-select">
-          <option value="">All schools</option>
-          <?php foreach ($schoolList as $s): ?>
-            <option value="<?php echo (int)$s['id']; ?>" <?php if(isset($_GET['school_id']) && (int)$_GET['school_id']===(int)$s['id']) echo 'selected'; ?>><?php echo $esc($s['name']); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Search (student / receipt / amount)</label>
-        <input name="q" class="form-control" value="<?php echo $esc($qraw); ?>" placeholder="Student name, receipt no, amount">
-      </div>
-      <div class="col-md-2 text-end">
-        <button class="btn btn-primary">Filter</button>
-        <a class="btn btn-outline-secondary" href="?">Reset</a>
-      </div>
-    </form>
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+  <div>
+    <h1 class="h4 mb-1">Monthly summary</h1>
+    <p class="text-muted mb-0">How much came in and went out in <strong><?php echo e($monthLabel); ?></strong>.</p>
   </div>
+  <div class="ms-no-print d-flex flex-wrap gap-2">
+    <a class="btn btn-outline-secondary" href="<?php echo e($selfUrl . '?month=' . $prevYm); ?>">← Previous</a>
+    <a class="btn btn-outline-secondary" href="<?php echo e($selfUrl . '?month=' . $nextYm); ?>">Next →</a>
+    <a class="btn btn-outline-success" href="<?php echo e($selfUrl . '?' . http_build_query(['month' => $ym, 'export' => 'csv'])); ?>">Excel</a>
+    <a class="btn btn-outline-primary" href="<?php echo e($selfUrl . '?' . $printQs); ?>" target="_blank" rel="noopener">Print</a>
+  </div>
+</div>
 
-  <!-- Summary cards -->
-  <div class="row g-2 mb-3">
-    <div class="col-md-3">
-      <div class="card p-3 text-center summary-card">
-        <div class="h6">Records</div>
-        <div class="h4"><?php echo number_format($records_count); ?></div>
-        <div class="small text-muted">for <?php echo e(date('F Y', strtotime($fromDate))); ?></div>
-      </div>
+<form method="get" class="card card-body mb-3 ms-no-print">
+  <div class="row g-2 align-items-end">
+    <div class="col-sm-4 col-md-3">
+      <label class="form-label">Month</label>
+      <input type="month" name="month" class="form-control" value="<?php echo e($ym); ?>">
     </div>
-    <div class="col-md-3">
-      <div class="card p-3 text-center summary-card">
-        <div class="h6">Total Amount</div>
-        <div class="h4">₹ <?php echo number_format($total_amount,2); ?></div>
-        <div class="small text-muted">Expected</div>
-      </div>
+    <div class="col-sm-8 col-md-9">
+      <button class="btn btn-primary">Show</button>
+      <a class="btn btn-outline-secondary" href="<?php echo e($selfUrl); ?>">This month</a>
+      <a class="btn btn-outline-primary" href="<?php echo e($feesUrl); ?>">Collect fees</a>
+      <a class="btn btn-outline-danger" href="<?php echo e($expUrl); ?>">Add expense</a>
     </div>
-    <div class="col-md-3">
-      <div class="card p-3 text-center summary-card">
-        <div class="h6">Total Collected</div>
-        <div class="h4">₹ <?php echo number_format($total_paid,2); ?></div>
-        <div class="small text-muted">Received</div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card p-3 text-center summary-card">
-        <div class="h6">Total Due</div>
-        <div class="h4">₹ <?php echo number_format($total_due,2); ?></div>
-        <div class="small text-muted">Pending</div>
+  </div>
+</form>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="card ms-stat ms-in p-3 h-100">
+      <div class="text-muted small">Fees collected</div>
+      <div class="n text-success">₹ <?php echo number_format($totalIn, 2); ?></div>
+      <div class="small"><?php echo (int) $receiptCount; ?> receipts
+        · <a href="<?php echo e($dailyUrl . '?' . http_build_query(['from' => $fromDate, 'to' => $toDate])); ?>">See list</a>
       </div>
     </div>
   </div>
+  <div class="col-md-4">
+    <div class="card ms-stat ms-out p-3 h-100">
+      <div class="text-muted small">School expenses</div>
+      <div class="n text-danger">₹ <?php echo number_format($totalOut, 2); ?></div>
+      <div class="small"><?php echo (int) $expenseCount; ?> bills
+        · <a href="<?php echo e($expUrl . '?' . http_build_query(['from' => $fromDate, 'to' => $toDate])); ?>">See list</a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card ms-stat <?php echo $net >= 0 ? 'ms-net-ok' : 'ms-net-bad'; ?> p-3 h-100">
+      <div class="text-muted small"><?php echo $net >= 0 ? 'Leftover this month' : 'Short this month'; ?></div>
+      <div class="n <?php echo $net >= 0 ? 'text-primary' : 'text-danger'; ?>">₹ <?php echo number_format($net, 2); ?></div>
+      <div class="small text-muted">Fees minus expenses</div>
+    </div>
+  </div>
+</div>
 
-  <!-- Records table -->
-  <div class="card">
-    <div class="table-responsive">
-      <table class="table table-striped mb-0">
-        <thead>
-          <tr>
-            <th style="width:60px">ID</th>
-            <th style="width:150px">Collected At</th>
-            <th>Student</th>
-            <th style="width:140px">Class</th>
-            <th style="width:120px">Amount</th>
-            <th style="width:120px">Paid</th>
-            <th style="width:120px">Due</th>
-            <th style="width:120px">Status</th>
-            <th style="width:180px">Receipt / Collected By</th>
-            <th style="width:120px">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php if (!empty($fees)): foreach ($fees as $r): ?>
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3">
+    <div class="card ms-mini p-3 h-100">
+      <div class="small text-muted">New admissions</div>
+      <div class="fs-4 fw-semibold"><?php echo (int) $admissions; ?></div>
+      <div class="small text-muted">this month</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card ms-mini p-3 h-100">
+      <div class="small text-muted">Children on roll</div>
+      <div class="fs-4 fw-semibold"><?php echo (int) $activeKids; ?></div>
+      <div class="small text-muted">active now</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card ms-mini p-3 h-100">
+      <div class="small text-muted">Pending fees now</div>
+      <div class="fs-5 fw-semibold">₹ <?php echo number_format($pendingNow, 0); ?></div>
+      <div class="small"><a href="<?php echo e($pendingUrl); ?>"><?php echo (int) $pendingKids; ?> children</a></div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card ms-mini p-3 h-100">
+      <div class="small text-muted">Average receipt</div>
+      <div class="fs-5 fw-semibold">₹ <?php echo $receiptCount ? number_format($totalIn / $receiptCount, 0) : '0'; ?></div>
+      <div class="small text-muted">this month</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header bg-white fw-semibold">Fees by class</div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <tbody>
+          <?php if ($byClass === []): ?>
+            <tr><td class="text-muted p-3">No fees collected this month.</td></tr>
+          <?php else: foreach ($byClass as $k => $v): ?>
             <tr>
-              <td><?php echo (int)$r['id']; ?></td>
-              <td><?php echo $esc(substr($r['effective_collected_at'] ?? $r['created_at'] ?? '', 0, 16)); ?></td>
-              <td>
-                <div class="fw-semibold"><?php echo $esc($r['student_name'] ?: '—'); ?></div>
-                <div class="small text-muted"><?php echo $esc($r['school_name'] ?? ''); ?></div>
-              </td>
-              <td><?php echo $esc($r['class_name'] ?? '—'); ?></td>
-              <td>₹ <?php echo number_format((float)($r['amount'] ?? 0),2); ?></td>
-              <td>₹ <?php echo number_format((float)($r['paid_amount'] ?? 0),2); ?></td>
-              <td>₹ <?php $due = (isset($r['amount']) && isset($r['paid_amount'])) ? (float)$r['amount'] - (float)$r['paid_amount'] : 0; echo number_format($due,2); ?></td>
-              <td><span class="badge <?php echo ($r['status']==='paid' ? 'bg-success' : ($r['status']==='partial' ? 'bg-warning text-dark' : ($r['status']==='overdue' ? 'bg-danger' : 'bg-secondary'))); ?>"><?php echo $esc($r['status'] ?? ''); ?></span></td>
-              <td>
-                <div class="small"><?php echo $esc($r['receipt_no'] ?? '—'); ?></div>
-                <div class="small text-muted"><?php echo $esc($r['collector_name'] ?? '—'); ?></div>
-              </td>
-              <td>
-                <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#viewModal" data-id="<?php echo (int)$r['id']; ?>">View</button>
-              </td>
+              <td><?php echo e($k); ?></td>
+              <td class="text-end">₹ <?php echo number_format($v, 2); ?></td>
             </tr>
-          <?php endforeach; else: ?>
-            <tr><td colspan="10" class="text-center text-muted">No records for selected month.</td></tr>
-          <?php endif; ?>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="p-3 d-flex justify-content-between align-items-center">
-      <div>Showing <?php echo $totalRows ? ($offset+1) : 0; ?> - <?php echo min($totalRows, $offset + count($fees)); ?> of <?php echo $totalRows; ?></div>
-      <nav>
-        <ul class="pagination mb-0">
-          <?php for ($p = 1; $p <= max(1, $totalPages); $p++): ?>
-            <li class="page-item <?php if ($p === $page) echo 'active'; ?>"><a class="page-link" href="?<?php echo build_qs(['page'=>$p]); ?>"><?php echo $p; ?></a></li>
-          <?php endfor; ?>
-        </ul>
-      </nav>
-    </div>
-  </div>
-
-</div>
-
-<!-- View modal -->
-<div class="modal fade" id="viewModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Collection details</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
       </div>
-      <div class="modal-body" id="viewModalBody"><div class="text-center text-muted">Loading…</div></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header bg-white fw-semibold">How parents paid</div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <tbody>
+          <?php if ($byPay === []): ?>
+            <tr><td class="text-muted p-3">No payments this month.</td></tr>
+          <?php else: foreach ($byPay as $k => $v): ?>
+            <tr>
+              <td><?php echo e($k); ?></td>
+              <td class="text-end">₹ <?php echo number_format($v, 2); ?></td>
+            </tr>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header bg-white fw-semibold">Where money went</div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <tbody>
+          <?php if ($byCat === []): ?>
+            <tr><td class="text-muted p-3">No expenses this month.</td></tr>
+          <?php else: foreach ($byCat as $k => $v): ?>
+            <tr>
+              <td><?php echo e($categoryLabels[$k] ?? $k); ?></td>
+              <td class="text-end">₹ <?php echo number_format($v, 2); ?></td>
+            </tr>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  const viewModal = document.getElementById('viewModal');
-  if (viewModal) {
-    viewModal.addEventListener('show.bs.modal', function(event){
-      const id = event.relatedTarget.getAttribute('data-id');
-      const body = document.getElementById('viewModalBody');
-      body.innerHTML = '<div class="text-center text-muted">Loading…</div>';
-      fetch('?action=view&id=' + encodeURIComponent(id), { credentials: 'same-origin' })
-        .then(resp => resp.ok ? resp.text() : Promise.reject())
-        .then(html => { body.innerHTML = html; })
-        .catch(() => { body.innerHTML = '<div class="text-danger">Failed to load details.</div>'; });
-    });
-  }
-});
-</script>
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header bg-white d-flex justify-content-between">
+        <span class="fw-semibold">Latest fees</span>
+        <a class="small ms-no-print" href="<?php echo e($dailyUrl . '?' . http_build_query(['from' => $fromDate, 'to' => $toDate])); ?>">Full cash book</a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Date</th><th>Child</th><th class="text-end">Paid</th></tr></thead>
+          <tbody>
+          <?php
+          $latestFees = array_slice($feeReceipts, 0, 8);
+          if ($latestFees === []):
+          ?>
+            <tr><td colspan="3" class="text-muted p-3">Nothing collected yet.</td></tr>
+          <?php else: foreach ($latestFees as $r): ?>
+            <tr>
+              <td><?php echo e(substr((string) ($r['collected_at'] ?? ''), 0, 10)); ?></td>
+              <td><?php echo e($stuName($r) !== '' ? $stuName($r) : '—'); ?>
+                <div class="small text-muted"><?php echo e($r['class_name'] ?? ''); ?></div>
+              </td>
+              <td class="text-end">₹ <?php echo number_format((float) $r['paid_amount'], 2); ?></td>
+            </tr>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header bg-white d-flex justify-content-between">
+        <span class="fw-semibold">Latest expenses</span>
+        <a class="small ms-no-print" href="<?php echo e($expUrl . '?' . http_build_query(['from' => $fromDate, 'to' => $toDate])); ?>">All expenses</a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Date</th><th>Bill</th><th class="text-end">Amount</th></tr></thead>
+          <tbody>
+          <?php
+          $latestExp = array_slice($expenses, 0, 8);
+          if ($latestExp === []):
+          ?>
+            <tr><td colspan="3" class="text-muted p-3">No bills this month.</td></tr>
+          <?php else: foreach ($latestExp as $ex): ?>
+            <tr>
+              <td><?php echo e((string) ($ex['expense_date'] ?? '')); ?></td>
+              <td><?php echo e((string) ($ex['title'] ?? '')); ?>
+                <div class="small text-muted"><?php echo e($categoryLabels[$ex['category'] ?? ''] ?? ($ex['category'] ?? '')); ?></div>
+              </td>
+              <td class="text-end">₹ <?php echo number_format((float) $ex['amount'], 2); ?></td>
+            </tr>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
 
 <?php
 require_once __DIR__ . '/../footer.php';
-?>
