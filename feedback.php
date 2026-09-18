@@ -127,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $hasTable) {
         $errors[] = 'Please refresh the page and try again.';
     }
     if ($honeypot !== '') {
-        $errors[] = 'Could not send. Please try again.';
+        $errors[] = 'Please refresh the page and try again.';
     }
     if ($name === '') {
         $errors[] = 'Please write your name.';
@@ -135,8 +135,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $hasTable) {
     if (strlen($phone) < 10) {
         $errors[] = 'Please enter a 10-digit mobile number.';
     }
-    if ($message === '' || mb_strlen($message) < 8) {
-        $errors[] = 'Please write a short message.';
+    if ($message === '' || mb_strlen($message) < 3) {
+        $errors[] = 'Please write your message.';
     }
     if (!simple_captcha_ok((string) ($_POST['captcha'] ?? ''))) {
         $errors[] = 'Please type the correct answer from the picture.';
@@ -197,7 +197,7 @@ if (!empty($_GET['ok']) && !empty($_SESSION['feedback_ref'])) {
 simple_captcha_ensure(true);
 $captchaSrc = function_exists('site_url') ? site_url('/captcha.php') : '/captcha.php';
 
-public_site_render_head($ps, 'Feedback', 'Tell Pioneer Play School what is going well or what we can improve.');
+public_site_render_head($ps, 'Feedback', 'Tell Pioneer Play School what is going well or what we can improve.', 'public-form');
 public_site_render_nav($ps, 'feedback');
 ?>
 <section class="py-4 public-enquiry">
@@ -225,10 +225,10 @@ public_site_render_nav($ps, 'feedback');
 
             <form method="post" autocomplete="on">
               <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
-              <div class="fb-hp" aria-hidden="true">
-                <label>Website</label>
-                <input type="text" name="website" tabindex="-1" autocomplete="off">
-              </div>
+              <p class="fb-hp" hidden aria-hidden="true">
+                <label for="fb_website">Leave blank</label>
+                <input id="fb_website" type="text" name="website" tabindex="-1" autocomplete="off">
+              </p>
 
               <div class="mb-3">
                 <span class="form-label d-block">This is</span>

@@ -51,10 +51,11 @@ if (!function_exists('public_site_prepare')) {
 }
 
 if (!function_exists('public_site_render_head')) {
-    function public_site_render_head(array $ps, string $pageHeading, string $metaDescription = ''): void
+    function public_site_render_head(array $ps, string $pageHeading, string $metaDescription = '', string $extraBodyClass = ''): void
     {
         $title = e($ps['page_title']) . ' — ' . e($pageHeading);
         $meta = $metaDescription !== '' ? e(strip_tags(substr($metaDescription, 0, 160))) : '';
+        $bodyClass = trim('public-site ' . $extraBodyClass);
         ?>
 <!doctype html>
 <html lang="en">
@@ -65,9 +66,19 @@ if (!function_exists('public_site_render_head')) {
 <?php if ($meta !== ''): ?><meta name="description" content="<?php echo $meta; ?>"><?php endif; ?>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-<link href="<?php echo e($ps['cssBase']); ?>/assets/css/public-site.css" rel="stylesheet">
+<link href="<?php echo e($ps['cssBase']); ?>/assets/css/public-site.css?v=20260918" rel="stylesheet">
+<?php if (str_contains($extraBodyClass, 'public-form')): ?>
+<style>
+body.public-form #bottom-social-bar { display: none !important; }
+.fb-hp { position: absolute !important; left: -9999px !important; height: 0 !important; width: 0 !important; overflow: hidden !important; opacity: 0; }
+.fb-type { flex: 1; text-align: center; border: 2px solid #e2e8f0; border-radius: 999px; padding: .45rem .75rem; font-weight: 700; cursor: pointer; background: #fff; }
+.fb-type input { position: absolute; opacity: 0; width: 0; height: 0; }
+.fb-type.on { border-color: #ff6b8a; background: #fff0f3; color: #c81e4a; }
+.fb-captcha-img { border-radius: 12px; border: 1px solid #f3d7a3; background: #fff8e8; height: 64px; width: 220px; object-fit: contain; }
+</style>
+<?php endif; ?>
 </head>
-<body class="public-site">
+<body class="<?php echo e($bodyClass); ?>">
         <?php
     }
 }

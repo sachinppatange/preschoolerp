@@ -125,7 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $hasTable) {
         $errors[] = 'Please refresh the page and try again.';
     }
     if ($honeypot !== '') {
-        $errors[] = 'Could not send. Please try again.';
+        $errors[] = 'Please refresh the page and try again.';
     }
     if ($name === '') {
         $errors[] = 'Please write your name.';
@@ -133,7 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $hasTable) {
     if (strlen($phone) < 10) {
         $errors[] = 'Please enter a 10-digit mobile number.';
     }
-    if ($message === '' || mb_strlen($message) < 8) {
+    if ($message === '' || mb_strlen($message) < 3) {
         $errors[] = 'Please write what happened.';
     }
     if (!simple_captcha_ok((string) ($_POST['captcha'] ?? ''))) {
@@ -201,7 +201,7 @@ if (!empty($_GET['ok']) && !empty($_SESSION['complaint_ref'])) {
 simple_captcha_ensure(true);
 $captchaSrc = function_exists('site_url') ? site_url('/captcha.php') : '/captcha.php';
 
-public_site_render_head($ps, 'Complaint', 'Tell the school if something went wrong. We will call you.');
+public_site_render_head($ps, 'Complaint', 'Tell the school if something went wrong. We will call you.', 'public-form');
 public_site_render_nav($ps, 'complaint');
 ?>
 <section class="py-4 public-enquiry">
@@ -232,10 +232,10 @@ public_site_render_nav($ps, 'complaint');
 
             <form method="post" autocomplete="on">
               <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
-              <div class="fb-hp" aria-hidden="true">
-                <label>Website</label>
-                <input type="text" name="website" tabindex="-1" autocomplete="off">
-              </div>
+              <p class="fb-hp" hidden aria-hidden="true">
+                <label for="cp_website">Leave blank</label>
+                <input id="cp_website" type="text" name="website" tabindex="-1" autocomplete="off">
+              </p>
 
               <div class="mb-3">
                 <label class="form-label" for="cp_name">Your name</label>

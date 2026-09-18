@@ -8,6 +8,9 @@ body.public-site {
   background: var(--ps-surface);
   -webkit-font-smoothing: antialiased;
 }
+body.public-form #bottom-social-bar {
+  display: none !important;
+}
 
 .public-site h1,
 .public-site h2,
