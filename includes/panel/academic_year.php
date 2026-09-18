@@ -185,6 +185,53 @@ function ay_apply_student_filter(array &$where, array &$params, string $alias = 
     $params[':panel_ay'] = ay_selected();
 }
 
+/** SQL snippet: this academic year's students only. */
+function ay_sql_student(string $alias = 's'): string
+{
+    if (!ay_students_have_column()) {
+        return '1=1';
+    }
+
+    return $alias . '.academic_year = :panel_ay';
+}
+
+function ay_params_student(array $params = []): array
+{
+    if (ay_students_have_column()) {
+        $params[':panel_ay'] = ay_selected();
+    }
+
+    return $params;
+}
+
+/**
+ * Clip a date range to the selected academic year (June–May).
+ *
+ * @return array{0: string, 1: string}
+ */
+function ay_limit_dates(string $from, string $to): array
+{
+    $range = ay_range();
+    if ($from < $range['start']) {
+        $from = $range['start'];
+    }
+    if ($to > $range['end']) {
+        $to = $range['end'];
+    }
+    if ($to < $from) {
+        $to = $from;
+    }
+
+    return [$from, $to];
+}
+
+function ay_contains_date(string $date): bool
+{
+    $range = ay_range();
+
+    return $date >= $range['start'] && $date <= $range['end'];
+}
+
 /**
  * Append date-column filter for selected academic year (June–June).
  */

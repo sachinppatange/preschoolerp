@@ -54,15 +54,22 @@ if (!preg_match('/^(\d{4})-(\d{2})$/', $ym, $m)) {
 
 $fromDate = sprintf('%04d-%02d-01', $year, $month);
 $toDate = date('Y-m-t', strtotime($fromDate));
-$monthLabel = date('F Y', strtotime($fromDate));
-$prevYm = date('Y-m', strtotime($fromDate . ' -1 month'));
-$nextYm = date('Y-m', strtotime($fromDate . ' +1 month'));
+if (function_exists('ay_limit_dates')) {
+    [$fromDate, $toDate] = ay_limit_dates($fromDate, $toDate);
+}
+$monthLabel = date('F Y', strtotime(sprintf('%04d-%02d-01', $year, $month)));
+$prevYm = date('Y-m', strtotime(sprintf('%04d-%02d-01', $year, $month) . ' -1 month'));
+$nextYm = date('Y-m', strtotime(sprintf('%04d-%02d-01', $year, $month) . ' +1 month'));
 $fromDt = $fromDate . ' 00:00:00';
 $toDt = $toDate . ' 23:59:59';
 
 $hasFees = function_exists('table_exists') && table_exists('fees_records');
 $hasExp = function_exists('table_exists') && table_exists('expenses');
 $hasStudents = function_exists('table_exists') && table_exists('students');
+$ayStu = function_exists('ay_sql_student') ? ay_sql_student('s') : '1=1';
+$ayP = static function (array $extra = []): array {
+    return function_exists('ay_params_student') ? ay_params_student($extra) : $extra;
+};
 
 $feeReceipts = $hasFees
     ? (safe_db_get_all(
@@ -72,13 +79,14 @@ $feeReceipts = $hasFees
                 COALESCE(s.last_name,'') AS last_name,
                 COALESCE(c.name,'') AS class_name
          FROM fees_records fr
-         LEFT JOIN students s ON s.id = fr.student_id
+         INNER JOIN students s ON s.id = fr.student_id
          LEFT JOIN classes c ON c.id = s.class_id
          WHERE fr.collected_at IS NOT NULL
            AND fr.collected_at >= :from
            AND fr.collected_at <= :to
+           AND {$ayStu}
          ORDER BY fr.collected_at DESC, fr.id DESC",
-        [':from' => $fromDt, ':to' => $toDt]
+        $ayP([':from' => $fromDt, ':to' => $toDt])
     ) ?: [])
     : [];
 
@@ -138,15 +146,17 @@ if ($hasStudents) {
     $admCol = function_exists('column_exists') && column_exists('students', 'admission_date')
         ? 'admission_date' : 'created_at';
     $admRow = safe_db_get_one(
-        "SELECT COUNT(*) AS c FROM students
+        "SELECT COUNT(*) AS c FROM students s
          WHERE DATE({$admCol}) BETWEEN :from AND :to
-           AND LOWER(COALESCE(status,'active')) IN ('active','pending')",
-        [':from' => $fromDate, ':to' => $toDate]
+           AND LOWER(COALESCE(s.status,'active')) IN ('active','pending')
+           AND {$ayStu}",
+        $ayP([':from' => $fromDate, ':to' => $toDate])
     );
     $admissions = (int) ($admRow['c'] ?? 0);
 
     $actRow = safe_db_get_one(
-        "SELECT COUNT(*) AS c FROM students WHERE LOWER(COALESCE(status,'active')) = 'active'"
+        "SELECT COUNT(*) AS c FROM students s WHERE LOWER(COALESCE(s.status,'active')) = 'active' AND {$ayStu}",
+        $ayP()
     );
     $activeKids = (int) ($actRow['c'] ?? 0);
 
@@ -157,7 +167,9 @@ if ($hasStudents) {
             "SELECT s.id, COALESCE(s.total_fees,0) AS total_fees,
                     COALESCE((SELECT SUM(fr.paid_amount) FROM fees_records fr WHERE fr.student_id = s.id),0) AS paid
              FROM students s
-             WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') {$duesSql}"
+             WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') {$duesSql}
+               AND {$ayStu}",
+            $ayP()
         ) ?: [])
         : [];
     foreach ($pendRows as $pr) {

@@ -109,11 +109,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
                 }
                 continue;
             }
-            $stu = safe_db_get_one(
-                "SELECT id, school_id, class_id FROM students WHERE id = :id LIMIT 1",
-                [':id' => $sid]
-            );
+            $stuSql = 'SELECT id, school_id, class_id FROM students WHERE id = :id LIMIT 1';
+            if (function_exists('ay_students_have_column') && ay_students_have_column()) {
+                $stuSql = 'SELECT id, school_id, class_id, academic_year FROM students WHERE id = :id LIMIT 1';
+            }
+            $stu = safe_db_get_one($stuSql, [':id' => $sid]);
             if (!$stu) {
+                $skipped++;
+                continue;
+            }
+            if (function_exists('ay_students_have_column') && ay_students_have_column()
+                && (string) ($stu['academic_year'] ?? '') !== ay_selected()) {
                 $skipped++;
                 continue;
             }
@@ -158,6 +164,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
 $kids = [];
 if ($classId > 0 && $hasStudents) {
     $duesSql = $hasDues ? " AND LOWER(COALESCE(s.dues_status,'open')) <> 'written_off'" : '';
+    $ayKids = function_exists('ay_sql_student') ? ay_sql_student('s') : '1=1';
+    $kidsParams = [':cid' => $classId];
+    $kidsParams = function_exists('ay_params_student') ? ay_params_student($kidsParams) : $kidsParams;
     $kids = safe_db_get_all(
         "SELECT s.id, s.first_name, s.middle_name, s.last_name, s.school_id, s.class_id,
                 COALESCE(s.total_fees,0) AS total_fees,
@@ -166,8 +175,9 @@ if ($classId > 0 && $hasStudents) {
          WHERE s.class_id = :cid
            AND LOWER(COALESCE(s.status,'active')) IN ('active','pending')
            {$duesSql}
+           AND {$ayKids}
          ORDER BY s.first_name, s.last_name",
-        [':cid' => $classId]
+        $kidsParams
     ) ?: [];
 }
 

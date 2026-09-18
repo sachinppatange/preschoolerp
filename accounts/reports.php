@@ -54,8 +54,14 @@ if ($preset === 'today') {
     $from = $lastMonthStart;
     $to = $lastMonthEnd;
 } elseif ($preset === 'year') {
-    $from = $yearStart;
-    $to = $today;
+    if (function_exists('ay_range')) {
+        $ayr = ay_range();
+        $from = $ayr['start'];
+        $to = min($today, $ayr['end']);
+    } else {
+        $from = $yearStart;
+        $to = $today;
+    }
 } else {
     $from = trim((string) ($_GET['from'] ?? $monthStart));
     $to = trim((string) ($_GET['to'] ?? $monthEnd));
@@ -68,6 +74,9 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
 }
 if ($to < $from) {
     $to = $from;
+}
+if (function_exists('ay_limit_dates')) {
+    [$from, $to] = ay_limit_dates($from, $to);
 }
 
 $classId = isset($_GET['class_id']) && $_GET['class_id'] !== '' ? (int) $_GET['class_id'] : 0;
@@ -90,6 +99,9 @@ if ($classId > 0) {
     $feeWhere[] = 's.class_id = :cid';
     $feeParams[':cid'] = $classId;
 }
+if (function_exists('ay_apply_student_filter')) {
+    ay_apply_student_filter($feeWhere, $feeParams, 's');
+}
 $feeSql = 'WHERE ' . implode(' AND ', $feeWhere);
 
 $receipts = $hasFees
@@ -100,7 +112,7 @@ $receipts = $hasFees
                 COALESCE(s.last_name,'') AS last_name,
                 COALESCE(c.name,'') AS class_name
          FROM fees_records fr
-         LEFT JOIN students s ON s.id = fr.student_id
+         INNER JOIN students s ON s.id = fr.student_id
          LEFT JOIN classes c ON c.id = s.class_id
          {$feeSql}
          ORDER BY fr.collected_at ASC, fr.id ASC",
@@ -173,13 +185,16 @@ if ($hasStudents && $hasFees) {
     $duesSql = $hasDues ? " AND LOWER(COALESCE(s.dues_status,'open')) <> 'written_off'" : '';
     $classSql = $classId > 0 ? ' AND s.class_id = :cid' : '';
     $pendParams = $classId > 0 ? [':cid' => $classId] : [];
+    $ayPend = function_exists('ay_sql_student') ? ay_sql_student('s') : '1=1';
+    $pendParams = function_exists('ay_params_student') ? ay_params_student($pendParams) : $pendParams;
     $pendRows = safe_db_get_all(
         "SELECT COALESCE(c.name,'No class') AS class_name,
                 COALESCE(s.total_fees,0) AS total_fees,
                 COALESCE((SELECT SUM(fr.paid_amount) FROM fees_records fr WHERE fr.student_id = s.id),0) AS paid
          FROM students s
          LEFT JOIN classes c ON c.id = s.class_id
-         WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') {$duesSql} {$classSql}",
+         WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') {$duesSql} {$classSql}
+           AND {$ayPend}",
         $pendParams
     ) ?: [];
     foreach ($pendRows as $pr) {
@@ -195,24 +210,22 @@ if ($hasStudents && $hasFees) {
 }
 
 $admissions = 0;
-if ($hasStudents && $classId === 0) {
+$ayStu = function_exists('ay_sql_student') ? ay_sql_student('s') : '1=1';
+if ($hasStudents) {
     $admCol = function_exists('column_exists') && column_exists('students', 'admission_date')
         ? 'admission_date' : 'created_at';
+    $admParams = [':from' => $from, ':to' => $to];
+    $classAdm = $classId > 0 ? ' AND s.class_id = :cid' : '';
+    if ($classId > 0) {
+        $admParams[':cid'] = $classId;
+    }
+    $admParams = function_exists('ay_params_student') ? ay_params_student($admParams) : $admParams;
     $adm = safe_db_get_one(
-        "SELECT COUNT(*) AS c FROM students
+        "SELECT COUNT(*) AS c FROM students s
          WHERE DATE({$admCol}) BETWEEN :from AND :to
-           AND LOWER(COALESCE(status,'active')) IN ('active','pending','inactive','alumni')",
-        [':from' => $from, ':to' => $to]
-    );
-    $admissions = (int) ($adm['c'] ?? 0);
-} elseif ($hasStudents && $classId > 0) {
-    $admCol = function_exists('column_exists') && column_exists('students', 'admission_date')
-        ? 'admission_date' : 'created_at';
-    $adm = safe_db_get_one(
-        "SELECT COUNT(*) AS c FROM students
-         WHERE DATE({$admCol}) BETWEEN :from AND :to
-           AND class_id = :cid",
-        [':from' => $from, ':to' => $to, ':cid' => $classId]
+           AND {$ayStu}
+           {$classAdm}",
+        $admParams
     );
     $admissions = (int) ($adm['c'] ?? 0);
 }

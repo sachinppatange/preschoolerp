@@ -47,6 +47,9 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
 if ($to < $from) {
     $to = $from;
 }
+if (function_exists('ay_limit_dates')) {
+    [$from, $to] = ay_limit_dates($from, $to);
+}
 $q = trim((string) ($_GET['q'] ?? ''));
 $classFilter = isset($_GET['class_id']) && $_GET['class_id'] !== '' ? (int) $_GET['class_id'] : 0;
 
@@ -60,6 +63,9 @@ if ($classFilter > 0) {
     $where[] = 's.class_id = :cid';
     $params[':cid'] = $classFilter;
 }
+if (function_exists('ay_apply_student_filter')) {
+    ay_apply_student_filter($where, $params, 's');
+}
 $whereSql = 'WHERE ' . implode(' AND ', $where);
 
 $rows = safe_db_get_all(
@@ -67,7 +73,7 @@ $rows = safe_db_get_all(
             COALESCE(s.first_name,'') AS first_name, COALESCE(s.middle_name,'') AS middle_name, COALESCE(s.last_name,'') AS last_name,
             COALESCE(c.name,'') AS class_name, COALESCE(u.name,'') AS collector_name
      FROM fees_records fr
-     LEFT JOIN students s ON s.id = fr.student_id
+     INNER JOIN students s ON s.id = fr.student_id
      LEFT JOIN classes c ON c.id = s.class_id
      LEFT JOIN users u ON u.id = fr.collected_by
      {$whereSql}

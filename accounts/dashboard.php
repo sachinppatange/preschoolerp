@@ -19,10 +19,18 @@ $hasFees = function_exists('table_exists') && table_exists('fees_records');
 $hasExp = function_exists('table_exists') && table_exists('expenses');
 $hasStudents = function_exists('table_exists') && table_exists('students');
 $hasDues = $hasStudents && function_exists('column_exists') && column_exists('students', 'dues_status');
+$ayStu = function_exists('ay_sql_student') ? ay_sql_student('s') : '1=1';
+$ayP = static function (array $extra = []): array {
+    return function_exists('ay_params_student') ? ay_params_student($extra) : $extra;
+};
 
 $today = date('Y-m-d');
 $monthStart = date('Y-m-01');
 $monthEnd = date('Y-m-t');
+if (function_exists('ay_limit_dates')) {
+    [$monthStart, $monthEnd] = ay_limit_dates($monthStart, $monthEnd);
+}
+$todayInAy = !function_exists('ay_contains_date') || ay_contains_date($today);
 
 $todayIn = 0.0;
 $todayN = 0;
@@ -31,23 +39,29 @@ $monthOut = 0.0;
 $pendingAmt = 0.0;
 $pendingKids = 0;
 
-if ($hasFees) {
+if ($hasFees && $todayInAy) {
     $r = safe_db_get_one(
-        "SELECT COALESCE(SUM(paid_amount),0) AS a, COUNT(*) AS n
-         FROM fees_records
-         WHERE collected_at IS NOT NULL
-           AND collected_at >= :a AND collected_at <= :b",
-        [':a' => $today . ' 00:00:00', ':b' => $today . ' 23:59:59']
+        "SELECT COALESCE(SUM(fr.paid_amount),0) AS a, COUNT(*) AS n
+         FROM fees_records fr
+         INNER JOIN students s ON s.id = fr.student_id
+         WHERE fr.collected_at IS NOT NULL
+           AND fr.collected_at >= :a AND fr.collected_at <= :b
+           AND {$ayStu}",
+        $ayP([':a' => $today . ' 00:00:00', ':b' => $today . ' 23:59:59'])
     );
     $todayIn = (float) ($r['a'] ?? 0);
     $todayN = (int) ($r['n'] ?? 0);
+}
 
+if ($hasFees) {
     $r = safe_db_get_one(
-        "SELECT COALESCE(SUM(paid_amount),0) AS a
-         FROM fees_records
-         WHERE collected_at IS NOT NULL
-           AND collected_at >= :a AND collected_at <= :b",
-        [':a' => $monthStart . ' 00:00:00', ':b' => $monthEnd . ' 23:59:59']
+        "SELECT COALESCE(SUM(fr.paid_amount),0) AS a
+         FROM fees_records fr
+         INNER JOIN students s ON s.id = fr.student_id
+         WHERE fr.collected_at IS NOT NULL
+           AND fr.collected_at >= :a AND fr.collected_at <= :b
+           AND {$ayStu}",
+        $ayP([':a' => $monthStart . ' 00:00:00', ':b' => $monthEnd . ' 23:59:59'])
     );
     $monthIn = (float) ($r['a'] ?? 0);
 }
@@ -72,7 +86,9 @@ if ($hasStudents && $hasFees) {
          LEFT JOIN (
             SELECT student_id, SUM(paid_amount) AS paid_sum FROM fees_records GROUP BY student_id
          ) fr_sum ON fr_sum.student_id = s.id
-         WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') {$duesSql}"
+         WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') {$duesSql}
+           AND {$ayStu}",
+        $ayP()
     );
     $pendingAmt = (float) ($tot['amt'] ?? 0);
     $pendingKids = (int) ($tot['n'] ?? 0);
@@ -85,9 +101,11 @@ if ($hasStudents && $hasFees) {
             SELECT student_id, SUM(paid_amount) AS paid_sum FROM fees_records GROUP BY student_id
          ) fr_sum ON fr_sum.student_id = s.id
          WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') {$duesSql}
+           AND {$ayStu}
          HAVING pending > 0.009
          ORDER BY pending DESC
-         LIMIT 8"
+         LIMIT 8",
+        $ayP()
     ) ?: [];
 }
 
@@ -103,6 +121,7 @@ $payMethod = static function (string $raw): string {
     return '';
 };
 
+$ayRange = function_exists('ay_range') ? ay_range() : ['start' => $monthStart, 'end' => $monthEnd];
 $recentPay = $hasFees
     ? (safe_db_get_all(
         "SELECT fr.id, fr.paid_amount, fr.collected_at, fr.receipt_no,
@@ -111,17 +130,22 @@ $recentPay = $hasFees
                 COALESCE(s.last_name,'') AS last_name,
                 COALESCE(c.name,'') AS class_name
          FROM fees_records fr
-         LEFT JOIN students s ON s.id = fr.student_id
+         INNER JOIN students s ON s.id = fr.student_id
          LEFT JOIN classes c ON c.id = s.class_id
          WHERE fr.collected_at IS NOT NULL
+           AND {$ayStu}
          ORDER BY fr.collected_at DESC, fr.id DESC
-         LIMIT 8"
+         LIMIT 8",
+        $ayP()
     ) ?: [])
     : [];
 
 $recentExp = $hasExp
     ? (safe_db_get_all(
-        'SELECT id, title, amount, expense_date, category FROM expenses ORDER BY expense_date DESC, id DESC LIMIT 6'
+        'SELECT id, title, amount, expense_date, category FROM expenses
+         WHERE expense_date BETWEEN :a AND :b
+         ORDER BY expense_date DESC, id DESC LIMIT 6',
+        [':a' => $ayRange['start'], ':b' => $ayRange['end']]
     ) ?: [])
     : [];
 
@@ -144,7 +168,7 @@ require_once __DIR__ . '/../includes/header.php';
 
 <div class="dc-page">
   <div class="dc-ay-bar">
-    <div class="dc-ay-chip"><i class="bi bi-cash-coin"></i> Accounts · <?php echo e(date('d M Y')); ?> · Updated <?php echo e($lastUpdated); ?></div>
+    <div class="dc-ay-chip"><i class="bi bi-cash-coin"></i> Accounts · <?php echo e(function_exists('ay_display_short') ? ay_display_short() : ''); ?> · Updated <?php echo e($lastUpdated); ?></div>
   </div>
 
   <section class="dc-section">
