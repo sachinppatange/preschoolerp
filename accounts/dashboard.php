@@ -1,290 +1,326 @@
 <?php
 /**
- * accounts/dashboard.php
- *
- * Accounts Dashboard for Pioneer Play School.
- * - Mobile-first responsive UI using Bootstrap 5
- * - Shows accounts/finance-focused metrics and quick actions
- * - Prefers project includes (config.php, db.php, functions.php) when available
- * - Uses safe DB helpers with PDO fallbacks and guards to avoid redeclare errors
- * - Session auth key: $_SESSION['accounts_auth_user'] or $_SESSION['accounts_user_id']
- *
- * Place at: /pioneerplayschool01/accounts/dashboard.php
+ * Accounts home — money today / this month, then collect or look up.
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('accounts');
-$DEBUG = panel_debug();
 
-$accountsUserId = auth_user_id();
+$page_title = 'Accounts';
+$pageTitle = $page_title;
+$lastUpdated = date('d M Y, h:i A');
 
-/* ---------- Detect tables ---------- */
-function table_exists(string $name): bool {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :t", [':t' => $name]);
-    return !empty($r['cnt']);
-}
+$u = static function (string $path): string {
+    return function_exists('site_url') ? site_url($path) : $path;
+};
 
-$hasFees = table_exists('fees_records');
-$hasExpenses = table_exists('expenses');
-$hasStudents = table_exists('students');
-$hasNotices = table_exists('notices');
-$hasInvoices = table_exists('invoices'); // optional
-$hasPayments = $hasFees; // treat fees_records as payments source
+$hasFees = function_exists('table_exists') && table_exists('fees_records');
+$hasExp = function_exists('table_exists') && table_exists('expenses');
+$hasStudents = function_exists('table_exists') && table_exists('students');
+$hasDues = $hasStudents && function_exists('column_exists') && column_exists('students', 'dues_status');
 
-/* ---------- Gather metrics (accounts-focused) ---------- */
-$metrics = [
-    'todayCollection' => 0.0,
-    'monthCollection' => 0.0,
-    'pendingFees' => 0.0,
-    'dueInvoices' => 0,
-    'expenseThisMonth' => 0.0,
-    'totalStudents' => 0,
-];
+$today = date('Y-m-d');
+$monthStart = date('Y-m-01');
+$monthEnd = date('Y-m-t');
+
+$todayIn = 0.0;
+$todayN = 0;
+$monthIn = 0.0;
+$monthOut = 0.0;
+$pendingAmt = 0.0;
+$pendingKids = 0;
 
 if ($hasFees) {
-    // Today's collection: paid_amount where collected_at date is today OR created_at today and paid_amount>0
     $r = safe_db_get_one(
-        "SELECT COALESCE(SUM(paid_amount),0) AS amt FROM fees_records
-         WHERE paid_amount>0 AND ((collected_at IS NOT NULL AND DATE(collected_at)=CURDATE()) OR (collected_at IS NULL AND DATE(created_at)=CURDATE()))"
+        "SELECT COALESCE(SUM(paid_amount),0) AS a, COUNT(*) AS n
+         FROM fees_records
+         WHERE collected_at IS NOT NULL
+           AND collected_at >= :a AND collected_at <= :b",
+        [':a' => $today . ' 00:00:00', ':b' => $today . ' 23:59:59']
     );
-    $metrics['todayCollection'] = (float)($r['amt'] ?? 0);
+    $todayIn = (float) ($r['a'] ?? 0);
+    $todayN = (int) ($r['n'] ?? 0);
 
-    // Month collection
     $r = safe_db_get_one(
-        "SELECT COALESCE(SUM(paid_amount),0) AS amt FROM fees_records
-         WHERE paid_amount>0 AND ((collected_at IS NOT NULL AND MONTH(collected_at)=MONTH(CURDATE()) AND YEAR(collected_at)=YEAR(CURDATE()))
-         OR (collected_at IS NULL AND MONTH(created_at)=MONTH(CURDATE()) AND YEAR(created_at)=YEAR(CURDATE())))"
+        "SELECT COALESCE(SUM(paid_amount),0) AS a
+         FROM fees_records
+         WHERE collected_at IS NOT NULL
+           AND collected_at >= :a AND collected_at <= :b",
+        [':a' => $monthStart . ' 00:00:00', ':b' => $monthEnd . ' 23:59:59']
     );
-    $metrics['monthCollection'] = (float)($r['amt'] ?? 0);
-
-    // Pending fees (due)
-    $r = safe_db_get_one(
-        "SELECT COALESCE(SUM(GREATEST(0, amount - COALESCE(paid_amount,0))),0) AS due FROM fees_records WHERE (amount - COALESCE(paid_amount,0)) > 0"
-    );
-    $metrics['pendingFees'] = (float)($r['due'] ?? 0);
+    $monthIn = (float) ($r['a'] ?? 0);
 }
 
-if ($hasInvoices) {
-    // Count due invoices
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM invoices WHERE status IN ('due','unpaid')");
-    $metrics['dueInvoices'] = intval($r['cnt'] ?? 0);
-} else {
-    // fallback: count fee records with due date in past and unpaid
-    if ($hasFees) {
-        $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM fees_records WHERE (amount - COALESCE(paid_amount,0)) > 0 AND (due_date IS NOT NULL AND due_date < CURDATE())");
-        $metrics['dueInvoices'] = intval($r['cnt'] ?? 0);
+if ($hasExp) {
+    $r = safe_db_get_one(
+        'SELECT COALESCE(SUM(amount),0) AS a FROM expenses WHERE expense_date BETWEEN :a AND :b',
+        [':a' => $monthStart, ':b' => $monthEnd]
+    );
+    $monthOut = (float) ($r['a'] ?? 0);
+}
+
+$monthNet = $monthIn - $monthOut;
+
+$dueStudents = [];
+if ($hasStudents && $hasFees) {
+    $duesSql = $hasDues ? " AND LOWER(COALESCE(s.dues_status,'open')) <> 'written_off'" : '';
+    $tot = safe_db_get_one(
+        "SELECT COALESCE(SUM(GREATEST(COALESCE(s.total_fees,0) - COALESCE(fr_sum.paid_sum,0),0)),0) AS amt,
+                COALESCE(SUM(CASE WHEN GREATEST(COALESCE(s.total_fees,0) - COALESCE(fr_sum.paid_sum,0),0) > 0.009 THEN 1 ELSE 0 END),0) AS n
+         FROM students s
+         LEFT JOIN (
+            SELECT student_id, SUM(paid_amount) AS paid_sum FROM fees_records GROUP BY student_id
+         ) fr_sum ON fr_sum.student_id = s.id
+         WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') {$duesSql}"
+    );
+    $pendingAmt = (float) ($tot['amt'] ?? 0);
+    $pendingKids = (int) ($tot['n'] ?? 0);
+    $dueStudents = safe_db_get_all(
+        "SELECT s.id, s.first_name, s.middle_name, s.last_name, COALESCE(c.name,'') AS class_name,
+                GREATEST(COALESCE(s.total_fees,0) - COALESCE(fr_sum.paid_sum,0),0) AS pending
+         FROM students s
+         LEFT JOIN classes c ON c.id = s.class_id
+         LEFT JOIN (
+            SELECT student_id, SUM(paid_amount) AS paid_sum FROM fees_records GROUP BY student_id
+         ) fr_sum ON fr_sum.student_id = s.id
+         WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') {$duesSql}
+         HAVING pending > 0.009
+         ORDER BY pending DESC
+         LIMIT 8"
+    ) ?: [];
+}
+
+$stuName = static function (array $s): string {
+    $n = trim(preg_replace('/\s+/', ' ', trim(($s['first_name'] ?? '') . ' ' . ($s['middle_name'] ?? '') . ' ' . ($s['last_name'] ?? ''))));
+    return $n !== '' ? $n : 'Student';
+};
+
+$payMethod = static function (string $raw): string {
+    if (preg_match('/METHOD:([^|]+)/', $raw, $m)) {
+        return trim($m[1]);
     }
-}
+    return '';
+};
 
-if ($hasExpenses) {
-    $r = safe_db_get_one("SELECT COALESCE(SUM(amount),0) AS s FROM expenses WHERE MONTH(expense_date)=MONTH(CURDATE()) AND YEAR(expense_date)=YEAR(CURDATE())");
-    $metrics['expenseThisMonth'] = (float)($r['s'] ?? 0);
-}
+$recentPay = $hasFees
+    ? (safe_db_get_all(
+        "SELECT fr.id, fr.paid_amount, fr.collected_at, fr.receipt_no,
+                COALESCE(s.first_name,'') AS first_name,
+                COALESCE(s.middle_name,'') AS middle_name,
+                COALESCE(s.last_name,'') AS last_name,
+                COALESCE(c.name,'') AS class_name
+         FROM fees_records fr
+         LEFT JOIN students s ON s.id = fr.student_id
+         LEFT JOIN classes c ON c.id = s.class_id
+         WHERE fr.collected_at IS NOT NULL
+         ORDER BY fr.collected_at DESC, fr.id DESC
+         LIMIT 8"
+    ) ?: [])
+    : [];
 
-if ($hasStudents) {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM students WHERE status = 'active'");
-    $metrics['totalStudents'] = intval($r['cnt'] ?? 0);
-}
+$recentExp = $hasExp
+    ? (safe_db_get_all(
+        'SELECT id, title, amount, expense_date, category FROM expenses ORDER BY expense_date DESC, id DESC LIMIT 6'
+    ) ?: [])
+    : [];
 
-/* ---------- Recent items ---------- */
-$recent = [
-    'payments' => [],
-    'expenses' => [],
-    'pending_fees' => []
-];
+$money = static function ($v): string {
+    return function_exists('format_money') ? format_money($v) : ('₹ ' . number_format((float) $v, 2));
+};
 
-if ($hasFees) {
-    $recent['payments'] = safe_db_get_all("SELECT id, student_id, paid_amount, payment_method, collected_at, created_at FROM fees_records ORDER BY COALESCE(collected_at, created_at) DESC LIMIT 8");
-    $recent['pending_fees'] = safe_db_get_all("SELECT id, student_id, amount, COALESCE(paid_amount,0) AS paid_amount, due_date FROM fees_records WHERE (amount - COALESCE(paid_amount,0)) > 0 ORDER BY due_date IS NULL, due_date ASC LIMIT 8");
-}
-if ($hasExpenses) {
-    $recent['expenses'] = safe_db_get_all("SELECT id, title, amount, expense_date, created_at FROM expenses ORDER BY expense_date DESC LIMIT 8");
-}
+$collectUrl = $u('/accounts/fees_collection.php');
+$bulkUrl = $u('/accounts/fees_collectionbulk.php');
+$dailyUrl = $u('/accounts/daily_collection.php');
+$pendingUrl = $u('/accounts/pending_fees.php');
+$expUrl = $u('/accounts/expenses.php');
+$monthUrl = $u('/accounts/monthly_summary.php');
+$reportUrl = $u('/accounts/reports.php');
+$receiptUrl = $u('/accounts/receipt_print.php');
 
-$page_title = 'Accounts Dashboard';
 require_once __DIR__ . '/../includes/header.php';
 ?>
+<link href="<?php echo htmlspecialchars(rtrim(defined('BASE_URL') ? BASE_URL : '/', '/')); ?>/assets/css/dashboard-cards.css" rel="stylesheet">
 
-  <!-- Quick Access -->
-  <div class="card mb-4 shadow-sm">
-    <div class="card-body">
-      <div class="d-flex justify-content-between align-items-start mb-2">
-        <div>
-          <h6 class="mb-0">Quick Access</h6>
-          <div class="small-muted">Common accounts tasks</div>
-        </div>
-        <div class="d-none d-md-block">
-          <a class="btn btn-sm btn-outline-primary" href="#metrics">Jump to metrics</a>
-        </div>
-      </div>
-
-      <div class="row gy-2">
-        <?php
-        $quick = [
-          ['../accounts/daily_collection.php','bi-cash-stack','Daily Collection'],
-          ['../accounts/pending_fees.php','bi-clock-history','Pending Fees'],
-          ['../accounts/monthly_summary.php','bi-calendar-check','Monthly Summary'],
-          ['../accounts/expenses.php','bi-wallet2','Expenses'],
-          ['../accounts/reports.php','bi-bar-chart-line','Reports'],
-          // Added Fees Collection button that points to demopreschoolapp path as requested
-          ['../accounts/fees_collection.php','bi-receipt','Fees Collection']
-        ];
-        foreach ($quick as $q) {
-            ?>
-            <div class="col-12 col-md-6">
-              <a class="btn btn-outline-primary quick-btn d-flex align-items-center" href="<?php echo e($q[0]); ?>">
-                <span class="d-flex align-items-center"><i class="bi <?php echo e($q[1]); ?> fs-5 me-2"></i><span><?php echo e($q[2]); ?></span></span>
-                <i class="bi bi-chevron-right"></i>
-              </a>
-            </div>
-            <?php
-        }
-        ?>
-      </div>
-    </div>
+<div class="dc-page">
+  <div class="dc-ay-bar">
+    <div class="dc-ay-chip"><i class="bi bi-cash-coin"></i> Accounts · <?php echo e(date('d M Y')); ?> · Updated <?php echo e($lastUpdated); ?></div>
   </div>
 
-  <!-- Metrics -->
-  <section id="metrics" class="mb-4">
-    <div class="row g-3">
-
-      <div class="col-6 col-md-4 col-lg-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Today's Collection</div>
-            <div class="h5 mb-1"><?php echo e(format_money($metrics['todayCollection'])); ?></div>
-            <div class="small-muted">Collections today</div>
-            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/daily_collection.php'))); ?>" class="btn btn-sm btn-outline-primary w-100 btn-compact">Open</a></div>
-          </div>
-        </div>
+  <section class="dc-section">
+    <h2 class="dc-section-title">Do this now</h2>
+    <div class="row g-2 mb-2">
+      <div class="col-md-6">
+        <a href="<?php echo e($collectUrl); ?>" class="btn btn-success w-100 py-3 fw-semibold">
+          <i class="bi bi-person-check me-1"></i> Collect from one child
+        </a>
       </div>
-
-      <div class="col-6 col-md-4 col-lg-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">This Month Collection</div>
-            <div class="h5 mb-1"><?php echo e(format_money($metrics['monthCollection'])); ?></div>
-            <div class="small-muted">Current month</div>
-            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/monthly_summary.php'))); ?>" class="btn btn-sm btn-outline-info w-100 btn-compact">Summary</a></div>
-          </div>
-        </div>
+      <div class="col-md-6">
+        <a href="<?php echo e($bulkUrl); ?>" class="btn btn-outline-success w-100 py-3 fw-semibold">
+          <i class="bi bi-people me-1"></i> Collect from a class
+        </a>
       </div>
-
-      <div class="col-6 col-md-4 col-lg-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Pending Fees</div>
-            <div class="h5 mb-1"><?php echo e(format_money($metrics['pendingFees'])); ?></div>
-            <div class="small-muted">Total due</div>
-            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/pending_fees.php'))); ?>" class="btn btn-sm btn-outline-warning w-100 btn-compact">View</a></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Expenses This Month -->
-      <div class="col-6 col-md-4 col-lg-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Expenses This Month</div>
-            <div class="h5 mb-1"><?php echo e(format_money($metrics['expenseThisMonth'])); ?></div>
-            <div class="small-muted">Outflow</div>
-            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/expenses.php'))); ?>" class="btn btn-sm btn-outline-danger w-100 btn-compact">Open</a></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Total Students -->
-      <div class="col-6 col-md-4 col-lg-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Total Students</div>
-            <div class="h5 mb-1"><?php echo e(number_format($metrics['totalStudents'])); ?></div>
-            <div class="small-muted">Active</div>
-            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/students_list.php'))); ?>" class="btn btn-sm btn-outline-secondary w-100 btn-compact">Students</a></div>
-          </div>
-        </div>
-      </div>
-
     </div>
   </section>
 
-  <!-- Recent panels -->
-  <div class="row g-3">
-
-    <div class="col-12 col-md-6 col-lg-4">
-      <div class="card shadow-sm">
-        <div class="card-body">
-          <h6 class="mb-2">Recent Payments</h6>
-          <?php if (!empty($recent['payments'])): ?>
-            <ul class="list-group list-group-flush">
-              <?php foreach ($recent['payments'] as $p): ?>
-                <li class="list-group-item d-flex justify-content-between align-items-start">
-                  <div>
-                    <div class="fw-semibold">Student: <?php echo e($p['student_id'] ?? '—'); ?></div>
-                    <div class="small-muted"><?php echo e($p['payment_method'] ?? '—'); ?> • <?php echo e(format_money((float)($p['paid_amount'] ?? 0))); ?></div>
-                  </div>
-                  <div class="text-muted small"><?php echo e(substr(($p['collected_at'] ?? $p['created_at'] ?? ''),0,16)); ?></div>
-                </li>
-              <?php endforeach; ?>
-            </ul>
-          <?php else: ?>
-            <div class="small-muted">No recent payments</div>
-          <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-primary btn-compact" href="<?php echo e((site_url('/accounts/daily_collection.php'))); ?>">View all</a></div>
+  <section class="dc-section">
+    <h2 class="dc-section-title">Money snapshot</h2>
+    <div class="dc-grid dc-grid-4">
+      <a href="<?php echo e($dailyUrl); ?>" class="dc-card dc-card--link">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--pink"><i class="bi bi-cash-stack"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">Collected today</span>
+            <span class="dc-card-value"><?php echo e($money($todayIn)); ?></span>
+            <span class="dc-card-meta"><?php echo (int) $todayN; ?> receipts</span>
+          </div>
+        </div>
+      </a>
+      <a href="<?php echo e($monthUrl); ?>" class="dc-card dc-card--link">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--green"><i class="bi bi-calendar3"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">This month in</span>
+            <span class="dc-card-value"><?php echo e($money($monthIn)); ?></span>
+            <span class="dc-card-meta">Fees · <?php echo e(date('M Y')); ?></span>
+          </div>
+        </div>
+      </a>
+      <a href="<?php echo e($expUrl); ?>" class="dc-card dc-card--link">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--rose"><i class="bi bi-wallet2"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">This month out</span>
+            <span class="dc-card-value"><?php echo e($money($monthOut)); ?></span>
+            <span class="dc-card-meta">Expenses</span>
+          </div>
+        </div>
+      </a>
+      <a href="<?php echo e($pendingUrl); ?>" class="dc-card dc-card--link">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--amber"><i class="bi bi-hourglass-split"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">Still pending</span>
+            <span class="dc-card-value dc-card-value--warn"><?php echo e($money($pendingAmt)); ?></span>
+            <span class="dc-card-meta"><?php echo (int) $pendingKids; ?> children</span>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="dc-card mt-3">
+      <div class="dc-card-top">
+        <div class="dc-card-icon dc-card-icon--sky"><i class="bi bi-piggy-bank-fill"></i></div>
+        <div class="dc-card-info">
+          <span class="dc-card-label">Leftover this month</span>
+          <span class="dc-card-value <?php echo $monthNet >= 0 ? 'dc-card-value--ok' : 'dc-card-value--bad'; ?>"><?php echo e($money($monthNet)); ?></span>
+          <span class="dc-card-meta">Fees minus expenses · <a href="<?php echo e($reportUrl); ?>">Full report</a></span>
         </div>
       </div>
     </div>
+  </section>
 
-    <div class="col-12 col-md-6 col-lg-4">
-      <div class="card shadow-sm">
-        <div class="card-body">
-          <h6 class="mb-2">Recent Pending Fees</h6>
-          <?php if (!empty($recent['pending_fees'])): ?>
-            <ul class="list-group list-group-flush">
-              <?php foreach ($recent['pending_fees'] as $pf): ?>
-                <li class="list-group-item d-flex justify-content-between">
-                  <div>
-                    <div class="fw-semibold">Student: <?php echo e($pf['student_id'] ?? '—'); ?></div>
-                    <div class="small-muted">Due: <?php echo e(format_money((float)(($pf['amount'] ?? 0) - ($pf['paid_amount'] ?? 0)))); ?></div>
-                  </div>
-                  <div class="text-muted small"><?php echo e($pf['due_date'] ?? '—'); ?></div>
-                </li>
-              <?php endforeach; ?>
-            </ul>
-          <?php else: ?>
-            <div class="small-muted">No pending fees</div>
-          <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-warning btn-compact" href="<?php echo e((site_url('/accounts/pending_fees.php'))); ?>">Manage</a></div>
+  <section class="dc-section">
+    <h2 class="dc-section-title">Other pages</h2>
+    <div class="row g-2">
+      <?php
+      $quick = [
+          [$dailyUrl, 'bi-calendar-day', 'Daily collection'],
+          [$pendingUrl, 'bi-clock-history', 'Pending fees'],
+          [$expUrl, 'bi-receipt', 'Add expense'],
+          [$monthUrl, 'bi-calendar-check', 'Monthly summary'],
+          [$reportUrl, 'bi-bar-chart-line', 'Reports'],
+      ];
+      foreach ($quick as $q): ?>
+        <div class="col-6 col-md-4 col-lg">
+          <a href="<?php echo e($q[0]); ?>" class="btn btn-outline-primary w-100 py-3 d-flex flex-column align-items-center gap-1">
+            <i class="bi <?php echo e($q[1]); ?> fs-4"></i>
+            <span class="small fw-semibold"><?php echo e($q[2]); ?></span>
+          </a>
         </div>
+      <?php endforeach; ?>
+    </div>
+  </section>
+
+  <section class="dc-section">
+    <div class="dc-grid dc-grid-2">
+      <div class="dc-card dc-card--panel">
+        <div class="dc-card-header">
+          <span class="dc-card-label">Latest receipts</span>
+          <a href="<?php echo e($dailyUrl); ?>" class="dc-section-link">All</a>
+        </div>
+        <?php if ($recentPay === []): ?>
+          <p class="dc-card-meta mb-0">No receipts yet. Collect fees to see them here.</p>
+        <?php else: ?>
+          <ul class="list-unstyled mb-0">
+            <?php foreach ($recentPay as $p): ?>
+              <li class="d-flex justify-content-between gap-2 py-2 border-bottom">
+                <div>
+                  <div class="fw-semibold"><?php echo e($stuName($p)); ?></div>
+                  <div class="small text-muted"><?php echo e($p['class_name'] ?? ''); ?>
+                    <?php $pm = $payMethod((string) ($p['receipt_no'] ?? '')); echo $pm !== '' ? ' · ' . e($pm) : ''; ?>
+                    · <?php echo e(substr((string) ($p['collected_at'] ?? ''), 0, 10)); ?>
+                  </div>
+                </div>
+                <div class="text-end">
+                  <div class="fw-semibold"><?php echo e($money($p['paid_amount'] ?? 0)); ?></div>
+                  <a class="small" href="<?php echo e($receiptUrl . '?id=' . (int) $p['id']); ?>" target="_blank" rel="noopener">Receipt</a>
+                </div>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
+      </div>
+
+      <div class="dc-card dc-card--panel">
+        <div class="dc-card-header">
+          <span class="dc-card-label">Highest pending</span>
+          <a href="<?php echo e($pendingUrl); ?>" class="dc-section-link">All pending</a>
+        </div>
+        <?php if ($dueStudents === []): ?>
+          <p class="dc-card-meta mb-0">Nobody owes fees right now.</p>
+        <?php else: ?>
+          <ul class="list-unstyled mb-0">
+            <?php foreach ($dueStudents as $s): ?>
+              <li class="d-flex justify-content-between gap-2 py-2 border-bottom">
+                <div>
+                  <div class="fw-semibold"><?php echo e($stuName($s)); ?></div>
+                  <div class="small text-muted"><?php echo e($s['class_name'] ?? ''); ?></div>
+                </div>
+                <div class="text-end">
+                  <div class="fw-semibold text-warning"><?php echo e($money($s['pending'])); ?></div>
+                  <a class="small" href="<?php echo e($collectUrl . '?student_id=' . (int) $s['id']); ?>">Collect</a>
+                </div>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
       </div>
     </div>
+  </section>
 
-    <div class="col-12 col-md-6 col-lg-4">
-      <div class="card shadow-sm">
-        <div class="card-body">
-          <h6 class="mb-2">Recent Expenses</h6>
-          <?php if (!empty($recent['expenses'])): ?>
-            <ul class="list-group list-group-flush">
-              <?php foreach ($recent['expenses'] as $ex): ?>
-                <li class="list-group-item d-flex justify-content-between">
-                  <div>
-                    <div class="fw-semibold"><?php echo e(mb_strimwidth($ex['title'] ?? '(no title)', 0, 60, '...')); ?></div>
-                    <div class="small-muted"><?php echo e(format_money((float)($ex['amount'] ?? 0))); ?></div>
-                  </div>
-                  <div class="text-muted small"><?php echo e(substr($ex['expense_date'] ?? $ex['created_at'] ?? '', 0, 16)); ?></div>
-                </li>
-              <?php endforeach; ?>
-            </ul>
-          <?php else: ?>
-            <div class="small-muted">No recent expenses</div>
-          <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-danger btn-compact" href="<?php echo e((site_url('/accounts/expenses.php'))); ?>">Open</a></div>
-        </div>
+  <section class="dc-section">
+    <div class="dc-card dc-card--panel">
+      <div class="dc-card-header">
+        <span class="dc-card-label">Latest expenses</span>
+        <a href="<?php echo e($expUrl); ?>" class="dc-section-link">All bills</a>
       </div>
+      <?php if ($recentExp === []): ?>
+        <p class="dc-card-meta mb-0">No expenses yet.</p>
+      <?php else: ?>
+        <ul class="list-unstyled mb-0">
+          <?php foreach ($recentExp as $ex): ?>
+            <li class="d-flex justify-content-between gap-2 py-2 border-bottom">
+              <div>
+                <div class="fw-semibold"><?php echo e((string) ($ex['title'] ?? 'Expense')); ?></div>
+                <div class="small text-muted"><?php echo e((string) ($ex['category'] ?? '')); ?> · <?php echo e((string) ($ex['expense_date'] ?? '')); ?></div>
+              </div>
+              <div class="fw-semibold"><?php echo e($money($ex['amount'] ?? 0)); ?></div>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      <?php endif; ?>
     </div>
-
-  </div>
+  </section>
+</div>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
