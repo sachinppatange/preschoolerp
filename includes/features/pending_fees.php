@@ -445,7 +445,6 @@ require_once __DIR__ . '/../header.php';
                       · ₹ <?php echo number_format((float) $pr['paid_amount'], 2); ?>
                       · <?php echo e($rc); ?>
                       · <a href="<?php echo e($viewBase . 'id=' . $rid); ?>" target="_blank" rel="noopener">View</a>
-                      · <a href="<?php echo e($viewBase . 'id=' . $rid . '&pdf=1'); ?>">PDF</a>
                     </div>
                   <?php endforeach; ?>
                 </div>

@@ -493,8 +493,7 @@ function render_logo_tag(string $path): string {
 
     <div class="mt-3 no-print d-flex flex-wrap gap-2">
       <button class="btn btn-primary" type="button" onclick="window.print()">Print</button>
-      <a class="btn btn-success" href="?id=<?php echo (int) $id; ?>&amp;pdf=1">PDF</a>
-      <a class="btn btn-outline-secondary" href="fees_collection.php">Back to Collect Fees</a>
+      <a class="btn btn-outline-secondary" href="fees_collection.php<?php echo $id ? ('?student_id=' . (int) ($row['student_id'] ?? 0)) : ''; ?>">Back to Collect Fees</a>
     </div>
   </div>
   <?php if ($wantPrint): ?>
