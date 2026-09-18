@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS `whatsapp_messages` (
   `school_id` int(10) UNSIGNED NOT NULL DEFAULT 1,
   `direction` enum('in','out') NOT NULL,
   `phone` varchar(32) NOT NULL,
+  `contact_name` varchar(120) DEFAULT NULL,
   `wa_message_id` varchar(128) DEFAULT NULL,
   `type` varchar(32) NOT NULL DEFAULT 'text',
   `body` text DEFAULT NULL,

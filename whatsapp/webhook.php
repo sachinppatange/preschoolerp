@@ -86,9 +86,20 @@ foreach (($payload['entry'] ?? []) as $entry) {
                 wa_inbox_update_status($msgId, $st);
             }
         }
+        $profileName = '';
+        foreach (($value['contacts'] ?? []) as $contact) {
+            if (!is_array($contact)) {
+                continue;
+            }
+            $n = trim((string) ($contact['profile']['name'] ?? ''));
+            if ($n !== '') {
+                $profileName = $n;
+                break;
+            }
+        }
         foreach (($value['messages'] ?? []) as $message) {
             if (is_array($message)) {
-                wa_inbox_handle_incoming($message, $settings);
+                wa_inbox_handle_incoming($message, $settings, $profileName);
             }
         }
         foreach (($value['message_echoes'] ?? []) as $echo) {

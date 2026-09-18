@@ -20,6 +20,7 @@ function wa_inbox_ensure_table(): void
             school_id INT UNSIGNED NOT NULL DEFAULT 1,
             direction ENUM('in','out') NOT NULL,
             phone VARCHAR(32) NOT NULL,
+            contact_name VARCHAR(120) DEFAULT NULL,
             wa_message_id VARCHAR(128) DEFAULT NULL,
             type VARCHAR(32) NOT NULL DEFAULT 'text',
             body TEXT NULL,
@@ -35,6 +36,15 @@ function wa_inbox_ensure_table(): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     } catch (Throwable $e) {
         $done = false;
+        return;
+    }
+    try {
+        $col = db_fetch_one("SHOW COLUMNS FROM whatsapp_messages LIKE 'contact_name'");
+        if (!$col) {
+            db_execute('ALTER TABLE whatsapp_messages ADD COLUMN contact_name VARCHAR(120) NULL AFTER phone');
+        }
+    } catch (Throwable $e) {
+        // older servers without ALTER privilege still work without the column
     }
 }
 
@@ -99,14 +109,19 @@ function wa_inbox_save(array $row): int
         return 0;
     }
     try {
+        $name = trim((string) ($row['contact_name'] ?? ''));
+        if ($waId === '') {
+            $waId = 'local-' . bin2hex(random_bytes(8));
+        }
         db_execute(
-            'INSERT INTO whatsapp_messages (school_id, direction, phone, wa_message_id, type, body, status, is_bot, raw_json, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO whatsapp_messages (school_id, direction, phone, contact_name, wa_message_id, type, body, status, is_bot, raw_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [
                 (int) ($row['school_id'] ?? 1),
                 ($row['direction'] ?? 'in') === 'out' ? 'out' : 'in',
                 $phone,
-                $waId !== '' ? $waId : null,
+                $name !== '' ? $name : null,
+                $waId,
                 (string) ($row['type'] ?? 'text'),
                 $row['body'] ?? null,
                 $row['status'] ?? null,
@@ -117,7 +132,30 @@ function wa_inbox_save(array $row): int
         );
         return function_exists('db_last_insert_id') ? (int) db_last_insert_id() : 0;
     } catch (Throwable $e) {
-        return 0;
+        try {
+            db_execute(
+                'INSERT INTO whatsapp_messages (school_id, direction, phone, wa_message_id, type, body, status, is_bot, raw_json, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [
+                    (int) ($row['school_id'] ?? 1),
+                    ($row['direction'] ?? 'in') === 'out' ? 'out' : 'in',
+                    $phone,
+                    $waId,
+                    (string) ($row['type'] ?? 'text'),
+                    $row['body'] ?? null,
+                    $row['status'] ?? null,
+                    !empty($row['is_bot']) ? 1 : 0,
+                    isset($row['raw_json']) ? (is_string($row['raw_json']) ? $row['raw_json'] : json_encode($row['raw_json'])) : null,
+                    $row['created_at'] ?? date('Y-m-d H:i:s'),
+                ]
+            );
+            return function_exists('db_last_insert_id') ? (int) db_last_insert_id() : 0;
+        } catch (Throwable $e2) {
+            if (function_exists('whatsapp_log')) {
+                whatsapp_log('inbox_save_failed', ['error' => $e2->getMessage(), 'phone' => $phone]);
+            }
+            return 0;
+        }
     }
 }
 
@@ -248,7 +286,7 @@ function wa_inbox_send_text(string $toPhone, string $body, bool $isBot = false):
     ];
 }
 
-function wa_inbox_handle_incoming(array $message, array $settings): void
+function wa_inbox_handle_incoming(array $message, array $settings, string $profileName = ''): void
 {
     $from = wa_inbox_phone((string) ($message['from'] ?? ''));
     $body = wa_inbox_extract_body($message);
@@ -257,6 +295,7 @@ function wa_inbox_handle_incoming(array $message, array $settings): void
     wa_inbox_save([
         'direction' => 'in',
         'phone' => $from,
+        'contact_name' => $profileName,
         'wa_message_id' => $waId,
         'type' => (string) ($message['type'] ?? 'text'),
         'body' => $body,
@@ -281,18 +320,34 @@ function wa_inbox_conversations(int $limit = 80): array
 {
     wa_inbox_ensure_table();
     $limit = max(1, min(200, $limit));
-    $rows = db_fetch_all(
-        "SELECT m.phone, m.body AS last_body, m.created_at AS last_at, m.direction AS last_dir,
-                (SELECT COUNT(*) FROM whatsapp_messages u
-                 WHERE u.phone = m.phone AND u.direction = 'in' AND u.read_at IS NULL) AS unread
-         FROM whatsapp_messages m
-         INNER JOIN (
-             SELECT phone, MAX(id) AS max_id FROM whatsapp_messages GROUP BY phone
-         ) t ON t.max_id = m.id
-         ORDER BY m.created_at DESC
-         LIMIT {$limit}"
-    ) ?: [];
-    return $rows;
+    try {
+        $rows = db_fetch_all(
+            "SELECT m.phone, m.body AS last_body, m.created_at AS last_at, m.direction AS last_dir,
+                    m.contact_name,
+                    (SELECT COUNT(*) FROM whatsapp_messages u
+                     WHERE u.phone = m.phone AND u.direction = 'in' AND u.read_at IS NULL) AS unread
+             FROM whatsapp_messages m
+             INNER JOIN (
+                 SELECT phone, MAX(id) AS max_id FROM whatsapp_messages GROUP BY phone
+             ) t ON t.max_id = m.id
+             ORDER BY m.created_at DESC
+             LIMIT {$limit}"
+        ) ?: [];
+        return $rows;
+    } catch (Throwable $e) {
+        $rows = db_fetch_all(
+            "SELECT m.phone, m.body AS last_body, m.created_at AS last_at, m.direction AS last_dir,
+                    (SELECT COUNT(*) FROM whatsapp_messages u
+                     WHERE u.phone = m.phone AND u.direction = 'in' AND u.read_at IS NULL) AS unread
+             FROM whatsapp_messages m
+             INNER JOIN (
+                 SELECT phone, MAX(id) AS max_id FROM whatsapp_messages GROUP BY phone
+             ) t ON t.max_id = m.id
+             ORDER BY m.created_at DESC
+             LIMIT {$limit}"
+        ) ?: [];
+        return $rows;
+    }
 }
 
 function wa_inbox_thread(string $phone, int $limit = 200): array
@@ -314,13 +369,88 @@ function wa_inbox_contact_name(string $phone): string
     if ($last10 === '' || !function_exists('db_fetch_one')) {
         return '';
     }
-    $row = db_fetch_one(
-        "SELECT name FROM users
-         WHERE REPLACE(REPLACE(IFNULL(phone,''),'+',''),' ','') LIKE CONCAT('%', ?)
-            OR REPLACE(REPLACE(IFNULL(whatsapp_id,''),'+',''),' ','') LIKE CONCAT('%', ?)
-         ORDER BY FIELD(role,'parent','owner','reception','staff','teacher','accounts') ASC
-         LIMIT 1",
-        [$last10, $last10]
-    );
-    return trim((string) ($row['name'] ?? ''));
+    try {
+        $row = db_fetch_one(
+            "SELECT name FROM users
+             WHERE RIGHT(REPLACE(REPLACE(IFNULL(phone,''),'+',''),' ',''), 10) = ?
+                OR RIGHT(REPLACE(REPLACE(IFNULL(whatsapp_id,''),'+',''),' ',''), 10) = ?
+             LIMIT 1",
+            [$last10, $last10]
+        );
+        return trim((string) ($row['name'] ?? ''));
+    } catch (Throwable $e) {
+        return '';
+    }
+}
+
+function wa_inbox_display_phone(string $phone): string
+{
+    $d = preg_replace('/\D+/', '', $phone) ?? '';
+    if (strlen($d) >= 10) {
+        $ten = substr($d, -10);
+        return '+91 ' . substr($ten, 0, 5) . ' ' . substr($ten, 5);
+    }
+    return $d !== '' ? $d : 'Unknown';
+}
+
+function wa_inbox_when(?string $dt): string
+{
+    if ($dt === null || $dt === '') {
+        return '';
+    }
+    $t = strtotime($dt);
+    if ($t === false) {
+        return $dt;
+    }
+    $today = date('Y-m-d');
+    $day = date('Y-m-d', $t);
+    if ($day === $today) {
+        return date('g:i A', $t);
+    }
+    if ($day === date('Y-m-d', strtotime('-1 day'))) {
+        return 'Yesterday';
+    }
+    if (date('Y', $t) === date('Y')) {
+        return date('d M', $t);
+    }
+    return date('d/m/Y', $t);
+}
+
+function wa_inbox_clock(?string $dt): string
+{
+    if ($dt === null || $dt === '') {
+        return '';
+    }
+    $t = strtotime($dt);
+    return $t ? date('g:i A', $t) : '';
+}
+
+function wa_inbox_initials(string $name): string
+{
+    $name = trim($name);
+    if ($name === '') {
+        return '?';
+    }
+    $parts = preg_split('/\s+/', $name) ?: [];
+    $a = strtoupper(substr((string) ($parts[0] ?? ''), 0, 1));
+    $b = strtoupper(substr((string) ($parts[1] ?? ''), 0, 1));
+    return $b !== '' ? $a . $b : $a;
+}
+
+function wa_inbox_ticks(string $status): string
+{
+    $st = strtolower($status);
+    if (in_array($st, ['failed', 'undelivered'], true)) {
+        return '!';
+    }
+    if (in_array($st, ['read', 'played'], true)) {
+        return 'read';
+    }
+    if (in_array($st, ['delivered'], true)) {
+        return 'delivered';
+    }
+    if (in_array($st, ['sent', 'echo', 'accepted'], true)) {
+        return 'sent';
+    }
+    return 'sent';
 }
