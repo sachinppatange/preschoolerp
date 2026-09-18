@@ -23,6 +23,30 @@ if (!table_exists('tasks')) {
     exit;
 }
 
+$hasDemo = safe_db_get_one("SELECT id FROM tasks WHERE title LIKE '[Demo]%' LIMIT 1");
+if (!$hasDemo && $userId > 0) {
+    $demos = [
+        ['[Demo] Collect first-term fee', "How to collect a fee:\n1. Open Accounts → Collect Fees\n2. Type the student name and select them\n3. Pending amount fills in — change it if they paid part\n4. Choose Cash / UPI / Online, then Save & print receipt\nTick this Done after you try it once.", 'high'],
+        ['[Demo] Mark a task done', 'Click the circle on the left of this line. It moves to Done. Click the title to edit note, due date, or who it is for.', 'low'],
+        ['[Demo] Add your own task', 'Use the box at the top: type a short title (example: Call parent about photos), optional date, then Add. You can delete these Demo items anytime.', 'medium'],
+    ];
+    foreach ($demos as $d) {
+        safe_db_run(
+            'INSERT INTO tasks (school_id, title, description, assigned_to, due_date, priority, status, created_at, updated_at)
+             VALUES (:s, :t, :d, :a, :due, :p, :st, NOW(), NOW())',
+            [
+                ':s' => $schoolId,
+                ':t' => $d[0],
+                ':d' => $d[1],
+                ':a' => $userId,
+                ':due' => date('Y-m-d', strtotime('+2 days')),
+                ':p' => $d[2],
+                ':st' => 'pending',
+            ]
+        );
+    }
+}
+
 $messages = [];
 $errors = [];
 $priorities = ['medium' => 'Normal', 'high' => 'Urgent', 'low' => 'Low'];

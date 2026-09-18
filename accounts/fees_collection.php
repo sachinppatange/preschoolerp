@@ -20,28 +20,34 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
-panel_bootstrap('accounts', ['skip_auth' => true]);
+panel_bootstrap('accounts');
 require_accounts_or_reception_auth();
 $DEBUG = panel_debug();
-
-/* Optional includes (guarded) */
-require_accounts_or_reception_auth();
 $accountsUserId = auth_user_id();
 
 /* Debug flag */
 /* escape helper */
 
-/* helper: get column list for a table */
-function table_columns(string $table): array {
-    try {
-        $r = safe_db_get_all("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t", [':t'=>$table]);
-        return array_map(function($row){ return $row['COLUMN_NAME']; }, $r);
-    } catch (Throwable $e) { return []; }
+if (!function_exists('table_columns')) {
+    function table_columns(string $table): array {
+        try {
+            $r = safe_db_get_all("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t", [':t'=>$table]);
+            return array_map(static function ($row) { return $row['COLUMN_NAME']; }, $r ?: []);
+        } catch (Throwable $e) {
+            return [];
+        }
+    }
 }
 
-/* table exists helper */
-function table_exists(string $name): bool {
-    try { $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :t", [':t'=>$name]); return !empty($r) && intval($r['cnt'])>0; } catch (Throwable $e) { return false; }
+if (!function_exists('table_exists')) {
+    function table_exists(string $name): bool {
+        try {
+            $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :t", [':t'=>$name]);
+            return !empty($r) && intval($r['cnt']) > 0;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
 }
 
 /* ensure fees_records exists */
@@ -57,6 +63,7 @@ if (empty($_SESSION['csrf_token'])) $_SESSION['csrf_token'] = bin2hex(random_byt
 $CSRF = $_SESSION['csrf_token'];
 
 /* Helper to format student name (avoid duplicate middle token) */
+if (!function_exists('format_student_name')) {
 function format_student_name(array $st): string {
     // Robust formatter that removes duplicate tokens (case-insensitive)
     $first = preg_replace('/\s+/', ' ', trim((string)($st['first_name'] ?? '')));
@@ -98,6 +105,7 @@ function format_student_name(array $st): string {
 
     return trim(implode(' ', $parts));
 }
+}
 
 /* preload lists */
 $schools = table_exists('schools') ? safe_db_get_all("SELECT id, name FROM schools ORDER BY name ASC") : [];
@@ -121,7 +129,7 @@ foreach ($schools as $s) {
     if (strcasecmp(trim($s['name']), 'Pioneer Play School') === 0) { $defaultSchoolId = (int)$s['id']; break; }
 }
 
-$paymentTypes = ['Cash','Online','Cheque','Bank','Bad Debts/kasar'];
+$paymentTypes = ['Cash', 'UPI', 'Online', 'Cheque', 'Bank'];
 $action = $_REQUEST['action'] ?? 'form';
 
 /* AJAX: get_pending */
@@ -169,9 +177,9 @@ if ($action === 'create' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $note = trim((string)($_POST['note'] ?? ''));
 
     $errors = [];
-    if (empty($student_id) || $student_id <= 0) $errors[] = 'कृपया विद्यार्थी निवडा / Select student.';
-    if ($amount <= 0) $errors[] = 'कृपया रक्कम भरा (Amount must be > 0).';
-    if ($payment_type === '') $errors[] = 'Payment Type आवश्यक आहे (required).';
+    if (empty($student_id) || $student_id <= 0) $errors[] = 'Please select a student.';
+    if ($amount <= 0) $errors[] = 'Enter an amount greater than 0.';
+    if ($payment_type === '') $errors[] = 'Please choose how the fee was paid.';
     if ($payment_date === '') $payment_date = date('Y-m-d');
     if (!\DateTime::createFromFormat('Y-m-d', $payment_date)) $errors[] = 'Payment Date must be YYYY-MM-DD';
 
@@ -271,197 +279,180 @@ if (!empty($_SESSION['form_success'])) { $messages[] = $_SESSION['form_success']
 $saved_id = isset($_GET['saved_id']) ? (int)$_GET['saved_id'] : 0;
 $preselect_student = isset($_GET['student_id']) ? (int)$_GET['student_id'] : 0;
 
-$recent = safe_db_get_all("SELECT fr.id, fr.receipt_no, fr.amount, fr.paid_amount, fr.collected_by, fr.collected_at, COALESCE(s.first_name,'') AS student_first, COALESCE(s.middle_name,'') AS student_middle, COALESCE(s.last_name,'') AS student_last, COALESCE(s.academic_year,'') AS academic_year FROM fees_records fr LEFT JOIN students s ON s.id = fr.student_id ORDER BY fr.created_at DESC LIMIT 20");
+$recent = safe_db_get_all("SELECT fr.id, fr.receipt_no, fr.amount, fr.paid_amount, fr.collected_by, fr.collected_at, COALESCE(s.first_name,'') AS student_first, COALESCE(s.middle_name,'') AS student_middle, COALESCE(s.last_name,'') AS student_last, COALESCE(s.academic_year,'') AS academic_year, COALESCE(u.name,'') AS collector_name FROM fees_records fr LEFT JOIN students s ON s.id = fr.student_id LEFT JOIN users u ON u.id = fr.collected_by ORDER BY fr.created_at DESC LIMIT 20") ?: [];
+$receiptPrint = function_exists('site_url') ? site_url('/accounts/receipt_print.php') : '../accounts/receipt_print.php';
 
-/* header include if exists */
-$pageTitle = 'Add Payment Receipt';
+$page_title = 'Collect Fees';
 require_once __DIR__ . '/../includes/header.php';
 ?>
+<style>
+.fee-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:1.1rem 1.2rem; margin-bottom:1rem; }
+.fee-steps { color:#64748b; font-size:.9rem; margin-bottom:1rem; }
+.fee-pending { background:#f0f7ff; border:1px dashed #b6d0f5; border-radius:14px; padding:1rem; }
+.fee-pending .amt { font-size:1.6rem; font-weight:800; color:#0d3b8c; }
+.fee-ok { background:#e7f8ee; color:#137a3a; }
+</style>
 
-  <?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo e($m); ?></div><?php endforeach; ?>
-  <?php foreach ($errors_flash as $er): ?><div class="alert alert-danger"><?php echo e($er); ?></div><?php endforeach; ?>
+<?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo e($m); ?></div><?php endforeach; ?>
+<?php foreach ($errors_flash as $er): ?><div class="alert alert-danger"><?php echo e($er); ?></div><?php endforeach; ?>
 
-  <div class="card mb-3"><div class="card-body">
-    <form id="paymentForm" method="post" action="?action=create" class="row g-3">
-      <input type="hidden" name="csrf_token" value="<?php echo e($CSRF); ?>">
+<p class="fee-steps mb-2">1. Find the student → 2. Check pending → 3. Enter amount &amp; how they paid → 4. Save (receipt opens to print)</p>
+<div class="alert alert-light border mb-3">Try it: pick any student, leave Cash, click <strong>Save &amp; print receipt</strong>. Allow pop-ups once. If pending is ₹0 they have already paid — enter a small amount only if you need a test receipt.</div>
 
-      <div class="col-md-4">
-        <label class="form-label">Student *</label>
-        <select id="student_select" name="student_id" class="form-select" required>
-          <option value="">-- Select student --</option>
-          <?php foreach ($students as $st):
+<div class="fee-card">
+  <form id="paymentForm" method="post" action="?action=create" class="row g-3">
+    <input type="hidden" name="csrf_token" value="<?php echo e($CSRF); ?>">
+    <input type="hidden" name="school_id" id="school_select" value="<?php echo $defaultSchoolId ? (int) $defaultSchoolId : ''; ?>">
+    <input type="hidden" name="class_id" id="class_select" value="">
+
+    <div class="col-md-7">
+      <label class="form-label fw-semibold">Student *</label>
+      <input type="search" id="studentSearch" class="form-control mb-2" placeholder="Type to search name" autocomplete="off">
+      <select id="student_select" name="student_id" class="form-select" size="8" required>
+        <option value="">Select a student</option>
+        <?php foreach ($students as $st):
             $label = format_student_name($st);
-            $label .= $st['academic_year'] ? ' — ' . e($st['academic_year']) : '';
-          ?>
-            <option value="<?php echo (int)$st['id']; ?>" <?php if($preselect_student === (int)$st['id']) echo 'selected'; ?>>
-              <?php echo e($label ?: ('Student ' . (int)$st['id'])); ?> (ID: <?php echo (int)$st['id']; ?>)
-            </option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">School (optional)</label>
-        <select id="school_select" name="school_id" class="form-select">
-          <option value="">-- Select school --</option>
-          <?php foreach ($schools as $s):
-              $sel = ($defaultSchoolId !== null && (int)$s['id'] === $defaultSchoolId) ? ' selected' : '';
-          ?>
-            <option value="<?php echo (int)$s['id']; ?>"<?php echo $sel; ?>><?php echo e($s['name']); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">Class (optional)</label>
-        <select id="class_select" name="class_id" class="form-select">
-          <option value="">-- Select class --</option>
-          <?php foreach ($classes as $c): ?><option value="<?php echo (int)$c['id']; ?>"><?php echo e($c['name']); ?></option><?php endforeach; ?>
-        </select>
-      </div>
-
-      <div class="col-12">
-        <div id="pendingSummary" class="summary-box d-flex justify-content-between align-items-center">
-          <div>
-            <div class="small-muted">Remaining Amount / Pending Fees</div>
-            <div id="pendingValue" class="summary-value">—</div>
-            <div id="pendingDetails" class="small text-muted">Select student to view details</div>
-          </div>
-          <div style="min-width:260px">
-            <div class="mb-2"><label class="form-label">Payment Date *</label>
-              <input name="payment_date" type="date" class="form-control" value="<?php echo e(date('Y-m-d')); ?>" required></div>
-            <div class="mb-2">
-              <label class="form-label">Payment Type *</label>
-              <select name="payment_type" class="form-select" required>
-                <option value="">-- Select Type --</option>
-                <?php foreach ($paymentTypes as $pt): ?><option value="<?php echo e($pt); ?>"><?php echo e($pt); ?></option><?php endforeach; ?>
-              </select>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">Amount *</label>
-        <input id="amount_input" name="amount" class="form-control" type="text" placeholder="Enter amount being collected" required>
-      </div>
-
-      <div class="col-md-8">
-        <label class="form-label">Payment Note / Collected by (name)</label>
-        <input name="note" class="form-control" placeholder="Collector name or note (optional)">
-        <div class="form-text small-muted">Collector identity is stored as your account user id (collected_by). Note and payment type are preserved in the receipt metadata; if your DB has separate payment_method/payment_note columns they will be saved separately.</div>
-      </div>
-
-      <div class="col-12 text-end">
-        <button class="btn btn-primary" type="submit">Save Payment & Generate Receipt</button>
-      </div>
-    </form>
-  </div></div>
-
-  <div class="card"><div class="card-body">
-    <h5 class="card-title">Recent Payments</h5>
-    <div class="table-responsive">
-      <table class="table table-sm table-striped mb-0">
-        <thead><tr><th>ID</th><th>Receipt</th><th>Student</th><th>Academic Year</th><th>Amount</th><th>Collected At</th><th>By (user id)</th><th>Actions</th></tr></thead>
-        <tbody>
-          <?php if (!empty($recent)): foreach ($recent as $rr):
-              $tmp = ['first_name'=>$rr['student_first'] ?? '','middle_name'=>$rr['student_middle'] ?? '','last_name'=>$rr['student_last'] ?? ''];
-              $student_label = format_student_name($tmp);
-              $rid = (int)$rr['id'];
-          ?>
-            <tr>
-              <td><?php echo $rid; ?></td>
-              <td><?php echo e($rr['receipt_no'] ?? ''); ?></td>
-              <td><?php echo e($student_label); ?></td>
-              <td><?php echo e($rr['academic_year'] ?? ''); ?></td>
-              <td>₹ <?php echo number_format((float)$rr['paid_amount'],2); ?></td>
-              <td><?php echo e($rr['collected_at'] ?? ''); ?></td>
-              <td><?php echo e($rr['collected_by'] ?? ''); ?></td>
-              <td class="action-btns">
-                <div class="btn-group" role="group" aria-label="actions">
-                  <button type="button" class="btn btn-sm btn-outline-primary" onclick="viewReceipt(<?php echo $rid; ?>)">View</button>
-                  <button type="button" class="btn btn-sm btn-outline-success" onclick="printReceipt(<?php echo $rid; ?>)">Print</button>
-                </div>
-              </td>
-            </tr>
-          <?php endforeach; else: ?>
-            <tr><td colspan="8" class="text-center text-muted">No payments yet.</td></tr>
-          <?php endif; ?>
-        </tbody>
-      </table>
+            $search = strtolower($label . ' ' . (string) ($st['academic_year'] ?? ''));
+        ?>
+          <option value="<?php echo (int) $st['id']; ?>" data-search="<?php echo e($search); ?>" <?php echo $preselect_student === (int) $st['id'] ? 'selected' : ''; ?>>
+            <?php echo e($label !== '' ? $label : ('Student #' . (int) $st['id'])); ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
     </div>
-  </div></div>
 
+    <div class="col-md-5">
+      <div class="fee-pending h-100" id="pendingSummary">
+        <div class="small text-muted">Pending fees</div>
+        <div class="amt" id="pendingValue">—</div>
+        <div class="small text-muted" id="pendingDetails">Select a student to see total, paid and pending.</div>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label fw-semibold">Amount *</label>
+      <input id="amount_input" name="amount" class="form-control" type="text" inputmode="decimal" placeholder="0.00" required>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label fw-semibold">Paid by *</label>
+      <select name="payment_type" class="form-select" required>
+        <option value="Cash" selected>Cash</option>
+        <?php foreach ($paymentTypes as $pt): if ($pt === 'Cash') continue; ?>
+          <option value="<?php echo e($pt); ?>"><?php echo e($pt); ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Date</label>
+      <input name="payment_date" type="date" class="form-control" value="<?php echo e(date('Y-m-d')); ?>" required>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Note</label>
+      <input name="note" class="form-control" placeholder="Optional, e.g. term 1 / cheque no.">
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Save &amp; print receipt</button>
+    </div>
+  </form>
+</div>
+
+<div class="fee-card">
+  <h2 class="h6 fw-bold mb-3">Recent receipts</h2>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead><tr><th>Student</th><th>Amount</th><th>When</th><th></th></tr></thead>
+      <tbody>
+        <?php if ($recent === []): ?>
+          <tr><td colspan="4" class="text-muted text-center py-3">No receipts yet. Collect a fee above to see it here.</td></tr>
+        <?php endif; ?>
+        <?php foreach ($recent as $rr):
+            $tmp = ['first_name'=>$rr['student_first'] ?? '','middle_name'=>$rr['student_middle'] ?? '','last_name'=>$rr['student_last'] ?? ''];
+            $student_label = format_student_name($tmp);
+            $rid = (int) $rr['id'];
+            $rc = (string) ($rr['receipt_no'] ?? '');
+            if (str_contains($rc, '||')) {
+                $rc = explode('||', $rc, 2)[0];
+            }
+        ?>
+          <tr>
+            <td>
+              <div class="fw-semibold"><?php echo e($student_label !== '' ? $student_label : 'Student'); ?></div>
+              <div class="small text-muted"><?php echo e($rc); ?></div>
+            </td>
+            <td>₹ <?php echo number_format((float) ($rr['paid_amount'] ?? 0), 2); ?></td>
+            <td class="small text-muted"><?php echo e(substr((string) ($rr['collected_at'] ?? ''), 0, 16)); ?></td>
+            <td class="text-nowrap">
+              <button type="button" class="btn btn-sm btn-outline-primary" onclick="openReceipt(<?php echo $rid; ?>, false)">View</button>
+              <button type="button" class="btn btn-sm btn-success" onclick="openReceipt(<?php echo $rid; ?>, true)">Print</button>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function(){
-  const $ = id => document.getElementById(id);
-  const studentSelect = $('student_select');
-  const pendingValue = $('pendingValue');
-  const pendingDetails = $('pendingDetails');
-  const amountInput = $('amount_input');
-  const schoolSelect = $('school_select');
-  const classSelect = $('class_select');
+(function () {
+  var receiptBase = <?php echo json_encode($receiptPrint); ?>;
+  var studentSelect = document.getElementById('student_select');
+  var search = document.getElementById('studentSearch');
+  var pendingValue = document.getElementById('pendingValue');
+  var pendingDetails = document.getElementById('pendingDetails');
+  var pendingBox = document.getElementById('pendingSummary');
+  var amountInput = document.getElementById('amount_input');
+  var schoolSelect = document.getElementById('school_select');
+  var classSelect = document.getElementById('class_select');
 
-  function fmt(n){ return Number(n).toFixed(2); }
-  function clearPending(){ pendingValue.textContent='—'; pendingDetails.textContent='Select student to view details'; amountInput.value=''; amountInput.readOnly=false; }
-
-  function fetchPending(sid){
-    if (!sid) { clearPending(); return; }
-    pendingValue.textContent = 'Loading...';
-    pendingDetails.textContent = '';
-    fetch('?action=get_pending&student_id=' + encodeURIComponent(sid), { credentials: 'same-origin' })
-      .then(resp => resp.ok ? resp.json() : Promise.reject())
-      .then(json => {
-        if (json && json.ok) {
-          pendingValue.textContent = '₹ ' + fmt(json.pending);
-          let details = 'Total Fee: ₹ ' + fmt(json.total_fee) + ' • Paid: ₹ ' + fmt(json.total_paid);
-          if (json.academic_year) details += ' • Year: ' + json.academic_year;
-          pendingDetails.textContent = details;
-          amountInput.value = fmt(json.pending);
-          amountInput.readOnly = false;
-          if (json.school_id && schoolSelect) schoolSelect.value = json.school_id;
-          if (json.class_id && classSelect) classSelect.value = json.class_id;
-        } else {
-          clearPending();
-        }
-      }).catch(() => { pendingValue.textContent='—'; pendingDetails.textContent='Failed to load'; });
+  function fmt(n) { return Number(n).toFixed(2); }
+  function clearPending() {
+    pendingValue.textContent = '—';
+    pendingDetails.textContent = 'Select a student to see total, paid and pending.';
+    pendingBox.classList.remove('fee-ok');
+    amountInput.value = '';
   }
+  function fetchPending(sid) {
+    if (!sid) { clearPending(); return; }
+    pendingValue.textContent = '…';
+    fetch('?action=get_pending&student_id=' + encodeURIComponent(sid), { credentials: 'same-origin' })
+      .then(function (resp) { return resp.ok ? resp.json() : Promise.reject(); })
+      .then(function (json) {
+        if (!json || !json.ok) { clearPending(); return; }
+        pendingValue.textContent = '₹ ' + fmt(json.pending);
+        pendingDetails.textContent = 'Total ₹ ' + fmt(json.total_fee) + ' · Paid ₹ ' + fmt(json.total_paid);
+        pendingBox.classList.toggle('fee-ok', Number(json.pending) <= 0.009);
+        amountInput.value = fmt(json.pending);
+        if (json.school_id && schoolSelect) schoolSelect.value = json.school_id;
+        if (json.class_id && classSelect) classSelect.value = json.class_id;
+      })
+      .catch(function () { pendingDetails.textContent = 'Could not load pending fees.'; });
+  }
+  if (search) {
+    search.addEventListener('input', function () {
+      var q = (search.value || '').toLowerCase().trim();
+      Array.prototype.forEach.call(studentSelect.options, function (opt, i) {
+        if (i === 0) { opt.hidden = false; return; }
+        var hay = opt.getAttribute('data-search') || opt.textContent.toLowerCase();
+        opt.hidden = q !== '' && hay.indexOf(q) === -1;
+      });
+    });
+  }
+  if (studentSelect) studentSelect.addEventListener('change', function () { fetchPending(this.value); });
+  <?php if ($preselect_student > 0): ?>fetchPending(<?php echo (int) $preselect_student; ?>);<?php endif; ?>
 
-  <?php if ($preselect_student > 0): ?>
-    fetchPending(<?php echo (int)$preselect_student; ?>);
-  <?php endif; ?>
-
-  if (studentSelect) studentSelect.addEventListener('change', function(){ fetchPending(this.value); });
-
-  (function openReceiptIfSaved(){
-    const params = new URLSearchParams(window.location.search);
-    const saved_id = params.get('saved_id');
-    if (saved_id) {
-      // OPEN the receipt page under the demopreschoolapp path (fixed)
-      const url = '/demopreschoolapp/accounts/receipt_print.php?id=' + encodeURIComponent(saved_id);
-      try { window.open(url, '_blank'); } catch(e) {}
-      params.delete('saved_id');
-      const base = window.location.pathname + (params.toString() ? ('?' + params.toString()) : '');
-      history.replaceState(null, '', base);
-    }
-  })();
-});
-
-/* Receipt actions: view, print */
-function viewReceipt(id) {
-  const url = '/demopreschoolapp/accounts/receipt_print.php?id=' + encodeURIComponent(id);
-  window.open(url, '_blank');
-}
-
-function printReceipt(id) {
-  const url = '/demopreschoolapp/accounts/receipt_print.php?id=' + encodeURIComponent(id);
-  const w = window.open(url, '_blank');
-  if (!w) { alert('Popup blocked. Please allow popups for this site.'); return; }
-  w.onload = function() { try { w.focus(); w.print(); } catch(e) {} };
-  setTimeout(function(){ try { w.focus(); w.print(); } catch(e) {} }, 2000);
-}
+  window.openReceipt = function (id, doPrint) {
+    var url = receiptBase + (receiptBase.indexOf('?') >= 0 ? '&' : '?') + 'id=' + encodeURIComponent(id);
+    var w = window.open(url, '_blank');
+    if (!w) { alert('Allow pop-ups to view the receipt.'); return; }
+    if (doPrint) setTimeout(function () { try { w.focus(); w.print(); } catch (e) {} }, 800);
+  };
+  var params = new URLSearchParams(window.location.search);
+  var saved = params.get('saved_id');
+  if (saved) {
+    openReceipt(saved, true);
+    params.delete('saved_id');
+    history.replaceState(null, '', window.location.pathname + (params.toString() ? ('?' + params.toString()) : ''));
+  }
+})();
 </script>
-
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
