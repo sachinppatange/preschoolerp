@@ -61,82 +61,105 @@ $phone = (string) ($boot['phone'] ?? $phone);
 require_once __DIR__ . '/../includes/header.php';
 ?>
 <style>
-.wa-app { --wa:#008069; --wa-dark:#075e54; --wa-mint:#25d366; --wa-chat:#efeae2; --wa-out:#d9fdd3; height: calc(100vh - 118px); min-height: 540px; display:grid; grid-template-columns: 360px 1fr 280px; background:#fff; border-radius:12px; overflow:hidden; border:1px solid #d1d7db; }
-@media (max-width: 1200px) { .wa-app { grid-template-columns: 320px 1fr; } .wa-log { display:none; } .wa-app.show-log { grid-template-columns: 1fr 280px; } .wa-app.show-log .wa-sidebar, .wa-app.show-log .wa-stage { display:none; } .wa-app.show-log .wa-log { display:flex; } }
+.panel-content:has(.wa-app) { padding: 0.6rem; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.panel-main:has(.wa-app) { overflow: hidden; }
+.wa-app {
+  --wa:#008069; --wa-mint:#25d366; --wa-chat:#efeae2; --wa-out:#d9fdd3;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  background: #fff;
+  border: 1px solid #d1d7db;
+  border-radius: 12px;
+  overflow: hidden;
+}
 @media (max-width: 800px) {
   .wa-app { grid-template-columns: 1fr; }
-  .wa-app.is-thread .wa-sidebar, .wa-app.show-log .wa-sidebar { display:none; }
-  .wa-app:not(.is-thread):not(.show-log) .wa-stage { display:none; }
-  .wa-log { display:none; }
-  .wa-app.show-log .wa-log { display:flex; }
-  .wa-app.show-log .wa-stage { display:none; }
+  .wa-app.is-thread .wa-sidebar { display: none; }
+  .wa-app:not(.is-thread) .wa-stage { display: none; }
 }
-.wa-sidebar, .wa-log { display:flex; flex-direction:column; min-width:0; background:#fff; }
-.wa-sidebar { border-right:1px solid #e9edef; }
-.wa-log { border-left:1px solid #e9edef; background:#f8faf9; }
-.wa-head { background:var(--wa); color:#fff; padding:10px 12px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.wa-head h2 { margin:0; font-size:1.05rem; font-weight:700; color:#fff; }
-.wa-head a, .wa-head button { color:#fff; background:transparent; border:0; font-size:.82rem; }
-.wa-live { font-size:.72rem; background:rgba(255,255,255,.18); border-radius:999px; padding:2px 8px; }
-.wa-live.on { background:#25d366; color:#053b27; font-weight:700; }
-.wa-search { padding:8px 10px; position:relative; }
-.wa-search i { position:absolute; left:20px; top:50%; transform:translateY(-50%); color:#667781; }
-.wa-search input { width:100%; border:none; background:#f0f2f5; border-radius:8px; padding:8px 12px 8px 34px; }
-.wa-list, .wa-thread, .wa-log-body { flex:1; overflow:auto; min-height:0; }
-.wa-row { display:flex; gap:10px; padding:10px 12px; text-decoration:none; color:#111b21; border-bottom:1px solid #f0f2f5; cursor:pointer; }
-.wa-row:hover { background:#f5f6f6; color:#111b21; }
-.wa-row.active { background:#f0f2f5; }
-.wa-av { width:44px; height:44px; border-radius:50%; background:#dfe5e7; color:#54656f; display:flex; align-items:center; justify-content:center; font-weight:700; flex:0 0 44px; }
-.wa-row-main { min-width:0; flex:1; }
-.wa-row-top { display:flex; justify-content:space-between; gap:8px; }
-.wa-row-top .nm { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.wa-row-top .tm { font-size:.72rem; color:#667781; }
-.wa-row-top .tm.unread { color:var(--wa-mint); font-weight:700; }
-.wa-row-bot { display:flex; justify-content:space-between; gap:8px; margin-top:2px; color:#667781; font-size:.85rem; }
-.wa-row-bot .sn { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.wa-badge { min-width:18px; height:18px; border-radius:999px; background:var(--wa-mint); color:#fff; font-size:.68rem; font-weight:700; display:inline-flex; align-items:center; justify-content:center; padding:0 5px; }
-.wa-new { padding:8px 12px; border-top:1px solid #e9edef; background:#f0f2f5; }
-.wa-stage { display:flex; flex-direction:column; min-width:0; background:var(--wa-chat); background-image: radial-gradient(rgba(0,0,0,.04) 1px, transparent 1px); background-size:18px 18px; }
-.wa-chat-head { background:var(--wa); color:#fff; padding:8px 12px; display:flex; align-items:center; gap:10px; }
-.wa-back { display:none; color:#fff; border:0; background:transparent; font-size:1.15rem; }
-@media (max-width: 800px) { .wa-back { display:inline-flex; } }
-.wa-thread { padding:12px 7% 16px; display:flex; flex-direction:column; gap:4px; }
-.wa-bubble { max-width:min(78%, 560px); padding:6px 8px 4px 9px; border-radius:8px; font-size:.95rem; line-height:1.4; box-shadow:0 1px 1px rgba(11,20,26,.06); white-space:pre-wrap; word-break:break-word; }
-.wa-in { align-self:flex-start; background:#fff; border-top-left-radius:0; }
-.wa-out { align-self:flex-end; background:var(--wa-out); border-top-right-radius:0; }
-.wa-out.failed { background:#ffe8e6; }
-.wa-bubble .ft { display:flex; justify-content:flex-end; gap:4px; margin-top:2px; font-size:.68rem; color:#667781; }
-.wa-ticks.read { color:#53bdeb; }
-.wa-compose { background:#f0f2f5; padding:8px 10px; display:flex; gap:8px; align-items:flex-end; }
-.wa-compose textarea { flex:1; border:none; border-radius:8px; padding:10px 12px; resize:none; min-height:44px; }
-.wa-send { width:44px; height:44px; border:0; border-radius:50%; background:var(--wa); color:#fff; }
-.wa-send:disabled { opacity:.5; }
-.wa-err { display:none; margin:0; padding:6px 12px; background:#ffe8e6; color:#b42318; font-size:.82rem; }
-.wa-err.on { display:block; }
-.wa-blank, .wa-empty { padding:2rem 1rem; text-align:center; color:#667781; }
-.wa-log-item { padding:8px 12px; border-bottom:1px solid #e8eee9; font-size:.8rem; }
-.wa-log-item .k { font-weight:700; }
-.wa-log-item.in .k { color:#008069; }
-.wa-log-item.out .k { color:#1a7f37; }
-.wa-log-item.error .k { color:#b42318; }
-.wa-log-item .d { color:#3b4a54; margin-top:2px; word-break:break-word; }
-.wa-log-item .t { color:#667781; font-size:.7rem; }
+.wa-sidebar, .wa-stage, .wa-log { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.wa-sidebar { border-right: 1px solid #e9edef; background: #fff; }
+.wa-head, .wa-chat-head { flex: 0 0 auto; background: var(--wa); color: #fff; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wa-head h2, .wa-chat-head .nm { margin: 0; font-size: 1.05rem; font-weight: 700; color: #fff; }
+.wa-head button, .wa-chat-head button, .wa-head a { color: #fff; background: transparent; border: 0; font-size: .82rem; }
+.wa-live { font-size: .72rem; background: rgba(255,255,255,.2); border-radius: 999px; padding: 2px 8px; }
+.wa-live.on { background: var(--wa-mint); color: #053b27; font-weight: 700; }
+.wa-search { flex: 0 0 auto; padding: 8px 10px; }
+.wa-search input { width: 100%; border: 0; background: #f0f2f5; border-radius: 8px; padding: 8px 12px; }
+.wa-list, .wa-thread, .wa-log-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
+}
+.wa-row { display: flex; gap: 10px; padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #f0f2f5; }
+.wa-row:hover { background: #f5f6f6; }
+.wa-row.active { background: #f0f2f5; }
+.wa-av { width: 42px; height: 42px; border-radius: 50%; background: #dfe5e7; color: #54656f; display: flex; align-items: center; justify-content: center; font-weight: 700; flex: 0 0 42px; }
+.wa-row-main { min-width: 0; flex: 1; }
+.wa-row-top { display: flex; justify-content: space-between; gap: 8px; }
+.wa-row-top .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-row-top .tm { font-size: .72rem; color: #667781; white-space: nowrap; }
+.wa-snip { color: #667781; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-stage { background: var(--wa-chat); }
+.wa-chat-head { justify-content: flex-start; }
+.wa-chat-head .meta { min-width: 0; flex: 1; }
+.wa-chat-head .ph { font-size: .78rem; opacity: .9; }
+.wa-back { display: none; }
+@media (max-width: 800px) { .wa-back { display: inline-flex; } }
+.wa-err { display: none; flex: 0 0 auto; padding: 6px 12px; background: #ffe8e6; color: #b42318; font-size: .82rem; }
+.wa-err.on { display: block; }
+.wa-thread { padding: 10px 12px 14px; }
+.wa-bubble { max-width: 78%; padding: 7px 9px 4px; border-radius: 8px; font-size: .95rem; line-height: 1.4; box-shadow: 0 1px 1px rgba(11,20,26,.06); white-space: pre-wrap; word-break: break-word; margin-bottom: 6px; }
+.wa-in { margin-right: auto; background: #fff; }
+.wa-out { margin-left: auto; background: var(--wa-out); }
+.wa-out.failed { background: #ffe8e6; }
+.wa-bubble .ft { display: flex; justify-content: flex-end; gap: 4px; margin-top: 2px; font-size: .68rem; color: #667781; }
+.wa-ticks.read { color: #53bdeb; }
+.wa-compose { flex: 0 0 auto; background: #f0f2f5; padding: 8px 10px; display: flex; gap: 8px; align-items: center; border-top: 1px solid #e9edef; }
+.wa-compose input { flex: 1; border: 0; border-radius: 22px; padding: 10px 14px; min-height: 44px; }
+.wa-send { flex: 0 0 auto; border: 0; border-radius: 22px; background: var(--wa); color: #fff; font-weight: 700; padding: 10px 16px; min-height: 44px; }
+.wa-send:disabled { opacity: .5; }
+.wa-empty { padding: 2rem 1rem; text-align: center; color: #667781; }
+.wa-log {
+  display: none;
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: min(320px, 90vw);
+  background: #fff;
+  border-left: 1px solid #e9edef;
+  box-shadow: -8px 0 24px rgba(0,0,0,.08);
+  z-index: 6;
+}
+.wa-app.show-log .wa-log { display: flex; }
+.wa-log-item { padding: 8px 12px; border-bottom: 1px solid #eef2f0; font-size: .8rem; }
+.wa-log-item .k { font-weight: 700; color: #008069; }
+.wa-log-item.error .k { color: #b42318; }
+.wa-log-item .d { color: #3b4a54; margin-top: 2px; word-break: break-word; }
+.wa-log-item .t { color: #667781; font-size: .7rem; }
+.wa-plus { width: 36px; height: 36px; border: 0; border-radius: 50%; background: rgba(255,255,255,.2); color: #fff; }
+.wa-new { display: none; flex: 0 0 auto; padding: 8px 10px; border-top: 1px solid #e9edef; background: #f8faf9; }
+.wa-app.show-new .wa-new { display: block; }
 </style>
 
 <div class="wa-app<?php echo $phone !== '' ? ' is-thread' : ''; ?>" id="waApp">
   <aside class="wa-sidebar">
     <div class="wa-head">
       <h2>Chats</h2>
-      <span class="wa-live" id="waLive">Connecting</span>
+      <div class="d-flex align-items-center gap-2">
+        <span class="wa-live" id="waLive">Live</span>
+        <button type="button" class="wa-plus" id="waNewBtn" title="New chat">+</button>
+      </div>
     </div>
-    <div class="wa-search">
-      <i class="bi bi-search"></i>
-      <input type="search" id="waFilter" placeholder="Search chats">
-    </div>
+    <div class="wa-search"><input type="search" id="waFilter" placeholder="Search"></div>
     <div class="wa-list" id="waList"></div>
-    <div class="wa-new">
+    <div class="wa-new" id="waNewBox">
       <form id="waNewForm">
-        <div class="small fw-semibold mb-1">New chat</div>
         <input class="form-control form-control-sm mb-1" name="new_phone" maxlength="15" placeholder="10-digit mobile">
         <div class="d-flex gap-1">
           <input class="form-control form-control-sm" name="body" placeholder="Message">
@@ -147,27 +170,27 @@ require_once __DIR__ . '/../includes/header.php';
   </aside>
 
   <section class="wa-stage">
-    <div class="wa-chat-head" id="waChatHead">
+    <div class="wa-chat-head">
       <button class="wa-back" type="button" id="waBack" aria-label="Back"><i class="bi bi-arrow-left"></i></button>
       <div class="wa-av" id="waHeadAv">?</div>
-      <div>
-        <div class="fw-bold" id="waHeadName">Select a chat</div>
-        <div class="small" id="waHeadPhone" style="opacity:.9"></div>
+      <div class="meta">
+        <div class="nm" id="waHeadName">Select a chat</div>
+        <div class="ph" id="waHeadPhone"></div>
       </div>
       <button type="button" class="ms-auto" id="waLogBtn">Log</button>
     </div>
     <div class="wa-err" id="waErr"></div>
     <div class="wa-thread" id="waThread"></div>
     <form class="wa-compose" id="waSendForm">
-      <textarea name="body" id="waInput" rows="1" placeholder="Type a message"></textarea>
-      <button class="wa-send" type="submit" id="waSendBtn" aria-label="Send"><i class="bi bi-send-fill"></i></button>
+      <input type="text" id="waInput" placeholder="Type a message" autocomplete="off">
+      <button class="wa-send" type="submit" id="waSendBtn">Send</button>
     </form>
   </section>
 
   <aside class="wa-log" id="waLog">
     <div class="wa-head">
-      <h2>Activity</h2>
-      <a href="<?php echo e(site_url('/owner/otp_settings.php')); ?>">Settings</a>
+      <h2>Log</h2>
+      <button type="button" id="waLogClose">Close</button>
     </div>
     <div class="wa-log-body" id="waLogBody"></div>
   </aside>
@@ -183,6 +206,13 @@ require_once __DIR__ . '/../includes/header.php';
   var lastSig = '';
   var stickBottom = true;
 
+  function fit() {
+    var app = document.getElementById('waApp');
+    if (!app) return;
+    var top = app.getBoundingClientRect().top;
+    var h = Math.max(420, window.innerHeight - top - 8);
+    app.style.height = h + 'px';
+  }
   function esc(s) {
     return String(s || '').replace(/[&<>"']/g, function (c) {
       return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);
@@ -197,7 +227,6 @@ require_once __DIR__ . '/../includes/header.php';
   }
   function showErr(msg) {
     var el = document.getElementById('waErr');
-    if (!el) return;
     if (!msg) { el.classList.remove('on'); el.textContent = ''; return; }
     el.textContent = msg;
     el.classList.add('on');
@@ -211,23 +240,20 @@ require_once __DIR__ . '/../includes/header.php';
       html += '<div class="wa-row' + (c.phone === state.phone ? ' active' : '') + '" data-phone="' + esc(c.phone) + '">'
         + '<div class="wa-av">' + esc(c.initials || '?') + '</div>'
         + '<div class="wa-row-main"><div class="wa-row-top"><span class="nm">' + esc(c.name) + '</span>'
-        + '<span class="tm' + (c.unread > 0 ? ' unread' : '') + '">' + esc(c.when) + '</span></div>'
-        + '<div class="wa-row-bot"><span class="sn">' + esc(c.last_body) + '</span>'
-        + (c.unread > 0 ? '<span class="wa-badge">' + (c.unread > 99 ? '99+' : c.unread) + '</span>' : '')
-        + '</div></div></div>';
+        + '<span class="tm">' + esc(c.when) + '</span></div>'
+        + '<div class="wa-snip">' + esc(c.last_body) + '</div></div></div>';
     });
-    if (!html) html = '<div class="wa-empty">No chats yet. When a parent messages, it appears here automatically.</div>';
-    document.getElementById('waList').innerHTML = html;
+    document.getElementById('waList').innerHTML = html || '<div class="wa-empty">No chats yet.</div>';
   }
   function renderThread() {
     var thread = document.getElementById('waThread');
     var msgs = state.messages || [];
     if (!state.phone) {
-      thread.innerHTML = '<div class="wa-blank"><i class="bi bi-whatsapp" style="font-size:2.4rem;color:#008069"></i><p class="mt-2 mb-0">Select a chat to talk live.</p></div>';
+      thread.innerHTML = '<div class="wa-empty">Select a chat, then type below and press Send.</div>';
       return;
     }
     if (!msgs.length) {
-      thread.innerHTML = '<div class="wa-empty">No messages yet. Type below to send.</div>';
+      thread.innerHTML = '<div class="wa-empty">No messages yet. Type below and press Send.</div>';
       return;
     }
     thread.innerHTML = msgs.map(function (m) {
@@ -244,9 +270,10 @@ require_once __DIR__ . '/../includes/header.php';
     document.getElementById('waHeadAv').textContent = (state.name || '?').trim().split(/\s+/).map(function (w) { return w.charAt(0); }).join('').slice(0, 2).toUpperCase() || '?';
     document.getElementById('waApp').classList.toggle('is-thread', !!state.phone);
     var live = document.getElementById('waLive');
-    live.textContent = state.live ? 'Live' : 'Waiting';
+    live.textContent = state.live ? 'Live' : 'On';
     live.classList.toggle('on', !!state.live);
-    document.getElementById('waSendBtn').disabled = !state.phone;
+    document.getElementById('waSendBtn').disabled = !state.phone || sending;
+    document.getElementById('waInput').disabled = !state.phone;
   }
   function renderLog() {
     var html = (state.events || []).map(function (e) {
@@ -254,12 +281,12 @@ require_once __DIR__ . '/../includes/header.php';
         + '<div class="d">' + esc(e.detail) + '</div>'
         + '<div class="t">' + esc(e.when) + (e.phone && e.phone !== 'Unknown' ? ' · ' + esc(e.phone) : '') + '</div></div>';
     }).join('');
-    document.getElementById('waLogBody').innerHTML = html || '<div class="wa-empty">Incoming, sent, and webhook updates show here.</div>';
+    document.getElementById('waLogBody').innerHTML = html || '<div class="wa-empty">No activity yet.</div>';
   }
   function sig(data) {
     var lastMsg = (data.messages && data.messages.length) ? data.messages[data.messages.length - 1].id : 0;
     var lastEv = (data.events && data.events[0]) ? data.events[0].id : 0;
-    return [data.phone, lastMsg, lastEv, data.unread, (data.chats || []).length].join(':');
+    return [data.phone, lastMsg, lastEv, (data.chats || []).length].join(':');
   }
   function apply(data, force) {
     if (!data) return;
@@ -272,6 +299,7 @@ require_once __DIR__ . '/../includes/header.php';
     renderHead();
     renderLog();
     if (data.error) showErr(data.error);
+    fit();
   }
   function sync(phone) {
     var url = endpoint + '?ajax=sync&phone=' + encodeURIComponent(phone || state.phone || '');
@@ -281,37 +309,39 @@ require_once __DIR__ . '/../includes/header.php';
       .catch(function () {});
   }
   function send(body, extra) {
-    if (sending) return;
     extra = extra || {};
-    var phone = extra.phone || state.phone;
-    if (!body) return;
+    var phone = extra.phone || extra.new_phone || state.phone;
+    body = (body || '').trim();
+    if (!body) { showErr('Type a message first.'); return; }
+    if (!phone) { showErr('Choose a chat first.'); return; }
+    if (sending) return;
     sending = true;
+    showErr('');
     document.getElementById('waSendBtn').disabled = true;
     var fd = new FormData();
     fd.append('ajax', 'send');
     fd.append('csrf', csrf);
-    fd.append('phone', phone || '');
+    fd.append('phone', phone);
     fd.append('body', body);
     if (extra.new_phone) fd.append('new_phone', extra.new_phone);
     fetch(endpoint, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         sending = false;
-        document.getElementById('waSendBtn').disabled = false;
         if (data && data.ok) {
-          showErr('');
-          document.getElementById('waInput').value = '';
+          var inp = document.getElementById('waInput');
+          if (inp) inp.value = '';
           history.replaceState({}, '', endpoint + '?phone=' + encodeURIComponent(data.phone || phone));
+          stickBottom = true;
         }
         apply(data || {}, true);
-        if (data && !data.ok) showErr(data.error || 'Could not send.');
-        stickBottom = true;
-        renderThread();
+        if (data && !data.ok) showErr(data.error || 'Could not send. Parent must message first (24-hour window).');
+        document.getElementById('waInput').focus();
       })
       .catch(function () {
         sending = false;
-        document.getElementById('waSendBtn').disabled = false;
-        showErr('Network error. Try again.');
+        renderHead();
+        showErr('Network error. Try Send again.');
       });
   }
 
@@ -328,17 +358,19 @@ require_once __DIR__ . '/../includes/header.php';
   });
   document.getElementById('waLogBtn').addEventListener('click', function () {
     document.getElementById('waApp').classList.toggle('show-log');
+    var log = document.getElementById('waLogBody');
+    if (log) log.scrollTop = 0;
+  });
+  document.getElementById('waLogClose').addEventListener('click', function () {
+    document.getElementById('waApp').classList.remove('show-log');
+  });
+  document.getElementById('waNewBtn').addEventListener('click', function () {
+    document.getElementById('waApp').classList.toggle('show-new');
   });
   document.getElementById('waFilter').addEventListener('input', renderChats);
   document.getElementById('waSendForm').addEventListener('submit', function (e) {
     e.preventDefault();
-    send((document.getElementById('waInput').value || '').trim());
-  });
-  document.getElementById('waInput').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      send((document.getElementById('waInput').value || '').trim());
-    }
+    send(document.getElementById('waInput').value);
   });
   document.getElementById('waThread').addEventListener('scroll', function () {
     var el = document.getElementById('waThread');
@@ -346,13 +378,13 @@ require_once __DIR__ . '/../includes/header.php';
   });
   document.getElementById('waNewForm').addEventListener('submit', function (e) {
     e.preventDefault();
-    var phone = (this.new_phone.value || '').trim();
-    var body = (this.body.value || '').trim();
-    send(body, { new_phone: phone, phone: phone });
+    send(this.body.value, { new_phone: this.new_phone.value, phone: this.new_phone.value });
     this.body.value = '';
   });
-
+  window.addEventListener('resize', fit);
+  fit();
   apply(state, true);
+  setTimeout(fit, 50);
   setInterval(function () { if (!sending) sync(state.phone); }, 2500);
 })();
 </script>
