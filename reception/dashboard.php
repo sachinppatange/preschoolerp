@@ -236,10 +236,10 @@ require_once __DIR__ . '/../includes/header.php';
       <div class="col-6 col-md-3">
         <div class="card metric-card shadow-sm h-100">
           <div class="card-body">
-            <div class="small-muted">Pending Tasks</div>
+            <div class="small-muted">To-do</div>
             <div class="h5 mb-1"><?php echo number_format($metrics['pendingTasks']); ?></div>
-            <div class="small-muted">Open tasks</div>
-            <div class="mt-2"><a href="../reception/pending_tasks.php" class="btn btn-sm btn-outline-warning w-100 btn-compact">Tasks</a></div>
+            <div class="small-muted">Still open</div>
+            <div class="mt-2"><a href="../reception/pending_tasks.php" class="btn btn-sm btn-outline-warning w-100 btn-compact">Open</a></div>
           </div>
         </div>
       </div>

@@ -17,7 +17,7 @@ function reception_panel_menu(): array
             ['url' => $base . '/enquiry_list.php', 'icon' => 'bi-chat-left-text', 'label' => 'Enquiries', 'match' => 'enquiry'],
         ]],
         ['section' => 'Daily Work', 'items' => [
-            ['url' => $base . '/pending_tasks.php', 'icon' => 'bi-list-check', 'label' => 'Tasks', 'match' => 'pending_tasks'],
+            ['url' => $base . '/pending_tasks.php', 'icon' => 'bi-check2-square', 'label' => 'To-do', 'match' => 'pending_tasks'],
             ['url' => $base . '/pending_alerts.php', 'icon' => 'bi-bell', 'label' => 'Alerts', 'match' => 'pending_alerts'],
             ['url' => $base . '/notices_publish.php', 'icon' => 'bi-megaphone', 'label' => 'Notices', 'match' => 'notices'],
             ['url' => $base . '/news_events.php', 'icon' => 'bi-newspaper', 'label' => 'News & Events', 'match' => 'news_events'],

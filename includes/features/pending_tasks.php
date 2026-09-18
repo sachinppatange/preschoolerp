@@ -7,7 +7,7 @@ declare(strict_types=1);
 
 $cfg = $GLOBALS['FEATURE_CONFIG'] ?? [];
 $panel = (string) ($cfg['panel'] ?? 'owner');
-$page_title = (string) ($cfg['page_title'] ?? 'Tasks');
+$page_title = (string) ($cfg['page_title'] ?? 'To-do');
 $mineOnly = !empty($cfg['enforce_ownership']) || (($cfg['task_scope'] ?? '') === 'assigned_to_me');
 $canAssign = !$mineOnly;
 $canDelete = !$mineOnly;
@@ -223,125 +223,91 @@ if ($canAssign && table_exists('users')) {
 require_once __DIR__ . '/../header.php';
 ?>
 <style>
-.task-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; overflow:hidden; }
-.task-row { display:flex; gap:12px; padding:12px 14px; border-bottom:1px solid #f0f4fb; align-items:flex-start; }
-.task-row:last-child { border-bottom:0; }
-.task-row.overdue { background:#fff7f7; }
-.task-title { font-weight:700; color:#1e3a5f; }
-.task-meta { font-size:.82rem; color:#64748b; }
-.pri-high { color:#b42318; font-weight:700; }
-.pri-medium { color:#b45309; }
-.tab-on { font-weight:700; }
+.todo-add { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:12px; margin-bottom:12px; }
+.todo-list { background:#fff; border:1px solid #dbe7fb; border-radius:16px; overflow:hidden; }
+.todo-item { display:flex; gap:12px; align-items:flex-start; padding:12px 14px; border-bottom:1px solid #f0f4fb; }
+.todo-item:last-child { border-bottom:0; }
+.todo-item.overdue { background:#fff8f7; }
+.todo-check { width:28px; height:28px; border-radius:50%; border:2px solid #94a3b8; background:#fff; color:transparent; font-weight:800; line-height:1; padding:0; flex:0 0 28px; margin-top:2px; }
+.todo-check:hover { border-color:#16a34a; color:#16a34a; }
+.todo-item.done .todo-check { background:#16a34a; border-color:#16a34a; color:#fff; }
+.todo-item.done .todo-title { text-decoration:line-through; color:#94a3b8; }
+.todo-title { font-weight:700; color:#1e3a5f; background:none; border:0; padding:0; text-align:left; }
+.todo-title:hover { color:#0d3b8c; text-decoration:underline; }
+.todo-meta { font-size:.8rem; color:#64748b; }
+.todo-urgent { color:#b42318; font-weight:700; }
 </style>
-
-<p class="text-muted mb-3">Use this list for reception follow-ups: call a parent, collect documents, or remind about a visit. Tick <strong>Done</strong> when finished.</p>
 
 <?php foreach ($messages as $m): ?><div class="alert alert-success py-2"><?php echo $esc($m); ?></div><?php endforeach; ?>
 <?php foreach ($errors as $er): ?><div class="alert alert-danger py-2"><?php echo $esc($er); ?></div><?php endforeach; ?>
 
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-  <div class="btn-group">
-    <a class="btn btn-<?php echo $tab === 'open' ? 'primary' : 'outline-primary'; ?>" href="?tab=open<?php echo $qraw !== '' ? '&q=' . urlencode($qraw) : ''; ?>">Open (<?php echo $openCount; ?>)</a>
-    <a class="btn btn-<?php echo $tab === 'done' ? 'primary' : 'outline-primary'; ?>" href="?tab=done<?php echo $qraw !== '' ? '&q=' . urlencode($qraw) : ''; ?>">Done (<?php echo $doneCount; ?>)</a>
-  </div>
-  <div class="d-flex gap-2">
-    <?php if ($overdueCount > 0 && $tab === 'open'): ?>
-      <span class="align-self-center small text-danger fw-semibold"><?php echo $overdueCount; ?> overdue</span>
+<form method="post" class="todo-add">
+  <input type="hidden" name="csrf" value="<?php echo $esc($csrf); ?>">
+  <input type="hidden" name="action" value="add">
+  <div class="d-flex flex-wrap gap-2">
+    <input class="form-control" name="title" required placeholder="Add a to-do, e.g. Call parent for documents" style="flex:1; min-width:220px">
+    <?php if ($canAssign): ?>
+    <select name="assigned_to" class="form-select" style="max-width:200px">
+      <option value="<?php echo (int) $userId; ?>">Me</option>
+      <?php foreach ($staffList as $s): ?>
+        <option value="<?php echo (int) $s['id']; ?>"><?php echo $esc((string) $s['name']); ?></option>
+      <?php endforeach; ?>
+    </select>
     <?php endif; ?>
-    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addTaskModal">Add task</button>
+    <button class="btn btn-success" type="submit">Add</button>
   </div>
-</div>
-
-<form method="get" class="mb-3 d-flex gap-2">
-  <input type="hidden" name="tab" value="<?php echo $esc($tab); ?>">
-  <input class="form-control" name="q" value="<?php echo $esc($qraw); ?>" placeholder="Search tasks">
-  <button class="btn btn-outline-primary">Search</button>
+  <div class="form-check mt-2 mb-0">
+    <input class="form-check-input" type="checkbox" name="priority" value="high" id="todoUrgent">
+    <label class="form-check-label small" for="todoUrgent">Urgent</label>
+  </div>
 </form>
 
-<div class="task-card">
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <div class="small">
+    <a class="<?php echo $tab === 'open' ? 'fw-bold' : ''; ?>" href="?tab=open">To do (<?php echo $openCount; ?>)</a>
+    <span class="text-muted"> · </span>
+    <a class="<?php echo $tab === 'done' ? 'fw-bold' : ''; ?>" href="?tab=done">Finished (<?php echo $doneCount; ?>)</a>
+    <?php if ($overdueCount > 0 && $tab === 'open'): ?>
+      <span class="todo-urgent ms-2"><?php echo $overdueCount; ?> overdue</span>
+    <?php endif; ?>
+  </div>
+  <form method="get" class="d-flex gap-1">
+    <input type="hidden" name="tab" value="<?php echo $esc($tab); ?>">
+    <input class="form-control form-control-sm" name="q" value="<?php echo $esc($qraw); ?>" placeholder="Search" style="width:160px">
+  </form>
+</div>
+
+<div class="todo-list">
   <?php if ($tasks === []): ?>
-    <div class="p-4 text-center text-muted"><?php echo $tab === 'done' ? 'No completed tasks yet.' : 'No open tasks. Add one for reception to follow up.'; ?></div>
+    <div class="p-4 text-center text-muted"><?php echo $tab === 'done' ? 'Nothing finished yet.' : 'Nothing to do. Type above and press Add.'; ?></div>
   <?php endif; ?>
   <?php foreach ($tasks as $t):
       $due = (string) ($t['due_date'] ?? '');
       $overdue = $tab === 'open' && $due !== '' && $due < date('Y-m-d');
       $pri = (string) ($t['priority'] ?? 'medium');
+      $isDone = $tab === 'done';
   ?>
-    <div class="task-row<?php echo $overdue ? ' overdue' : ''; ?>">
+    <div class="todo-item<?php echo $overdue ? ' overdue' : ''; ?><?php echo $isDone ? ' done' : ''; ?>">
+      <form method="post">
+        <input type="hidden" name="csrf" value="<?php echo $esc($csrf); ?>">
+        <input type="hidden" name="action" value="<?php echo $isDone ? 'reopen' : 'done'; ?>">
+        <input type="hidden" name="id" value="<?php echo (int) $t['id']; ?>">
+        <button class="todo-check" type="submit" title="<?php echo $isDone ? 'Move back to to-do' : 'Mark done'; ?>">✓</button>
+      </form>
       <div class="flex-grow-1">
-        <div class="task-title"><?php echo $esc((string) $t['title']); ?></div>
-        <?php if (trim((string) ($t['description'] ?? '')) !== ''): ?>
-          <div class="task-meta"><?php echo $esc(mb_strimwidth((string) $t['description'], 0, 140, '…')); ?></div>
-        <?php endif; ?>
-        <div class="task-meta mt-1">
+        <button type="button" class="todo-title" data-bs-toggle="modal" data-bs-target="#editTaskModal" data-id="<?php echo (int) $t['id']; ?>"><?php echo $esc((string) $t['title']); ?></button>
+        <div class="todo-meta">
           <?php echo $esc((string) ($t['assignee_name'] !== '' ? $t['assignee_name'] : 'Unassigned')); ?>
-          <?php if ($due !== ''): ?> · Due <?php echo $esc(date('d M Y', strtotime($due))); ?><?php endif; ?>
-          <?php if ($overdue): ?> · <span class="pri-high">Overdue</span><?php endif; ?>
-          <?php if ($pri === 'high'): ?> · <span class="pri-high">Urgent</span><?php endif; ?>
+          <?php if ($due !== ''): ?> · <?php echo $esc(date('d M', strtotime($due))); ?><?php endif; ?>
+          <?php if ($overdue): ?> · <span class="todo-urgent">Overdue</span><?php endif; ?>
+          <?php if ($pri === 'high'): ?> · <span class="todo-urgent">Urgent</span><?php endif; ?>
         </div>
       </div>
-      <div class="d-flex flex-wrap gap-1 justify-content-end">
-        <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#viewModal" data-id="<?php echo (int) $t['id']; ?>">View</button>
-        <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editTaskModal" data-id="<?php echo (int) $t['id']; ?>">Edit</button>
-        <?php if ($tab === 'open'): ?>
-          <form method="post">
-            <input type="hidden" name="csrf" value="<?php echo $esc($csrf); ?>">
-            <input type="hidden" name="action" value="done">
-            <input type="hidden" name="id" value="<?php echo (int) $t['id']; ?>">
-            <button class="btn btn-sm btn-success" type="submit">Done</button>
-          </form>
-        <?php else: ?>
-          <form method="post">
-            <input type="hidden" name="csrf" value="<?php echo $esc($csrf); ?>">
-            <input type="hidden" name="action" value="reopen">
-            <input type="hidden" name="id" value="<?php echo (int) $t['id']; ?>">
-            <button class="btn btn-sm btn-outline-secondary" type="submit">Reopen</button>
-          </form>
-        <?php endif; ?>
-        <?php if ($canDelete) {
-            echo render_secure_delete_button((int) $t['id'], 'Delete', 'Delete this task?');
-        } ?>
-      </div>
+      <?php if ($canDelete) {
+          echo render_secure_delete_button((int) $t['id'], '×', 'Delete this to-do?');
+      } ?>
     </div>
   <?php endforeach; ?>
-</div>
-
-<div class="modal fade" id="addTaskModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
-    <form class="modal-content" method="post">
-      <input type="hidden" name="csrf" value="<?php echo $esc($csrf); ?>">
-      <input type="hidden" name="action" value="add">
-      <div class="modal-header"><h5 class="modal-title">Add task</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body row g-2">
-        <div class="col-12"><label class="form-label">What to do *</label><input name="title" class="form-control" required placeholder="e.g. Call parent about documents"></div>
-        <div class="col-12"><label class="form-label">Note</label><textarea name="description" class="form-control" rows="2" placeholder="Optional"></textarea></div>
-        <?php if ($canAssign): ?>
-        <div class="col-md-6">
-          <label class="form-label">Assign to</label>
-          <select name="assigned_to" class="form-select">
-            <option value="<?php echo (int) $userId; ?>">Me</option>
-            <?php foreach ($staffList as $s): ?>
-              <option value="<?php echo (int) $s['id']; ?>"><?php echo $esc((string) $s['name']); ?></option>
-            <?php endforeach; ?>
-          </select>
-        </div>
-        <?php endif; ?>
-        <div class="col-md-6"><label class="form-label">Due date</label><input type="date" name="due_date" class="form-control"></div>
-        <div class="col-md-6">
-          <label class="form-label">Priority</label>
-          <select name="priority" class="form-select">
-            <option value="medium">Normal</option>
-            <option value="high">Urgent</option>
-            <option value="low">Low</option>
-          </select>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn btn-success" type="submit">Save</button>
-      </div>
-    </form>
-  </div>
 </div>
 
 <div class="modal fade" id="editTaskModal" tabindex="-1" aria-hidden="true">
@@ -350,13 +316,13 @@ require_once __DIR__ . '/../header.php';
       <input type="hidden" name="csrf" value="<?php echo $esc($csrf); ?>">
       <input type="hidden" name="action" value="edit">
       <input type="hidden" name="id" id="edit_id">
-      <div class="modal-header"><h5 class="modal-title">Edit task</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><h5 class="modal-title">Edit to-do</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body row g-2">
-        <div class="col-12"><label class="form-label">What to do *</label><input name="title" id="edit_title" class="form-control" required></div>
+        <div class="col-12"><label class="form-label">To-do</label><input name="title" id="edit_title" class="form-control" required></div>
         <div class="col-12"><label class="form-label">Note</label><textarea name="description" id="edit_description" class="form-control" rows="2"></textarea></div>
         <?php if ($canAssign): ?>
         <div class="col-md-6">
-          <label class="form-label">Assign to</label>
+          <label class="form-label">Who</label>
           <select name="assigned_to" id="edit_assigned_to" class="form-select">
             <option value="">Unassigned</option>
             <?php foreach ($staffList as $s): ?>
@@ -365,71 +331,51 @@ require_once __DIR__ . '/../header.php';
           </select>
         </div>
         <?php endif; ?>
-        <div class="col-md-6"><label class="form-label">Due date</label><input type="date" name="due_date" id="edit_due_date" class="form-control"></div>
+        <div class="col-md-6"><label class="form-label">Due</label><input type="date" name="due_date" id="edit_due_date" class="form-control"></div>
         <div class="col-md-6">
           <label class="form-label">Priority</label>
           <select name="priority" id="edit_priority" class="form-select">
             <option value="medium">Normal</option>
             <option value="high">Urgent</option>
-            <option value="low">Low</option>
           </select>
         </div>
         <div class="col-md-6">
           <label class="form-label">Status</label>
           <select name="status" id="edit_status" class="form-select">
-            <option value="pending">Open</option>
-            <option value="in_progress">In progress</option>
-            <option value="done">Done</option>
+            <option value="pending">To do</option>
+            <option value="done">Finished</option>
           </select>
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
         <button class="btn btn-primary" type="submit">Save</button>
       </div>
     </form>
   </div>
 </div>
-
-<div class="modal fade" id="viewModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Task</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body" id="viewModalBody">Loading…</div>
-    </div>
-  </div>
-</div>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-  var viewModal = document.getElementById('viewModal');
-  if (viewModal) {
-    viewModal.addEventListener('show.bs.modal', function (ev) {
-      var body = document.getElementById('viewModalBody');
-      body.textContent = 'Loading…';
-      fetch('?action=view&id=' + encodeURIComponent(ev.relatedTarget.getAttribute('data-id')), { credentials: 'same-origin' })
-        .then(function (r) { return r.text(); })
-        .then(function (html) { body.innerHTML = html; });
-    });
-  }
   var editModal = document.getElementById('editTaskModal');
-  if (editModal) {
-    editModal.addEventListener('show.bs.modal', function (ev) {
-      fetch('?action=get&id=' + encodeURIComponent(ev.relatedTarget.getAttribute('data-id')), { credentials: 'same-origin' })
-        .then(function (r) { return r.json(); })
-        .then(function (json) {
-          if (!json || !json.ok) return;
-          var d = json.data;
-          document.getElementById('edit_id').value = d.id || '';
-          document.getElementById('edit_title').value = d.title || '';
-          document.getElementById('edit_description').value = d.description || '';
-          document.getElementById('edit_due_date').value = d.due_date || '';
-          document.getElementById('edit_priority').value = d.priority || 'medium';
-          document.getElementById('edit_status').value = d.status || 'pending';
-          var asg = document.getElementById('edit_assigned_to');
-          if (asg) asg.value = d.assigned_to || '';
-        });
-    });
-  }
+  if (!editModal) return;
+  editModal.addEventListener('show.bs.modal', function (ev) {
+    var btn = ev.relatedTarget;
+    if (!btn) return;
+    fetch('?action=get&id=' + encodeURIComponent(btn.getAttribute('data-id')), { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (json) {
+        if (!json || !json.ok) return;
+        var d = json.data;
+        document.getElementById('edit_id').value = d.id || '';
+        document.getElementById('edit_title').value = d.title || '';
+        document.getElementById('edit_description').value = d.description || '';
+        document.getElementById('edit_due_date').value = d.due_date || '';
+        document.getElementById('edit_priority').value = d.priority === 'high' ? 'high' : 'medium';
+        document.getElementById('edit_status').value = d.status === 'done' ? 'done' : 'pending';
+        var asg = document.getElementById('edit_assigned_to');
+        if (asg) asg.value = d.assigned_to || '';
+      });
+  });
 });
 </script>
 <?php require_once __DIR__ . '/../footer.php'; ?>
