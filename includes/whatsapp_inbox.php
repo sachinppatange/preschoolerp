@@ -306,6 +306,33 @@ function wa_inbox_handle_incoming(array $message, array $settings, string $profi
         'raw_json' => $message,
     ]);
     wa_inbox_event('in', $from, $body !== '' ? $body : ('[' . (string) ($message['type'] ?? 'message') . ']'));
+
+    if ($from !== '' && $body !== '') {
+        if (!function_exists('enquiry_is_interest')) {
+            $ef = __DIR__ . '/enquiry.php';
+            if (is_file($ef)) {
+                require_once $ef;
+            }
+        }
+        if (function_exists('enquiry_is_interest') && enquiry_is_interest($body)) {
+            $name = trim($profileName);
+            if ($name === '' && function_exists('wa_inbox_label')) {
+                $name = wa_inbox_label($from);
+            }
+            $enq = enquiry_from_whatsapp($from, $name, $body);
+            if (!empty($enq['ok'])) {
+                wa_inbox_event('in', $from, !empty($enq['duplicate']) ? 'Enquiry already on list' : 'Added to Enquiries');
+                if (!wa_inbox_recent_bot($from, 30)) {
+                    $reply = !empty($enq['duplicate'])
+                        ? 'Thank you. We already have your enquiry. Our team will call you on this number.'
+                        : 'Thank you, we have received your enquiry. Our team will call you soon.';
+                    wa_inbox_send_text($from, $reply, true);
+                }
+                return;
+            }
+        }
+    }
+
     if (empty($settings['autobot']) || $from === '' || $body === '') {
         return;
     }
