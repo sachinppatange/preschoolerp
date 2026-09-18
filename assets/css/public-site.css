@@ -280,6 +280,37 @@ body.public-site {
   color: #fff;
 }
 
+.fb-hp {
+  position: absolute;
+  left: -9999px;
+  height: 0;
+  overflow: hidden;
+}
+.fb-type {
+  flex: 1;
+  text-align: center;
+  border: 2px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: #fff;
+}
+.fb-type input { display: none; }
+.fb-type.on {
+  border-color: var(--ps-coral);
+  background: #fff0f3;
+  color: var(--ps-coral-dark);
+}
+.fb-captcha-img {
+  border-radius: 12px;
+  border: 1px solid #f3d7a3;
+  background: #fff8e8;
+  height: 64px;
+  width: 220px;
+  object-fit: contain;
+}
+
 @media (max-width: 576px) {
   .public-hero h1 { font-size: 1.65rem; }
   .public-nav .logo-img { height: 44px; }
