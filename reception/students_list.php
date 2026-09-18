@@ -306,12 +306,11 @@ require_once __DIR__ . '/../includes/header.php';
       <div class="col-md-2">
         <label class="form-label">Status</label>
         <select name="status" class="form-select">
-          <option value="">Any</option>
-          <?php foreach ($statusOptions as $st): ?>
-            <option value="<?php echo $esc($st); ?>" <?php if (($statusFilter ?? '') === $st) echo 'selected'; ?>>
-              <?php echo $esc(ucfirst($st)); ?>
-            </option>
-          <?php endforeach; ?>
+          <option value="all" <?php if (($statusFilter ?? '') === '') echo 'selected'; ?>>All</option>
+          <option value="active" <?php if (($statusFilter ?? '') === 'active') echo 'selected'; ?>>Current</option>
+          <option value="inactive" <?php if (($statusFilter ?? '') === 'inactive') echo 'selected'; ?>>Left</option>
+          <option value="alumni" <?php if (($statusFilter ?? '') === 'alumni') echo 'selected'; ?>>Alumni</option>
+          <option value="pending" <?php if (($statusFilter ?? '') === 'pending') echo 'selected'; ?>>Pending</option>
         </select>
       </div>
       <div class="col-md-2">

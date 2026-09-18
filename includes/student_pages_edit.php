@@ -470,8 +470,8 @@ if ($parentLogin['email'] === '' && function_exists('parent_normalize_email')) {
           <label class="form-label">Status</label>
           <?php $st = (string)($val('status','active')); ?>
           <select name="status" class="form-select">
-            <?php foreach (['active','inactive','pending','alumni'] as $opt): ?>
-              <option value="<?php echo e($opt); ?>" <?php if ($st === $opt) echo 'selected'; ?>><?php echo e(ucfirst($opt)); ?></option>
+            <?php foreach (['active' => 'Current', 'inactive' => 'Left', 'pending' => 'Pending', 'alumni' => 'Alumni'] as $opt => $lab): ?>
+              <option value="<?php echo e($opt); ?>" <?php if ($st === $opt) echo 'selected'; ?>><?php echo e($lab); ?></option>
             <?php endforeach; ?>
           </select>
         </div>

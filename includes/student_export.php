@@ -26,8 +26,10 @@ function student_list_filters(): array
         $params[':class_id'] = $classId;
     }
 
-    $status = trim((string) ($_GET['status'] ?? ''));
-    if ($status !== '') {
+    $status = trim((string) ($_GET['status'] ?? 'active'));
+    if ($status === 'all') {
+        $status = '';
+    } elseif ($status !== '') {
         $where[] = 's.status = :status';
         $params[':status'] = $status;
     }

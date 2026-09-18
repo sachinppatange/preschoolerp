@@ -115,7 +115,7 @@ if (table_exists('students')) {
     if (function_exists('ay_students_have_column') && ay_students_have_column()) {
         $students = safe_db_get_all(
             "SELECT id, COALESCE(first_name,'') AS first_name, COALESCE(middle_name,'') AS middle_name, COALESCE(last_name,'') AS last_name, COALESCE(academic_year,'') AS academic_year, COALESCE(school_id,NULL) AS school_id, COALESCE(class_id,NULL) AS class_id
-             FROM students WHERE academic_year = :panel_ay ORDER BY first_name, last_name",
+             FROM students WHERE academic_year = :panel_ay AND (status IS NULL OR status IN ('active','pending')) ORDER BY first_name, last_name",
             [':panel_ay' => ay_selected()]
         );
     } else {

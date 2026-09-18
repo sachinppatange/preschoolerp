@@ -306,8 +306,11 @@ require_once __DIR__ . '/../includes/header.php';
       </div>
       <div class="col-md-2"><label class="form-label">Status</label>
         <select name="status" class="form-select">
-          <option value="">Any</option>
-          <?php foreach ($statusOptions as $st): ?><option value="<?php echo $esc($st); ?>" <?php if(($statusFilter ?? '')===$st) echo 'selected'; ?>><?php echo $esc(ucfirst($st)); ?></option><?php endforeach; ?>
+          <option value="all" <?php if(($statusFilter ?? '')==='') echo 'selected'; ?>>All</option>
+          <option value="active" <?php if(($statusFilter ?? '')==='active') echo 'selected'; ?>>Current</option>
+          <option value="inactive" <?php if(($statusFilter ?? '')==='inactive') echo 'selected'; ?>>Left</option>
+          <option value="alumni" <?php if(($statusFilter ?? '')==='alumni') echo 'selected'; ?>>Alumni</option>
+          <option value="pending" <?php if(($statusFilter ?? '')==='pending') echo 'selected'; ?>>Pending</option>
         </select>
       </div>
       <div class="col-md-2"><label class="form-label">Gender</label>
@@ -362,7 +365,10 @@ require_once __DIR__ . '/../includes/header.php';
                 <div><?php echo $esc($s['parent_name'] ?? ''); ?></div>
               </td>
               <td><?php echo $s['admission_date'] ? e(date('d M Y', strtotime($s['admission_date']))) : '—'; ?></td>
-              <td><span class="badge <?php echo ($s['status']==='active' ? 'bg-success' : ($s['status']==='pending' ? 'bg-warning text-dark' : 'bg-secondary')); ?>"><?php echo $esc(ucfirst($s['status'])); ?></span></td>
+              <td><span class="badge <?php echo ($s['status']==='active' ? 'bg-success' : ($s['status']==='pending' ? 'bg-warning text-dark' : 'bg-secondary')); ?>"><?php
+                $stLab = ['active'=>'Current','inactive'=>'Left','alumni'=>'Alumni','pending'=>'Pending'];
+                echo $esc($stLab[$s['status'] ?? ''] ?? ucfirst((string)($s['status'] ?? '')));
+              ?></span></td>
               <td>
                 <a class="btn btn-sm btn-outline-info" href="<?php echo e(function_exists('site_url') ? site_url('/owner/students_view.php?id=' . (int)$s['id']) : ('students_view.php?id=' . (int)$s['id'])); ?>">View</a>
                 <a class="btn btn-sm btn-outline-warning" href="<?php echo e(function_exists('site_url') ? site_url('/owner/students_edit.php?id=' . (int)$s['id']) : ('students_edit.php?id=' . (int)$s['id'])); ?>">Edit</a>
