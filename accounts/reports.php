@@ -1,372 +1,462 @@
 <?php
 /**
- * accounts/reports.php
- *
- * Accounts - Reports and exports for Pioneer Play School.
- *
- * Features:
- *  - Quick reports: daily collection, monthly collection, pending fees, expense summary
- *  - Date-range filter and class/school filters where applicable
- *  - Export CSV for the selected report and filters (?action=export&report=<name>&...)
- *  - View small detail fragments for selected rows (AJAX fragments)
- *
- * Place at: /pioneerplayschool01/accounts/reports.php
- *
- * Auth: $_SESSION['accounts_auth_user'] or $_SESSION['accounts_user_id'] required (role 'accounts' enforced if present).
- *
- * This file follows the same DB/helpers pattern used across the app (pdo_connect, safe_db_get_one, safe_db_get_all).
+ * Money report for a date range: fees in, expenses out, leftover, by class.
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('accounts');
-$DEBUG = panel_debug();
 
-function format_money($v): string { return '₹ ' . number_format((float)$v, 2); }
+$page_title = 'Reports';
+$pageTitle = $page_title;
 
-function table_exists(string $name): bool {
-    try {
-        $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :t", [':t'=>$name]);
-        return !empty($r) && intval($r['cnt']) > 0;
-    } catch (Throwable $e) { return false; }
-}
+$selfUrl = function_exists('site_url') ? site_url('/accounts/reports.php') : 'reports.php';
+$dailyUrl = function_exists('site_url') ? site_url('/accounts/daily_collection.php') : 'daily_collection.php';
+$monthUrl = function_exists('site_url') ? site_url('/accounts/monthly_summary.php') : 'monthly_summary.php';
+$pendingUrl = function_exists('site_url') ? site_url('/accounts/pending_fees.php') : 'pending_fees.php';
+$expUrl = function_exists('site_url') ? site_url('/accounts/expenses.php') : 'expenses.php';
+$collectUrl = function_exists('site_url') ? site_url('/accounts/fees_collection.php') : 'fees_collection.php';
 
-$accountsUserId = auth_user_id();
+$categoryLabels = [
+    'Rent' => 'Rent / premises',
+    'Salary' => 'Staff salary',
+    'Electricity' => 'Electricity',
+    'Water' => 'Water',
+    'Housekeeping' => 'Housekeeping / cleaning',
+    'Food' => 'Food / snacks / milk',
+    'Learning' => 'Toys & learning material',
+    'Stationery' => 'Stationery / printing',
+    'Events' => 'Events / celebrations',
+    'Transport' => 'Transport',
+    'Maintenance' => 'Maintenance / repairs',
+    'Internet' => 'Internet / phone',
+    'Medical' => 'Medical / first aid',
+    'Uniforms' => 'Uniforms / ID cards',
+    'Marketing' => 'Marketing',
+    'Licence' => 'Licence / government fees',
+    'Other' => 'Other',
+];
 
-/* -------------------------
-   Inputs & filters
-   ------------------------- */
-$report = trim((string)($_GET['report'] ?? 'daily')); // daily, monthly, pending_fees, expense_summary
-$action = trim((string)($_GET['action'] ?? 'view')); // view or export
-$from = trim((string)($_GET['from'] ?? '')); // yyyy-mm-dd
-$to   = trim((string)($_GET['to'] ?? ''));
-$class_id = !empty($_GET['class_id']) ? (int) $_GET['class_id'] : 0;
-$school_id = !empty($_GET['school_id']) ? (int) $_GET['school_id'] : 0;
+$today = date('Y-m-d');
+$monthStart = date('Y-m-01');
+$monthEnd = date('Y-m-t');
+$lastMonthStart = date('Y-m-01', strtotime('first day of last month'));
+$lastMonthEnd = date('Y-m-t', strtotime('last day of last month'));
+$yearStart = date('Y-01-01');
 
-/* default date range: today for daily, this month for monthly, last 30 days for others */
-if ($report === 'daily') {
-    if ($from === '') $from = date('Y-m-d');
-    if ($to === '') $to = $from;
-} elseif ($report === 'monthly') {
-    if ($from === '') $from = date('Y-m-01');
-    if ($to === '') $to = date('Y-m-t');
+$preset = trim((string) ($_GET['preset'] ?? ''));
+if ($preset === 'today') {
+    $from = $to = $today;
+} elseif ($preset === 'month') {
+    $from = $monthStart;
+    $to = $monthEnd;
+} elseif ($preset === 'last') {
+    $from = $lastMonthStart;
+    $to = $lastMonthEnd;
+} elseif ($preset === 'year') {
+    $from = $yearStart;
+    $to = $today;
 } else {
-    if ($from === '') $from = date('Y-m-d', strtotime('-30 days'));
-    if ($to === '') $to = date('Y-m-d');
+    $from = trim((string) ($_GET['from'] ?? $monthStart));
+    $to = trim((string) ($_GET['to'] ?? $monthEnd));
+}
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+    $from = $monthStart;
+}
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+    $to = $monthEnd;
+}
+if ($to < $from) {
+    $to = $from;
 }
 
-/* quick guards for tables */
-$hasFees = table_exists('fees_records');
-$hasExpenses = table_exists('expenses');
-$hasStudents = table_exists('students');
-$hasClasses = table_exists('classes');
-$hasSchools = table_exists('schools');
+$classId = isset($_GET['class_id']) && $_GET['class_id'] !== '' ? (int) $_GET['class_id'] : 0;
 
-/* -------------------------
-   Build where clauses shared
-   ------------------------- */
-$where = []; $params = [];
-if ($from !== '') { $where[] = "DATE(COALESCE(fr.collected_at, fr.created_at)) >= :from"; $params[':from'] = $from; }
-if ($to !== '')   { $where[] = "DATE(COALESCE(fr.collected_at, fr.created_at)) <= :to";   $params[':to']   = $to; }
-if ($class_id) { $where[] = "fr.class_id = :class_id"; $params[':class_id'] = $class_id; }
-if ($school_id) { $where[] = "fr.school_id = :school_id"; $params[':school_id'] = $school_id; }
-$whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+$hasFees = function_exists('table_exists') && table_exists('fees_records');
+$hasExp = function_exists('table_exists') && table_exists('expenses');
+$hasStudents = function_exists('table_exists') && table_exists('students');
+$hasDues = $hasStudents && function_exists('column_exists') && column_exists('students', 'dues_status');
 
-/* -------------------------
-   Prepare report data
-   ------------------------- */
-$reportTitle = '';
-$rows = [];
-$summary = [];
+$classes = (function_exists('table_exists') && table_exists('classes'))
+    ? (safe_db_get_all('SELECT id, name FROM classes ORDER BY name ASC') ?: [])
+    : [];
 
-try {
-    if ($report === 'daily') {
-        $reportTitle = 'Daily Collection';
-        if ($hasFees) {
-            // totals by day within range
-            $sql = "SELECT DATE(COALESCE(fr.collected_at, fr.created_at)) AS day,
-                           COUNT(*) AS count_records,
-                           COALESCE(SUM(fr.paid_amount),0) AS total_paid,
-                           COALESCE(SUM(fr.amount),0) AS total_amount
-                    FROM fees_records fr
-                    $whereSql
-                    GROUP BY day
-                    ORDER BY day ASC";
-            $rows = safe_db_get_all($sql, $params);
-            $s = safe_db_get_one("SELECT COALESCE(SUM(fr.paid_amount),0) AS total_paid, COALESCE(SUM(fr.amount),0) AS total_amount FROM fees_records fr " . ($whereSql ? $whereSql : ''), $params);
-            $summary['total_paid'] = (float)($s['total_paid'] ?? 0);
-            $summary['total_amount'] = (float)($s['total_amount'] ?? 0);
-            $summary['days'] = count($rows);
-        } else {
-            $rows = [];
-            $summary = ['total_paid'=>0,'total_amount'=>0,'days'=>0];
-        }
-    } elseif ($report === 'monthly') {
-        $reportTitle = 'Monthly Collection (by day)';
-        if ($hasFees) {
-            $sql = "SELECT DATE(COALESCE(fr.collected_at, fr.created_at)) AS day,
-                           COUNT(*) AS count_records,
-                           COALESCE(SUM(fr.paid_amount),0) AS total_paid,
-                           COALESCE(SUM(fr.amount),0) AS total_amount
-                    FROM fees_records fr
-                    $whereSql
-                    GROUP BY day
-                    ORDER BY day ASC";
-            $rows = safe_db_get_all($sql, $params);
-            $s = safe_db_get_one("SELECT COALESCE(SUM(fr.paid_amount),0) AS total_paid, COALESCE(SUM(fr.amount),0) AS total_amount FROM fees_records fr " . ($whereSql ? $whereSql : ''), $params);
-            $summary['total_paid'] = (float)($s['total_paid'] ?? 0);
-            $summary['total_amount'] = (float)($s['total_amount'] ?? 0);
-        } else {
-            $rows = []; $summary = ['total_paid'=>0,'total_amount'=>0];
-        }
-    } elseif ($report === 'pending_fees') {
-        $reportTitle = 'Pending Fees';
-        if ($hasFees) {
-            // list unpaid or partial by student
-            $sql = "SELECT fr.id, fr.student_id, COALESCE(st.first_name,'') AS first_name, COALESCE(st.last_name,'') AS last_name,
-                           fr.amount, COALESCE(fr.paid_amount,0) AS paid_amount, (fr.amount - COALESCE(fr.paid_amount,0)) AS due_amount,
-                           fr.due_date, fr.status
-                    FROM fees_records fr
-                    LEFT JOIN students st ON st.id = fr.student_id
-                    WHERE (fr.amount - COALESCE(fr.paid_amount,0)) > 0
-                    " . ($class_id ? " AND fr.class_id = :class_id" : "") . ($school_id ? " AND fr.school_id = :school_id" : "") . "
-                    ORDER BY fr.due_date IS NULL, fr.due_date ASC, st.first_name ASC";
-            // reuse params but only class_id/school_id might be present
-            $rows = safe_db_get_all($sql, $params);
-            $s = safe_db_get_one("SELECT COALESCE(SUM(GREATEST(0, amount - COALESCE(paid_amount,0))),0) AS total_due FROM fees_records fr " . ($whereSql ? $whereSql : ''), $params);
-            // fallback if above returns null: compute unconditional
-            if ($s === null) $s = safe_db_get_one("SELECT COALESCE(SUM(GREATEST(0, amount - COALESCE(paid_amount,0))),0) AS total_due FROM fees_records");
-            $summary['total_due'] = (float)($s['total_due'] ?? 0);
-            $summary['count'] = count($rows);
-        } else {
-            $rows = []; $summary = ['total_due'=>0,'count'=>0];
-        }
-    } elseif ($report === 'expense_summary') {
-        $reportTitle = 'Expenses Summary';
-        if ($hasExpenses) {
-            // sum by category
-            $sql = "SELECT COALESCE(category,'Uncategorized') AS category, COUNT(*) AS cnt, COALESCE(SUM(amount),0) AS total_amount
-                    FROM expenses ex
-                    WHERE DATE(ex.expense_date) >= :from AND DATE(ex.expense_date) <= :to
-                    GROUP BY category
-                    ORDER BY total_amount DESC";
-            $rows = safe_db_get_all($sql, [':from'=>$from, ':to'=>$to]);
-            $s = safe_db_get_one("SELECT COALESCE(SUM(amount),0) AS total_amount FROM expenses WHERE DATE(expense_date) >= :from AND DATE(expense_date) <= :to", [':from'=>$from, ':to'=>$to]);
-            $summary['total'] = (float)($s['total_amount'] ?? 0);
-        } else {
-            $rows = []; $summary = ['total'=>0];
-        }
-    } else {
-        // unknown report - default to daily
-        $report = 'daily';
-        header('Location: ?report=daily');
-        exit;
+$fromDt = $from . ' 00:00:00';
+$toDt = $to . ' 23:59:59';
+
+$feeWhere = ['fr.collected_at IS NOT NULL', 'fr.collected_at >= :from', 'fr.collected_at <= :to'];
+$feeParams = [':from' => $fromDt, ':to' => $toDt];
+if ($classId > 0) {
+    $feeWhere[] = 's.class_id = :cid';
+    $feeParams[':cid'] = $classId;
+}
+$feeSql = 'WHERE ' . implode(' AND ', $feeWhere);
+
+$receipts = $hasFees
+    ? (safe_db_get_all(
+        "SELECT fr.id, fr.receipt_no, fr.paid_amount, fr.collected_at,
+                COALESCE(s.first_name,'') AS first_name,
+                COALESCE(s.middle_name,'') AS middle_name,
+                COALESCE(s.last_name,'') AS last_name,
+                COALESCE(c.name,'') AS class_name
+         FROM fees_records fr
+         LEFT JOIN students s ON s.id = fr.student_id
+         LEFT JOIN classes c ON c.id = s.class_id
+         {$feeSql}
+         ORDER BY fr.collected_at ASC, fr.id ASC",
+        $feeParams
+    ) ?: [])
+    : [];
+
+$expWhere = 'WHERE expense_date BETWEEN :from AND :to';
+$expParams = [':from' => $from, ':to' => $to];
+$expenses = $hasExp
+    ? (safe_db_get_all(
+        "SELECT id, title, amount, category, expense_date, payment_method
+         FROM expenses {$expWhere}
+         ORDER BY expense_date ASC, id ASC",
+        $expParams
+    ) ?: [])
+    : [];
+
+$totalIn = 0.0;
+$byClass = [];
+$byPay = [];
+$byDay = [];
+foreach ($receipts as $r) {
+    $amt = (float) ($r['paid_amount'] ?? 0);
+    $totalIn += $amt;
+    $cls = trim((string) ($r['class_name'] ?? ''));
+    if ($cls === '') {
+        $cls = 'No class';
     }
-} catch (Throwable $e) {
-    if ($DEBUG) error_log('Report generation error: ' . $e->getMessage());
-    $rows = []; $summary = [];
+    $byClass[$cls] = ($byClass[$cls] ?? 0) + $amt;
+    $method = 'Other';
+    $raw = (string) ($r['receipt_no'] ?? '');
+    if (preg_match('/METHOD:([^|]+)/', $raw, $mm)) {
+        $method = trim($mm[1]) ?: 'Other';
+    }
+    $byPay[$method] = ($byPay[$method] ?? 0) + $amt;
+    $day = substr((string) ($r['collected_at'] ?? ''), 0, 10);
+    if ($day === '') {
+        $day = $from;
+    }
+    if (!isset($byDay[$day])) {
+        $byDay[$day] = ['n' => 0, 'amt' => 0.0];
+    }
+    $byDay[$day]['n']++;
+    $byDay[$day]['amt'] += $amt;
+}
+arsort($byClass);
+arsort($byPay);
+ksort($byDay);
+
+$totalOut = 0.0;
+$byCat = [];
+foreach ($expenses as $ex) {
+    $amt = (float) ($ex['amount'] ?? 0);
+    $totalOut += $amt;
+    $cat = trim((string) ($ex['category'] ?? ''));
+    if ($cat === '') {
+        $cat = 'Other';
+    }
+    $byCat[$cat] = ($byCat[$cat] ?? 0) + $amt;
+}
+arsort($byCat);
+
+$net = $totalIn - $totalOut;
+
+$pendingNow = 0.0;
+$pendingKids = 0;
+$pendingByClass = [];
+if ($hasStudents && $hasFees) {
+    $duesSql = $hasDues ? " AND LOWER(COALESCE(s.dues_status,'open')) <> 'written_off'" : '';
+    $classSql = $classId > 0 ? ' AND s.class_id = :cid' : '';
+    $pendParams = $classId > 0 ? [':cid' => $classId] : [];
+    $pendRows = safe_db_get_all(
+        "SELECT COALESCE(c.name,'No class') AS class_name,
+                COALESCE(s.total_fees,0) AS total_fees,
+                COALESCE((SELECT SUM(fr.paid_amount) FROM fees_records fr WHERE fr.student_id = s.id),0) AS paid
+         FROM students s
+         LEFT JOIN classes c ON c.id = s.class_id
+         WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') {$duesSql} {$classSql}",
+        $pendParams
+    ) ?: [];
+    foreach ($pendRows as $pr) {
+        $due = max(0, (float) $pr['total_fees'] - (float) $pr['paid']);
+        if ($due > 0.009) {
+            $pendingNow += $due;
+            $pendingKids++;
+            $cn = (string) $pr['class_name'];
+            $pendingByClass[$cn] = ($pendingByClass[$cn] ?? 0) + $due;
+        }
+    }
+    arsort($pendingByClass);
 }
 
-/* -------------------------
-   Export CSV
-   ------------------------- */
-if ($action === 'export') {
-    $filename = 'report_' . $report . '_' . date('Ymd_His') . '.csv';
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=' . $filename);
-    $out = fopen('php://output','w');
+$admissions = 0;
+if ($hasStudents && $classId === 0) {
+    $admCol = function_exists('column_exists') && column_exists('students', 'admission_date')
+        ? 'admission_date' : 'created_at';
+    $adm = safe_db_get_one(
+        "SELECT COUNT(*) AS c FROM students
+         WHERE DATE({$admCol}) BETWEEN :from AND :to
+           AND LOWER(COALESCE(status,'active')) IN ('active','pending','inactive','alumni')",
+        [':from' => $from, ':to' => $to]
+    );
+    $admissions = (int) ($adm['c'] ?? 0);
+} elseif ($hasStudents && $classId > 0) {
+    $admCol = function_exists('column_exists') && column_exists('students', 'admission_date')
+        ? 'admission_date' : 'created_at';
+    $adm = safe_db_get_one(
+        "SELECT COUNT(*) AS c FROM students
+         WHERE DATE({$admCol}) BETWEEN :from AND :to
+           AND class_id = :cid",
+        [':from' => $from, ':to' => $to, ':cid' => $classId]
+    );
+    $admissions = (int) ($adm['c'] ?? 0);
+}
 
-    if ($report === 'daily' || $report === 'monthly') {
-        fputcsv($out, ['Day','Records','Total Paid','Total Amount']);
-        foreach ($rows as $r) {
-            fputcsv($out, [$r['day'] ?? '', $r['count_records'] ?? 0, $r['total_paid'] ?? 0, $r['total_amount'] ?? 0]);
-        }
-    } elseif ($report === 'pending_fees') {
-        fputcsv($out, ['Record ID','Student ID','Student Name','Amount','Paid Amount','Due Amount','Due Date','Status']);
-        foreach ($rows as $r) {
-            $student = trim(($r['first_name'] ?? '') . ' ' . ($r['last_name'] ?? ''));
-            fputcsv($out, [
-                $r['id'] ?? '', $r['student_id'] ?? '', $student,
-                $r['amount'] ?? '', $r['paid_amount'] ?? '', $r['due_amount'] ?? '', $r['due_date'] ?? '', $r['status'] ?? ''
-            ]);
-        }
-    } elseif ($report === 'expense_summary') {
-        fputcsv($out, ['Category','Count','Total Amount']);
-        foreach ($rows as $r) fputcsv($out, [$r['category'] ?? '', $r['cnt'] ?? 0, $r['total_amount'] ?? 0]);
+$qs = static function (array $extra = []) use ($from, $to, $classId): string {
+    $q = ['from' => $from, 'to' => $to];
+    if ($classId > 0) {
+        $q['class_id'] = $classId;
+    }
+    return http_build_query(array_merge($q, $extra));
+};
+
+if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename=accounts_report_' . $from . '_' . $to . '.csv');
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Accounts report', $from, $to]);
+    fputcsv($out, ['Fees collected', number_format($totalIn, 2, '.', ''), count($receipts) . ' receipts']);
+    fputcsv($out, ['Expenses', number_format($totalOut, 2, '.', ''), count($expenses) . ' bills']);
+    fputcsv($out, ['Leftover', number_format($net, 2, '.', '')]);
+    fputcsv($out, ['Pending now', number_format($pendingNow, 2, '.', ''), $pendingKids . ' children']);
+    fputcsv($out, ['Admissions in range', $admissions]);
+    fputcsv($out, []);
+    fputcsv($out, ['By day']);
+    fputcsv($out, ['Date', 'Receipts', 'Collected']);
+    foreach ($byDay as $d => $v) {
+        fputcsv($out, [$d, $v['n'], number_format($v['amt'], 2, '.', '')]);
+    }
+    fputcsv($out, []);
+    fputcsv($out, ['By class']);
+    fputcsv($out, ['Class', 'Collected']);
+    foreach ($byClass as $k => $v) {
+        fputcsv($out, [$k, number_format($v, 2, '.', '')]);
+    }
+    fputcsv($out, []);
+    fputcsv($out, ['How parents paid']);
+    fputcsv($out, ['Method', 'Collected']);
+    foreach ($byPay as $k => $v) {
+        fputcsv($out, [$k, number_format($v, 2, '.', '')]);
+    }
+    fputcsv($out, []);
+    fputcsv($out, ['Expenses']);
+    fputcsv($out, ['Type', 'Amount']);
+    foreach ($byCat as $k => $v) {
+        fputcsv($out, [$categoryLabels[$k] ?? $k, number_format($v, 2, '.', '')]);
+    }
+    fputcsv($out, []);
+    fputcsv($out, ['Pending now by class']);
+    fputcsv($out, ['Class', 'Pending']);
+    foreach ($pendingByClass as $k => $v) {
+        fputcsv($out, [$k, number_format($v, 2, '.', '')]);
     }
     fclose($out);
     exit;
 }
 
-/* -------------------------
-   Data for filters (classes, schools)
-   ------------------------- */
-$classList = $hasClasses ? safe_db_get_all("SELECT id, name FROM classes ORDER BY name ASC") : [];
-$schoolList = $hasSchools ? safe_db_get_all("SELECT id, name FROM schools ORDER BY name ASC") : [];
+$isPrint = isset($_GET['print']) && $_GET['print'] === '1';
+$money = static function ($v): string {
+    return function_exists('format_money') ? format_money($v) : ('₹ ' . number_format((float) $v, 2));
+};
 
-$pageTitle = 'Accounts — Reports';
 require_once __DIR__ . '/../includes/header.php';
 ?>
+<style>
+.rp-stat { border: 0; border-radius: 12px; }
+.rp-stat .n { font-size: 1.35rem; font-weight: 700; }
+.rp-in { background: #ecfdf3; }
+.rp-out { background: #fef2f2; }
+.rp-net { background: #eff6ff; }
+.rp-pend { background: #fff7ed; }
+@media print {
+  .rp-no-print, .sidebar, nav, .navbar, footer { display: none !important; }
+}
+</style>
+<?php if ($isPrint): ?>
+<script>window.addEventListener('load', function () { window.print(); });</script>
+<?php endif; ?>
 
-  <div class="card mb-3 p-3">
-    <form method="get" class="row g-2 align-items-end">
-      <input type="hidden" name="report" value="<?php echo e($report); ?>">
-      <div class="col-md-3"><label class="form-label">From</label><input type="date" name="from" class="form-control" value="<?php echo e($from); ?>"></div>
-      <div class="col-md-3"><label class="form-label">To</label><input type="date" name="to" class="form-control" value="<?php echo e($to); ?>"></div>
-      <div class="col-md-3"><label class="form-label">Class</label>
-        <select name="class_id" class="form-select">
-          <option value="">All</option>
-          <?php foreach ($classList as $c): ?><option value="<?php echo (int)$c['id']; ?>" <?php if($class_id===(int)$c['id']) echo 'selected'; ?>><?php echo e($c['name']); ?></option><?php endforeach; ?>
-        </select>
-      </div>
-      <div class="col-md-3"><label class="form-label">School</label>
-        <select name="school_id" class="form-select">
-          <option value="">All</option>
-          <?php foreach ($schoolList as $s): ?><option value="<?php echo (int)$s['id']; ?>" <?php if($school_id===(int)$s['id']) echo 'selected'; ?>><?php echo e($s['name']); ?></option><?php endforeach; ?>
-        </select>
-      </div>
-
-      <div class="col-12 text-end mt-2">
-        <button class="btn btn-primary">Generate</button>
-        <a class="btn btn-outline-secondary" href="?report=<?php echo e($report); ?>">Reset</a>
-        <a class="btn btn-success" href="?action=export&report=<?php echo urlencode($report); ?>&<?php echo http_build_query(['from'=>$from,'to'=>$to,'class_id'=>$class_id,'school_id'=>$school_id]); ?>">Export CSV</a>
-      </div>
-    </form>
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+  <div>
+    <h1 class="h4 mb-1">Money report</h1>
+    <p class="text-muted mb-0"><?php echo e(date('d M Y', strtotime($from))); ?> – <?php echo e(date('d M Y', strtotime($to))); ?>. Pick dates, then print or Excel.</p>
   </div>
-
-  <!-- Summary -->
-  <div class="row g-3 mb-3">
-    <?php if ($report === 'daily' || $report === 'monthly'): ?>
-      <div class="col-md-4">
-        <div class="summary-box">
-          <div class="small-muted">Total Paid</div>
-          <div class="h4"><?php echo e(format_money($summary['total_paid'] ?? 0)); ?></div>
-        </div>
-      </div>
-      <div class="col-md-4">
-        <div class="summary-box">
-          <div class="small-muted">Total Expected</div>
-          <div class="h4"><?php echo e(format_money($summary['total_amount'] ?? 0)); ?></div>
-        </div>
-      </div>
-      <div class="col-md-4">
-        <div class="summary-box">
-          <div class="small-muted">Days</div>
-          <div class="h4"><?php echo e((int)($summary['days'] ?? count($rows))); ?></div>
-        </div>
-      </div>
-    <?php elseif ($report === 'pending_fees'): ?>
-      <div class="col-md-4">
-        <div class="summary-box"><div class="small-muted">Total Due</div><div class="h4"><?php echo e(format_money($summary['total_due'] ?? 0)); ?></div></div>
-      </div>
-      <div class="col-md-4">
-        <div class="summary-box"><div class="small-muted">Pending Records</div><div class="h4"><?php echo e((int)($summary['count'] ?? count($rows))); ?></div></div>
-      </div>
-      <div class="col-md-4">
-        <div class="summary-box"><div class="small-muted">Filter Range</div><div class="h6"><?php echo e($from); ?> — <?php echo e($to); ?></div></div>
-      </div>
-    <?php elseif ($report === 'expense_summary'): ?>
-      <div class="col-md-4">
-        <div class="summary-box"><div class="small-muted">Total Expenses</div><div class="h4"><?php echo e(format_money($summary['total'] ?? 0)); ?></div></div>
-      </div>
-      <div class="col-md-8">
-        <div class="summary-box"><div class="small-muted">Period</div><div class="h6"><?php echo e($from); ?> — <?php echo e($to); ?></div></div>
-      </div>
-    <?php endif; ?>
+  <div class="rp-no-print d-flex flex-wrap gap-2">
+    <a class="btn btn-outline-success" href="<?php echo e($selfUrl . '?' . $qs(['export' => 'csv'])); ?>">Excel</a>
+    <a class="btn btn-outline-primary" href="<?php echo e($selfUrl . '?' . $qs(['print' => '1'])); ?>" target="_blank" rel="noopener">Print</a>
   </div>
-
-  <!-- Report table -->
-  <div class="card">
-    <div class="table-responsive">
-      <table class="table table-striped mb-0">
-        <thead>
-          <?php if ($report === 'daily' || $report === 'monthly'): ?>
-            <tr><th>Day</th><th>Records</th><th>Total Paid</th><th>Total Amount</th></tr>
-          <?php elseif ($report === 'pending_fees'): ?>
-            <tr><th>Record ID</th><th>Student</th><th>Amount</th><th>Paid</th><th>Due</th><th>Due Date</th><th>Actions</th></tr>
-          <?php elseif ($report === 'expense_summary'): ?>
-            <tr><th>Category</th><th>Count</th><th>Total Amount</th></tr>
-          <?php endif; ?>
-        </thead>
-        <tbody>
-          <?php if (empty($rows)): ?>
-            <tr><td colspan="99" class="text-center text-muted">No data available for the selected filters.</td></tr>
-          <?php else: ?>
-            <?php foreach ($rows as $r): ?>
-              <?php if ($report === 'daily' || $report === 'monthly'): ?>
-                <tr>
-                  <td><?php echo e($r['day'] ?? ''); ?></td>
-                  <td><?php echo (int)($r['count_records'] ?? 0); ?></td>
-                  <td><?php echo e(format_money($r['total_paid'] ?? 0)); ?></td>
-                  <td><?php echo e(format_money($r['total_amount'] ?? 0)); ?></td>
-                </tr>
-              <?php elseif ($report === 'pending_fees'): ?>
-                <tr>
-                  <td><?php echo (int)($r['id'] ?? 0); ?></td>
-                  <td><?php echo e(trim(($r['first_name'] ?? '') . ' ' . ($r['last_name'] ?? ''))); ?></td>
-                  <td><?php echo e(format_money($r['amount'] ?? 0)); ?></td>
-                  <td><?php echo e(format_money($r['paid_amount'] ?? 0)); ?></td>
-                  <td><?php echo e(format_money($r['due_amount'] ?? 0)); ?></td>
-                  <td><?php echo e($r['due_date'] ?? '—'); ?></td>
-                  <td>
-                    <a class="btn btn-sm btn-outline-info" href="/accounts/receipt_print.php?id=<?php echo (int)$r['id']; ?>" target="_blank">Receipt</a>
-                    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#detailModal" data-type="fee" data-id="<?php echo (int)$r['id']; ?>">View</button>
-                  </td>
-                </tr>
-              <?php elseif ($report === 'expense_summary'): ?>
-                <tr>
-                  <td><?php echo e($r['category'] ?? 'Uncategorized'); ?></td>
-                  <td><?php echo (int)($r['cnt'] ?? 0); ?></td>
-                  <td><?php echo e(format_money($r['total_amount'] ?? 0)); ?></td>
-                </tr>
-              <?php endif; ?>
-            <?php endforeach; ?>
-          <?php endif; ?>
-        </tbody>
-      </table>
-    </div>
-    <div class="p-3 small-muted">Report: <?php echo e(ucfirst(str_replace('_',' ',$report))); ?> • Range: <?php echo e($from); ?> — <?php echo e($to); ?></div>
-  </div>
-
 </div>
 
-<!-- Detail Modal for pending fees / items -->
-<div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Details</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body" id="detailModalBody"><div class="text-center text-muted">Loading…</div></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+<form method="get" class="card card-body mb-3 rp-no-print">
+  <div class="row g-2 align-items-end">
+    <div class="col-sm-6 col-md-2">
+      <label class="form-label">From</label>
+      <input type="date" name="from" class="form-control" value="<?php echo e($from); ?>">
+    </div>
+    <div class="col-sm-6 col-md-2">
+      <label class="form-label">To</label>
+      <input type="date" name="to" class="form-control" value="<?php echo e($to); ?>">
+    </div>
+    <div class="col-sm-6 col-md-3">
+      <label class="form-label">Class</label>
+      <select name="class_id" class="form-select">
+        <option value="">All classes</option>
+        <?php foreach ($classes as $c): ?>
+          <option value="<?php echo (int) $c['id']; ?>" <?php echo $classId === (int) $c['id'] ? 'selected' : ''; ?>><?php echo e((string) $c['name']); ?></option>
+        <?php endforeach; ?>
+      </select>
+    </div>
+    <div class="col-sm-6 col-md-5">
+      <button class="btn btn-primary">Show</button>
+      <a class="btn btn-outline-secondary" href="<?php echo e($selfUrl . '?preset=today'); ?>">Today</a>
+      <a class="btn btn-outline-secondary" href="<?php echo e($selfUrl . '?preset=month'); ?>">This month</a>
+      <a class="btn btn-outline-secondary" href="<?php echo e($selfUrl . '?preset=last'); ?>">Last month</a>
+      <a class="btn btn-outline-secondary" href="<?php echo e($selfUrl . '?preset=year'); ?>">This year</a>
+    </div>
+  </div>
+</form>
+
+<p class="small text-muted rp-no-print mb-3">
+  Day-by-day list → <a href="<?php echo e($dailyUrl); ?>">Daily Collection</a>
+  · Month snapshot → <a href="<?php echo e($monthUrl); ?>">Monthly Summary</a>
+  · Who still owes → <a href="<?php echo e($pendingUrl); ?>">Pending Fees</a>
+  · Bills → <a href="<?php echo e($expUrl); ?>">Expenses</a>
+  · Take payment → <a href="<?php echo e($collectUrl); ?>">Collect Fees</a>
+</p>
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    <div class="card rp-stat rp-in p-3 h-100">
+      <div class="small text-muted">Fees collected</div>
+      <div class="n text-success"><?php echo e($money($totalIn)); ?></div>
+      <div class="small"><?php echo count($receipts); ?> receipts</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card rp-stat rp-out p-3 h-100">
+      <div class="small text-muted">Expenses</div>
+      <div class="n text-danger"><?php echo e($money($totalOut)); ?></div>
+      <div class="small"><?php echo count($expenses); ?> bills</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card rp-stat rp-net p-3 h-100">
+      <div class="small text-muted"><?php echo $net >= 0 ? 'Leftover' : 'Short'; ?></div>
+      <div class="n <?php echo $net >= 0 ? 'text-primary' : 'text-danger'; ?>"><?php echo e($money($net)); ?></div>
+      <div class="small text-muted">Fees minus expenses</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card rp-stat rp-pend p-3 h-100">
+      <div class="small text-muted">Still pending now</div>
+      <div class="n"><?php echo e($money($pendingNow)); ?></div>
+      <div class="small"><?php echo (int) $pendingKids; ?> children · <?php echo (int) $admissions; ?> admissions in this range</div>
     </div>
   </div>
 </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  var modal = document.getElementById('detailModal');
-  if (!modal) return;
-  modal.addEventListener('show.bs.modal', function(event){
-    var btn = event.relatedTarget;
-    var id = btn.getAttribute('data-id');
-    var type = btn.getAttribute('data-type'); // 'fee' etc
-    var body = document.getElementById('detailModalBody');
-    body.innerHTML = '<div class="text-center text-muted">Loading…</div>';
-    if (!id) { body.innerHTML = '<div class="text-danger">Invalid id</div>'; return; }
-
-    var url = '';
-    if (type === 'fee') url = '/accounts/receipt_print.php?id=' + encodeURIComponent(id);
-    else url = '?action=view&id=' + encodeURIComponent(id);
-
-    // For receipts, open as fragment via fetch; receipt_print outputs full HTML; we'll load via fetch and wrap
-    fetch(url, { credentials: 'same-origin' })
-      .then(function(resp){ return resp.ok ? resp.text() : Promise.reject(); })
-      .then(function(html){ body.innerHTML = html; })
-      .catch(function(){ body.innerHTML = '<div class="text-danger">Failed to load details.</div>'; });
-  });
-});
-</script>
+<div class="row g-3 mb-3">
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header bg-white fw-semibold">Collected by day</div>
+      <div class="table-responsive" style="max-height:320px">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Date</th><th class="text-end">Receipts</th><th class="text-end">Amount</th></tr></thead>
+          <tbody>
+          <?php if ($byDay === []): ?>
+            <tr><td colspan="3" class="text-muted p-3">No fees in this range.</td></tr>
+          <?php else: foreach ($byDay as $d => $v): ?>
+            <tr>
+              <td><?php echo e(date('d M Y', strtotime((string) $d))); ?></td>
+              <td class="text-end"><?php echo (int) $v['n']; ?></td>
+              <td class="text-end"><?php echo e($money($v['amt'])); ?></td>
+            </tr>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header bg-white fw-semibold">Collected by class</div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <tbody>
+          <?php if ($byClass === []): ?>
+            <tr><td class="text-muted p-3">No collections.</td></tr>
+          <?php else: foreach ($byClass as $k => $v): ?>
+            <tr><td><?php echo e($k); ?></td><td class="text-end"><?php echo e($money($v)); ?></td></tr>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header bg-white fw-semibold">How parents paid</div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <tbody>
+          <?php if ($byPay === []): ?>
+            <tr><td class="text-muted p-3">No payments.</td></tr>
+          <?php else: foreach ($byPay as $k => $v): ?>
+            <tr><td><?php echo e($k); ?></td><td class="text-end"><?php echo e($money($v)); ?></td></tr>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header bg-white fw-semibold">Where money went</div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <tbody>
+          <?php if ($byCat === []): ?>
+            <tr><td class="text-muted p-3">No expenses in this range.</td></tr>
+          <?php else: foreach ($byCat as $k => $v): ?>
+            <tr><td><?php echo e($categoryLabels[$k] ?? $k); ?></td><td class="text-end"><?php echo e($money($v)); ?></td></tr>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header bg-white fw-semibold">Pending now by class</div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <tbody>
+          <?php if ($pendingByClass === []): ?>
+            <tr><td class="text-muted p-3">Nobody owes fees.</td></tr>
+          <?php else: foreach ($pendingByClass as $k => $v): ?>
+            <tr><td><?php echo e($k); ?></td><td class="text-end"><?php echo e($money($v)); ?></td></tr>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
 
 <?php
 require_once __DIR__ . '/../includes/footer.php';
-?>
