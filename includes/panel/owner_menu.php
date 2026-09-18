@@ -39,7 +39,6 @@ function owner_panel_menu(): array
                 ['url' => $accounts . '/fees_collection.php', 'icon' => 'bi-cash-coin', 'label' => 'Collect Fees', 'match' => 'fees_collection'],
                 ['url' => $owner . '/pending_fees.php', 'icon' => 'bi-clock-history', 'label' => 'Pending Fees', 'match' => 'pending_fees'],
                 ['url' => $owner . '/daily_collection.php', 'icon' => 'bi-calendar-day', 'label' => 'Daily Collection', 'match' => 'daily_collection'],
-                ['url' => $accounts . '/invoices.php', 'icon' => 'bi-receipt-cutoff', 'label' => 'Invoices', 'match' => 'invoices'],
                 ['url' => $owner . '/expense.php', 'icon' => 'bi-graph-down-arrow', 'label' => 'Expenses', 'match' => 'expense'],
                 ['url' => $owner . '/monthly_summary.php', 'icon' => 'bi-calendar-check', 'label' => 'Monthly Summary', 'match' => 'monthly_summary'],
                 ['url' => $owner . '/fees_setup.php', 'icon' => 'bi-sliders', 'label' => 'Fees Setup', 'match' => 'fees_setup'],

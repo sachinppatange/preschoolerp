@@ -127,7 +127,6 @@ require_once __DIR__ . '/../includes/header.php';
           ['../accounts/pending_fees.php','bi-clock-history','Pending Fees'],
           ['../accounts/monthly_summary.php','bi-calendar-check','Monthly Summary'],
           ['../accounts/expenses.php','bi-wallet2','Expenses'],
-          ['../accounts/invoices.php','bi-receipt','Invoices'],
           ['../accounts/reports.php','bi-bar-chart-line','Reports'],
           // Added Fees Collection button that points to demopreschoolapp path as requested
           ['../accounts/fees_collection.php','bi-receipt','Fees Collection']
@@ -180,17 +179,6 @@ require_once __DIR__ . '/../includes/header.php';
             <div class="h5 mb-1"><?php echo e(format_money($metrics['pendingFees'])); ?></div>
             <div class="small-muted">Total due</div>
             <div class="mt-2"><a href="<?php echo e((site_url('/accounts/pending_fees.php'))); ?>" class="btn btn-sm btn-outline-warning w-100 btn-compact">View</a></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-6 col-md-4 col-lg-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Due Invoices</div>
-            <div class="h5 mb-1"><?php echo e(number_format($metrics['dueInvoices'])); ?></div>
-            <div class="small-muted">Overdue / due</div>
-            <div class="mt-2"><a href="<?php echo e((site_url('/accounts/invoices.php'))); ?>" class="btn btn-sm btn-outline-secondary w-100 btn-compact">Invoices</a></div>
           </div>
         </div>
       </div>

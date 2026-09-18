@@ -15,7 +15,6 @@ function accounts_panel_menu(): array
             ['url' => $base . '/fees_collection.php', 'icon' => 'bi-cash-coin', 'label' => 'Collect Fees', 'match' => 'fees_collection'],
             ['url' => $base . '/pending_fees.php', 'icon' => 'bi-clock-history', 'label' => 'Pending Fees', 'match' => 'pending_fees'],
             ['url' => $base . '/daily_collection.php', 'icon' => 'bi-calendar-day', 'label' => 'Daily Collection', 'match' => 'daily_collection'],
-            ['url' => $base . '/invoices.php', 'icon' => 'bi-receipt', 'label' => 'Invoices', 'match' => 'invoices'],
         ]],
         ['section' => 'Finance', 'items' => [
             ['url' => $base . '/expenses.php', 'icon' => 'bi-graph-down-arrow', 'label' => 'Expenses', 'match' => 'expenses'],
