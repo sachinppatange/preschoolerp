@@ -20,3 +20,13 @@ CREATE TABLE IF NOT EXISTS `whatsapp_messages` (
   KEY `idx_wa_phone` (`phone`,`created_at`),
   KEY `idx_wa_dir` (`direction`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `whatsapp_events` (
+  `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `kind` varchar(32) NOT NULL,
+  `phone` varchar(32) DEFAULT NULL,
+  `detail` varchar(255) NOT NULL DEFAULT '',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_wa_ev_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

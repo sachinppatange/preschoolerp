@@ -55,6 +55,7 @@ if ($appSecret !== '') {
     $computed = hash_hmac('sha256', $rawBody, $appSecret);
     if ($sig === '' || !hash_equals($computed, $sig)) {
         whatsapp_log('webhook_signature_invalid', ['ip' => $_SERVER['REMOTE_ADDR'] ?? '']);
+        wa_inbox_event('error', '', 'Webhook signature failed');
         http_response_code(403);
         echo 'Invalid signature';
         exit;

@@ -269,6 +269,7 @@ function wa_inbox_send_text(string $toPhone, string $body, bool $isBot = false):
     if (is_array($resp)) {
         $waId = (string) ($resp['messages'][0]['id'] ?? '');
     }
+    $err = $ok ? null : wa_inbox_api_error($resp, (string) ($res['error'] ?? 'Send failed'));
     wa_inbox_save([
         'direction' => 'out',
         'phone' => $phone,
@@ -279,9 +280,10 @@ function wa_inbox_send_text(string $toPhone, string $body, bool $isBot = false):
         'is_bot' => $isBot,
         'raw_json' => is_array($resp) ? json_encode($resp) : null,
     ]);
+    wa_inbox_event($ok ? ($isBot ? 'bot' : 'out') : 'error', $phone, $ok ? $body : (string) $err);
     return [
         'ok' => $ok,
-        'error' => $ok ? null : (string) ($res['error'] ?? 'Send failed'),
+        'error' => $err,
         'wa_message_id' => $waId,
     ];
 }
@@ -303,6 +305,7 @@ function wa_inbox_handle_incoming(array $message, array $settings, string $profi
         'created_at' => $ts,
         'raw_json' => $message,
     ]);
+    wa_inbox_event('in', $from, $body !== '' ? $body : ('[' . (string) ($message['type'] ?? 'message') . ']'));
     if (empty($settings['autobot']) || $from === '' || $body === '') {
         return;
     }
@@ -453,4 +456,202 @@ function wa_inbox_ticks(string $status): string
         return 'sent';
     }
     return 'sent';
+}
+
+function wa_inbox_ensure_events(): void
+{
+    static $done = false;
+    if ($done || !function_exists('db_execute')) {
+        return;
+    }
+    $done = true;
+    try {
+        db_execute("CREATE TABLE IF NOT EXISTS whatsapp_events (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            kind VARCHAR(32) NOT NULL,
+            phone VARCHAR(32) DEFAULT NULL,
+            detail VARCHAR(255) NOT NULL DEFAULT '',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_wa_ev_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    } catch (Throwable $e) {
+        $done = false;
+    }
+}
+
+function wa_inbox_event(string $kind, string $phone, string $detail): void
+{
+    wa_inbox_ensure_events();
+    $phone = $phone !== '' ? wa_inbox_phone($phone) : '';
+    $detail = trim($detail);
+    if (function_exists('mb_substr')) {
+        $detail = mb_substr($detail, 0, 240);
+    } else {
+        $detail = substr($detail, 0, 240);
+    }
+    try {
+        db_execute(
+            'INSERT INTO whatsapp_events (kind, phone, detail, created_at) VALUES (?, ?, ?, ?)',
+            [$kind, $phone !== '' ? $phone : null, $detail, date('Y-m-d H:i:s')]
+        );
+    } catch (Throwable $e) {
+        // ignore
+    }
+}
+
+function wa_inbox_events(int $limit = 40): array
+{
+    wa_inbox_ensure_events();
+    $limit = max(1, min(100, $limit));
+    try {
+        return db_fetch_all(
+            "SELECT id, kind, phone, detail, created_at FROM whatsapp_events ORDER BY id DESC LIMIT {$limit}"
+        ) ?: [];
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+function wa_inbox_api_error($resp, string $fallback): string
+{
+    if (!is_array($resp) || !isset($resp['error'])) {
+        return $fallback !== '' ? $fallback : 'Could not send message.';
+    }
+    $err = is_array($resp['error']) ? $resp['error'] : [];
+    $code = (int) ($err['code'] ?? 0);
+    $msg = trim((string) ($err['error_user_msg'] ?? $err['message'] ?? ''));
+    $blob = strtolower($msg . ' ' . (string) ($err['error_data']['details'] ?? ''));
+    if ($code === 131047 || str_contains($blob, '24 hour') || str_contains($blob, 're-engagement')) {
+        return 'Parent must message first. After their WhatsApp message, you can reply here for 24 hours.';
+    }
+    if ($code === 131026) {
+        return 'Message not delivered. The number may not have WhatsApp.';
+    }
+    return $msg !== '' ? $msg : $fallback;
+}
+
+function wa_inbox_label(string $phone, ?string $hint = null): string
+{
+    $phone = wa_inbox_phone($phone);
+    $hint = trim((string) $hint);
+    if ($hint !== '') {
+        return $hint;
+    }
+    if ($phone === '') {
+        return 'Unknown';
+    }
+    try {
+        $row = db_fetch_one(
+            "SELECT contact_name FROM whatsapp_messages
+             WHERE phone = ? AND contact_name IS NOT NULL AND contact_name <> ''
+             ORDER BY id DESC LIMIT 1",
+            [$phone]
+        );
+        $waName = trim((string) ($row['contact_name'] ?? ''));
+        if ($waName !== '') {
+            return $waName;
+        }
+    } catch (Throwable $e) {
+        // ignore
+    }
+    $user = wa_inbox_contact_name($phone);
+    return $user !== '' ? $user : wa_inbox_display_phone($phone);
+}
+
+function wa_inbox_chat_dto(array $c): array
+{
+    $phone = wa_inbox_phone((string) ($c['phone'] ?? ''));
+    $name = wa_inbox_label($phone, (string) ($c['contact_name'] ?? ''));
+    $body = trim((string) ($c['last_body'] ?? ''));
+    if ($body === '') {
+        $body = 'Message';
+    }
+    if (($c['last_dir'] ?? '') === 'out') {
+        $body = 'You: ' . $body;
+    }
+    return [
+        'phone' => $phone,
+        'name' => $name,
+        'initials' => wa_inbox_initials($name),
+        'last_body' => $body,
+        'last_at' => (string) ($c['last_at'] ?? ''),
+        'when' => wa_inbox_when((string) ($c['last_at'] ?? '')),
+        'unread' => (int) ($c['unread'] ?? 0),
+        'last_dir' => (string) ($c['last_dir'] ?? ''),
+    ];
+}
+
+function wa_inbox_msg_dto(array $m): array
+{
+    $dir = ($m['direction'] ?? '') === 'out' ? 'out' : 'in';
+    $status = (string) ($m['status'] ?? '');
+    return [
+        'id' => (int) ($m['id'] ?? 0),
+        'dir' => $dir,
+        'body' => (string) ($m['body'] ?? ''),
+        'bot' => !empty($m['is_bot']),
+        'status' => $status,
+        'ticks' => $dir === 'out' ? wa_inbox_ticks($status) : '',
+        'time' => wa_inbox_clock((string) ($m['created_at'] ?? '')),
+        'created_at' => (string) ($m['created_at'] ?? ''),
+    ];
+}
+
+function wa_inbox_event_dto(array $e): array
+{
+    $kind = (string) ($e['kind'] ?? '');
+    $label = match ($kind) {
+        'in' => 'Incoming',
+        'out' => 'Sent',
+        'bot' => 'Auto reply',
+        'status' => 'Status',
+        'webhook' => 'Webhook',
+        'error' => 'Error',
+        default => $kind,
+    };
+    return [
+        'id' => (int) ($e['id'] ?? 0),
+        'kind' => $kind,
+        'label' => $label,
+        'phone' => wa_inbox_display_phone((string) ($e['phone'] ?? '')),
+        'detail' => (string) ($e['detail'] ?? ''),
+        'when' => wa_inbox_when((string) ($e['created_at'] ?? '')),
+        'created_at' => (string) ($e['created_at'] ?? ''),
+    ];
+}
+
+function wa_inbox_sync_payload(string $phone, bool $markRead = false): array
+{
+    $phone = wa_inbox_phone($phone);
+    $chats = array_map('wa_inbox_chat_dto', wa_inbox_conversations(120));
+    if ($phone === '' && $chats !== []) {
+        $phone = (string) ($chats[0]['phone'] ?? '');
+    }
+    if ($markRead && $phone !== '') {
+        wa_inbox_mark_read($phone);
+        $chats = array_map('wa_inbox_chat_dto', wa_inbox_conversations(120));
+    }
+    $messages = $phone !== '' ? array_map('wa_inbox_msg_dto', wa_inbox_thread($phone)) : [];
+    $events = array_map('wa_inbox_event_dto', wa_inbox_events(30));
+    $lastAt = $events[0]['created_at'] ?? '';
+    if ($messages !== []) {
+        $lastAt = max($lastAt, (string) ($messages[array_key_last($messages)]['created_at'] ?? ''));
+    }
+    $live = $lastAt !== '' && (time() - (int) strtotime($lastAt)) < 600;
+    $unread = 0;
+    foreach ($chats as $c) {
+        $unread += (int) ($c['unread'] ?? 0);
+    }
+    return [
+        'ok' => true,
+        'phone' => $phone,
+        'name' => $phone !== '' ? wa_inbox_label($phone) : '',
+        'display_phone' => $phone !== '' ? wa_inbox_display_phone($phone) : '',
+        'chats' => $chats,
+        'messages' => $messages,
+        'events' => $events,
+        'live' => $live,
+        'unread' => $unread,
+    ];
 }
