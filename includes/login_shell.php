@@ -38,6 +38,6 @@ if (empty($login_back_url)) {
   <title><?php echo htmlspecialchars($login_title . ' — ' . $appName); ?></title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <link href="<?php echo htmlspecialchars($base); ?>/assets/css/login.css" rel="stylesheet">
+  <link href="<?php echo htmlspecialchars($base); ?>/assets/css/login.css?v=20260919" rel="stylesheet">
 </head>
 <body class="login-page">

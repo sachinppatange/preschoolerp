@@ -124,49 +124,84 @@ body.login-page {
 
 /* Hub page (login.php) */
 .login-hub {
-  max-width: 960px;
+  max-width: 420px;
   margin: 0 auto;
-  padding: 2rem 1rem;
+  padding: 2.5rem 1rem;
 }
 .login-hub-card {
   background: var(--ps-surface);
   border-radius: var(--ps-radius-lg);
   box-shadow: var(--ps-shadow);
-  padding: 2rem;
+  padding: 1.75rem 1.5rem 1.5rem;
   border: 1px solid var(--ps-border);
 }
-.login-hub .btn-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 14px;
-  margin-top: 1.25rem;
-}
-.login-hub .ps-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 1rem 1.1rem;
-  border-radius: var(--ps-radius);
-  font-weight: 800;
-  text-decoration: none;
+.login-hub-card .logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  object-fit: cover;
   box-shadow: var(--ps-shadow-sm);
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
-  border: none;
-  font-size: 0.95rem;
+  margin-bottom: 0.75rem;
 }
-.login-hub .ps-btn:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--ps-shadow);
+.login-hub-card h1 {
+  font-family: var(--ps-font-display);
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 0 0 0.2rem;
+}
+.login-hub-parent {
+  display: block;
+  text-align: center;
   text-decoration: none;
-  color: inherit;
+  color: #fff !important;
+  background: linear-gradient(135deg, var(--ps-coral), var(--ps-coral-dark));
+  border-radius: var(--ps-radius);
+  padding: 1.1rem 1rem;
+  box-shadow: 0 8px 20px rgba(255, 107, 138, 0.28);
 }
-.login-hub .ps-pink   { background: linear-gradient(135deg, #ffb3c6, #ff95b8); color: #3b1b2b; }
-.login-hub .ps-blue   { background: linear-gradient(135deg, #a7d8ff, #7fc8ff); color: #07304a; }
-.login-hub .ps-yellow { background: linear-gradient(135deg, #fff2a6, #ffe67a); color: #4a3b00; }
-.login-hub .ps-green  { background: linear-gradient(135deg, #b7f3c6, #8ff0a6); color: #05321a; }
-.login-hub .ps-purple { background: linear-gradient(135deg, #d6b3ff, #c99bff); color: #2e0f44; }
-.login-hub .ps-orange { background: linear-gradient(135deg, #ffd8b3, #ffc27a); color: #3b2300; }
+.login-hub-parent:hover {
+  color: #fff !important;
+  filter: brightness(1.03);
+}
+.login-hub-parent-title {
+  display: block;
+  font-weight: 800;
+  font-size: 1.15rem;
+}
+.login-hub-parent-sub {
+  display: block;
+  font-size: 0.85rem;
+  opacity: 0.92;
+  margin-top: 0.2rem;
+}
+.login-hub-staff-label {
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ps-ink-muted);
+  margin: 1.35rem 0 0.6rem;
+}
+.login-hub-staff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.login-hub-staff a {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  font-weight: 700;
+  color: var(--ps-ink);
+  background: #f8fafc;
+  border: 1px solid var(--ps-border);
+  border-radius: var(--ps-radius-sm);
+  padding: 0.7rem 0.5rem;
+}
+.login-hub-staff a:hover {
+  background: #fff0f3;
+  border-color: #fecdd3;
+  color: var(--ps-coral-dark);
+}
 
 @media (max-width: 520px) {
   .login-card-body { padding: 1.25rem; }
