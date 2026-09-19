@@ -11,5 +11,5 @@ require_once __DIR__ . '/../includes/features/feature_run.php';
 
 feature_run('content_facilities', [
     'panel' => 'owner',
-    'page_title' => 'Facilities',
+    'page_title' => 'Facilities & classes',
 ]);

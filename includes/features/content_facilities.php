@@ -1,254 +1,338 @@
 <?php
 /**
- * Shared feature: content_facilities
- * Loaded via feature_run() after panel_bootstrap().
+ * Website facilities and classes offered (what parents see).
  */
 declare(strict_types=1);
 
 require_once __DIR__ . '/../cms/helpers.php';
 
 $cfg = $GLOBALS['FEATURE_CONFIG'] ?? [];
-$panel = (string)($cfg['panel'] ?? 'owner');
-$pageTitle = (string)($cfg['page_title'] ?? 'Facilities');
+$pageTitle = (string) ($cfg['page_title'] ?? 'Facilities & classes');
+$page_title = $pageTitle;
+$csrf = function_exists('get_csrf_token') ? get_csrf_token() : '';
 
-/* -------------------------
-   JSON helper
-   ------------------------- */
-
-/* -------------------------
-   Load school row
-   ------------------------- */
-$school = safe_db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id' => 1]) ?: [];
-
-/* current values */
-$current_facilities = cms_decode_json_field($school['facilities'] ?? null);
-$current_classes = cms_decode_json_field($school['classes_offered'] ?? null);
-
-/* prepare simple text versions for textareas */
-$facilities_lines = '';
-if (!empty($current_facilities) && is_array($current_facilities)) {
-    $facilities_lines = implode("\n", $current_facilities);
-}
-$classes_lines = '';
-$classes_json_text = '';
-if (!empty($current_classes) && is_array($current_classes)) {
-    $parts = [];
-    foreach ($current_classes as $c) {
-        $parts[] = (($c['name'] ?? '') . '|' . ($c['age'] ?? '') . '|' . (isset($c['fees']) ? $c['fees'] : ''));
+$normFac = static function (mixed $item): array {
+    if (is_string($item)) {
+        $t = trim($item);
+        return ['title' => $t, 'description' => ''];
     }
-    $classes_lines = implode("\n", $parts);
-    $classes_json_text = json_encode($current_classes, JSON_UNESCAPED_UNICODE);
+    if (!is_array($item)) {
+        return ['title' => '', 'description' => ''];
+    }
+    $title = trim((string) ($item['title'] ?? $item['name'] ?? ''));
+    $desc = trim((string) ($item['description'] ?? $item['desc'] ?? ''));
+    return ['title' => $title, 'description' => $desc];
+};
+
+$normClass = static function (mixed $item): array {
+    if (!is_array($item)) {
+        return ['name' => '', 'age' => '', 'fees' => ''];
+    }
+    $fees = $item['fees'] ?? '';
+    if ($fees === null || $fees === false) {
+        $fees = '';
+    } elseif (is_numeric($fees)) {
+        $fees = (string) (abs((float) $fees - (int) $fees) < 0.001 ? (int) $fees : $fees);
+    } else {
+        $fees = trim((string) $fees);
+    }
+    return [
+        'name' => trim((string) ($item['name'] ?? '')),
+        'age' => trim((string) ($item['age'] ?? '')),
+        'fees' => $fees,
+    ];
+};
+
+$school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => 1]) ?: [];
+$facilities = [];
+foreach (cms_decode_json_field($school['facilities'] ?? null) as $f) {
+    $row = $normFac($f);
+    if ($row['title'] !== '' || $row['description'] !== '') {
+        $facilities[] = $row;
+    }
+}
+$classes = [];
+foreach (cms_decode_json_field($school['classes_offered'] ?? null) as $c) {
+    $row = $normClass($c);
+    if ($row['name'] !== '') {
+        $classes[] = $row;
+    }
+}
+if ($facilities === []) {
+    $facilities = [
+        ['title' => '', 'description' => ''],
+        ['title' => '', 'description' => ''],
+    ];
+}
+if ($classes === []) {
+    $classes = [
+        ['name' => '', 'age' => '', 'fees' => ''],
+        ['name' => '', 'age' => '', 'fees' => ''],
+    ];
 }
 
-/* -------------------------
-   Handle POST
-   ------------------------- */
 $errors = [];
 $success = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_facilities') {
-    // Facilities: from textarea (one per line) OR from tag-style JS input (same field)
-    $fac_input = trim((string)($_POST['facilities_lines'] ?? ''));
-    $fac_items = [];
-    if ($fac_input !== '') {
-        $lines = preg_split('/\r\n|\r|\n/', $fac_input);
-        foreach ($lines as $ln) {
-            $ln = trim($ln);
-            if ($ln !== '') $fac_items[] = $ln;
-        }
-    }
-
-    // Classes: prefer JSON if provided, otherwise parse lines "Name|Age|Fees"
-    $classes_json_input = trim((string)($_POST['classes_json'] ?? ''));
-    $classes_lines_input = trim((string)($_POST['classes_lines'] ?? ''));
-
-    $classes_arr = [];
-    if ($classes_json_input !== '') {
-        $decoded = json_decode($classes_json_input, true);
-        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-            $classes_arr = $decoded;
-        } else {
-            $errors[] = 'Classes JSON is invalid. Provide valid JSON or use the simple lines format.';
-        }
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'save_facilities') {
+    if (function_exists('validate_csrf_token') && !validate_csrf_token((string) ($_POST['csrf'] ?? ''))) {
+        $errors[] = 'Please reload the page and try again.';
     } else {
-        if ($classes_lines_input !== '') {
-            $lines = preg_split('/\r\n|\r|\n/', $classes_lines_input);
-            foreach ($lines as $ln) {
-                $ln = trim($ln);
-                if ($ln === '') continue;
-                $parts = array_map('trim', explode('|', $ln));
-                $name = $parts[0] ?? '';
-                $age  = $parts[1] ?? '';
-                $fees = isset($parts[2]) ? (float)$parts[2] : null;
-                if ($name !== '') $classes_arr[] = ['name'=>$name, 'age'=>$age, 'fees'=>$fees];
+        $facTitles = $_POST['fac_title'] ?? [];
+        $facDescs = $_POST['fac_desc'] ?? [];
+        $newFac = [];
+        if (is_array($facTitles)) {
+            foreach ($facTitles as $i => $t) {
+                $row = $normFac([
+                    'title' => $t,
+                    'description' => is_array($facDescs) ? ($facDescs[$i] ?? '') : '',
+                ]);
+                if ($row['title'] === '' && $row['description'] === '') {
+                    continue;
+                }
+                $newFac[] = $row;
+            }
+        }
+
+        $clsNames = $_POST['class_name'] ?? [];
+        $clsAges = $_POST['class_age'] ?? [];
+        $clsFees = $_POST['class_fees'] ?? [];
+        $newCls = [];
+        if (is_array($clsNames)) {
+            foreach ($clsNames as $i => $n) {
+                $feesRaw = is_array($clsFees) ? trim((string) ($clsFees[$i] ?? '')) : '';
+                $feesVal = null;
+                if ($feesRaw !== '') {
+                    $feesVal = (float) preg_replace('/[^\d.]/', '', $feesRaw);
+                }
+                $row = $normClass([
+                    'name' => $n,
+                    'age' => is_array($clsAges) ? ($clsAges[$i] ?? '') : '',
+                    'fees' => $feesVal,
+                ]);
+                if ($row['name'] === '') {
+                    continue;
+                }
+                $newCls[] = [
+                    'name' => $row['name'],
+                    'age' => $row['age'],
+                    'fees' => $feesVal,
+                ];
+            }
+        }
+
+        if ($errors === []) {
+            $facJson = json_encode($newFac, JSON_UNESCAPED_UNICODE);
+            $clsJson = json_encode($newCls, JSON_UNESCAPED_UNICODE);
+            $ok = false;
+            if ($school !== []) {
+                $ok = (bool) safe_db_run(
+                    'UPDATE schools SET facilities = :fac, classes_offered = :classes, updated_at = NOW() WHERE id = 1',
+                    [':fac' => $facJson, ':classes' => $clsJson]
+                );
+            } else {
+                $defaultName = defined('APP_NAME') ? (string) APP_NAME : 'Preschool';
+                $ok = (bool) safe_db_run(
+                    'INSERT INTO schools (id, name, facilities, classes_offered, created_at, updated_at)
+                     VALUES (1, :name, :fac, :classes, NOW(), NOW())',
+                    [':name' => $defaultName, ':fac' => $facJson, ':classes' => $clsJson]
+                );
+            }
+            if ($ok) {
+                $success = 'Saved. Parents will see this on the website.';
+                $school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => 1]) ?: $school;
+                $facilities = [];
+                foreach (cms_decode_json_field($school['facilities'] ?? null) as $f) {
+                    $row = $normFac($f);
+                    if ($row['title'] !== '' || $row['description'] !== '') {
+                        $facilities[] = $row;
+                    }
+                }
+                $classes = [];
+                foreach (cms_decode_json_field($school['classes_offered'] ?? null) as $c) {
+                    $row = $normClass($c);
+                    if ($row['name'] !== '') {
+                        $classes[] = $row;
+                    }
+                }
+                if ($facilities === []) {
+                    $facilities = [['title' => '', 'description' => '']];
+                }
+                if ($classes === []) {
+                    $classes = [['name' => '', 'age' => '', 'fees' => '']];
+                }
+            } else {
+                $errors[] = 'Could not save. Try again.';
             }
         }
     }
-
-    if (empty($errors)) {
-        $fac_json = json_encode($fac_items, JSON_UNESCAPED_UNICODE);
-        $classes_json = json_encode($classes_arr, JSON_UNESCAPED_UNICODE);
-
-        // Update if row exists, else insert with minimal default name
-        if (!empty($school)) {
-            $ok = safe_db_run("UPDATE schools SET facilities = :fac, classes_offered = :classes, updated_at = NOW() WHERE id = 1", [
-                ':fac' => $fac_json,
-                ':classes' => $classes_json
-            ]);
-        } else {
-            $default_name = 'Pioneer Play School';
-            $ok = safe_db_run("INSERT INTO schools (id, name, facilities, classes_offered, created_at, updated_at) VALUES (1, :name, :fac, :classes, NOW(), NOW())", [
-                ':name' => $default_name,
-                ':fac' => $fac_json,
-                ':classes' => $classes_json
-            ]);
-        }
-
-        if ($ok) {
-            $success = 'Facilities and classes saved.';
-            $school = safe_db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id' => 1]) ?: $school;
-            $current_facilities = cms_decode_json_field($school['facilities'] ?? null);
-            $current_classes = cms_decode_json_field($school['classes_offered'] ?? null);
-            // refresh textareas
-            $facilities_lines = implode("\n", $current_facilities);
-            $parts = [];
-            foreach ($current_classes as $c) $parts[] = (($c['name'] ?? '') . '|' . ($c['age'] ?? '') . '|' . (isset($c['fees']) ? $c['fees'] : ''));
-            $classes_lines = implode("\n", $parts);
-            $classes_json_text = json_encode($current_classes, JSON_UNESCAPED_UNICODE);
-        } else {
-            $errors[] = 'Database error while saving.';
-        }
-    }
 }
-$pageTitle = (string)($cfg['page_title'] ?? 'Facilities');
+
+$publicFac = function_exists('site_url') ? site_url('/#facilities') : '/#facilities';
+$inr = static function ($n): string {
+    if ($n === '' || $n === null) {
+        return '';
+    }
+    $f = (float) $n;
+    if ($f <= 0) {
+        return '';
+    }
+    return function_exists('format_money') ? format_money($f) : ('₹ ' . number_format($f, 0));
+};
+
 require_once __DIR__ . '/../header.php';
 ?>
+<style>
+.fc-hero { background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:16px 18px; margin-bottom:14px; }
+.fc-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:16px 18px; margin-bottom:12px; }
+.fc-sec { font-size:.75rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:#94a3b8; margin-bottom:10px; }
+.fc-row { border:1px dashed #dbe7fb; border-radius:14px; padding:12px; margin-bottom:8px; background:#f8fafc; }
+.fc-preview { background:#f8fafc; border-radius:14px; padding:14px; }
+.fc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:8px; }
+.fc-tile { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:10px; }
+.fc-bar { position:sticky; bottom:0; background:#fff; border-top:1px solid #dbe7fb; padding:10px 0; z-index:2; }
+</style>
 
-<?php if ($success): ?><div class="alert alert-success"><?php echo e($success); ?></div><?php endif; ?>
-  <?php if (!empty($errors)): ?><div class="alert alert-danger"><ul><?php foreach ($errors as $err) echo '<li>' . e($err) . '</li>'; ?></ul></div><?php endif; ?>
-
-  <form method="post" class="card p-3" id="facForm">
-    <input type="hidden" name="action" value="save_facilities">
-
-    <div class="mb-3">
-      <label class="form-label">Facilities / Activities (one per line)</label>
-      <textarea name="facilities_lines" id="facilities_lines" class="form-control" rows="6" placeholder="Art & Craft"><?php echo e($facilities_lines); ?></textarea>
-      <div class="form-text">Enter one facility per line. You can also use the tag UI below to add/remove quickly.</div>
-    </div>
-
-    <div class="mb-3">
-      <label class="form-label">Quick Edit (tags)</label>
-      <div id="facTags" class="mb-2">
-        <?php foreach ($current_facilities as $f): ?>
-          <span class="tag"><?php echo e($f); ?> <a class="remove" data-value="<?php echo e($f); ?>">✖</a></span>
-        <?php endforeach; ?>
-      </div>
-      <div class="input-group mb-2">
-        <input id="facInput" class="form-control" placeholder="Add facility and press Add">
-        <button type="button" id="addFacBtn" class="btn btn-outline-primary">Add</button>
-      </div>
-      <div class="form-text">Adding/removing tags will sync to the textarea when you Save.</div>
-    </div>
-
-    <hr>
-
-    <h5>Classes Offered</h5>
-    <p class="small text-muted">Either provide JSON (preferred) or use simple lines: Name|Age|Fees</p>
-
-    <div class="mb-3">
-      <label class="form-label">Classes (JSON)</label>
-      <textarea name="classes_json" class="form-control" rows="6" placeholder='[{"name":"Nursery","age":"2.5-3.5","fees":3500}]'><?php echo e($classes_json_text); ?></textarea>
-    </div>
-
-    <div class="mb-3">
-      <label class="form-label">Or Classes (lines: Name|Age|Fees)</label>
-      <textarea name="classes_lines" class="form-control" rows="6" placeholder="Nursery|2.5-3.5|3500"><?php echo e($classes_lines); ?></textarea>
-    </div>
-
-    <div class="mt-3">
-      <button class="btn btn-primary">Save Facilities & Classes</button>
-      
-    </div>
-  </form>
-
-  <?php if (!empty($current_classes)): ?>
-    <div class="card mt-4 p-3">
-      <h5>Preview: Classes Offered</h5>
-      <div class="row g-2">
-        <?php foreach ($current_classes as $c): ?>
-          <div class="col-12 col-md-6 col-lg-3">
-            <div class="card p-2">
-              <div class="fw-semibold"><?php echo e($c['name'] ?? 'Class'); ?></div>
-              <div class="small text-muted"><?php echo e($c['age'] ?? ''); ?></div>
-              <?php if (!empty($c['fees'])): ?><div class="mt-1">₹ <?php echo number_format((float)$c['fees'], 2); ?></div><?php endif; ?>
-            </div>
-          </div>
-        <?php endforeach; ?>
-      </div>
-    </div>
-  <?php endif; ?>
-
+<div class="fc-hero d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <div>
+    <div class="fw-bold" style="font-size:1.15rem">Facilities &amp; classes</div>
+    <div class="text-muted">What parents read on the website — not the class list inside the app.</div>
+  </div>
+  <a class="btn btn-outline-primary" href="<?php echo e($publicFac); ?>" target="_blank" rel="noopener">See on website</a>
 </div>
 
+<?php if ($success !== ''): ?><div class="alert alert-success py-2"><?php echo e($success); ?></div><?php endif; ?>
+<?php foreach ($errors as $er): ?><div class="alert alert-danger py-2"><?php echo e($er); ?></div><?php endforeach; ?>
+
+<form method="post">
+  <input type="hidden" name="action" value="save_facilities">
+  <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+
+  <div class="fc-card">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="fc-sec mb-0">School facilities</div>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="addFac">Add one more</button>
+    </div>
+    <div class="form-text mb-2">CCTV, outdoor play, meals, transport — title plus one short line.</div>
+    <div id="facList">
+      <?php foreach ($facilities as $f): ?>
+        <div class="fc-row">
+          <div class="row g-2">
+            <div class="col-md-4">
+              <input name="fac_title[]" class="form-control" placeholder="Title" value="<?php echo e($f['title']); ?>">
+            </div>
+            <div class="col-md-7">
+              <input name="fac_desc[]" class="form-control" placeholder="One short line" value="<?php echo e($f['description']); ?>">
+            </div>
+            <div class="col-md-1">
+              <button type="button" class="btn btn-outline-secondary w-100" onclick="removeRow(this,'.fc-row','facList')">×</button>
+            </div>
+          </div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  </div>
+
+  <div class="fc-card">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="fc-sec mb-0">Classes on the website</div>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="addCls">Add class</button>
+    </div>
+    <div class="form-text mb-2">Nursery, LKG, UKG — age and yearly fees if you want them public. Leave fees blank to hide the amount.</div>
+    <div id="clsList">
+      <?php foreach ($classes as $c): ?>
+        <div class="fc-row fc-cls">
+          <div class="row g-2">
+            <div class="col-md-4">
+              <input name="class_name[]" class="form-control" placeholder="Class name" value="<?php echo e($c['name']); ?>">
+            </div>
+            <div class="col-md-4">
+              <input name="class_age[]" class="form-control" placeholder="Age, e.g. 3–4 years" value="<?php echo e($c['age']); ?>">
+            </div>
+            <div class="col-md-3">
+              <input name="class_fees[]" class="form-control" inputmode="numeric" placeholder="Fees (optional)" value="<?php echo e((string) $c['fees']); ?>">
+            </div>
+            <div class="col-md-1">
+              <button type="button" class="btn btn-outline-secondary w-100" onclick="removeRow(this,'.fc-cls','clsList')">×</button>
+            </div>
+          </div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  </div>
+
+  <div class="fc-card">
+    <div class="fc-sec">How it looks</div>
+    <div class="fc-preview">
+      <div class="fw-bold mb-2">Facilities</div>
+      <div class="fc-grid mb-3">
+        <?php
+        $shownFac = array_values(array_filter($facilities, static fn(array $r): bool => $r['title'] !== '' || $r['description'] !== ''));
+        ?>
+        <?php if ($shownFac === []): ?>
+          <div class="text-muted">Add a facility and save to preview.</div>
+        <?php else: ?>
+          <?php foreach ($shownFac as $f): ?>
+            <div class="fc-tile">
+              <div class="fw-bold"><?php echo e($f['title'] !== '' ? $f['title'] : 'Facility'); ?></div>
+              <div class="small text-muted"><?php echo e($f['description']); ?></div>
+            </div>
+          <?php endforeach; ?>
+        <?php endif; ?>
+      </div>
+      <div class="fw-bold mb-2">Classes</div>
+      <div class="fc-grid">
+        <?php
+        $shownCls = array_values(array_filter($classes, static fn(array $r): bool => $r['name'] !== ''));
+        ?>
+        <?php if ($shownCls === []): ?>
+          <div class="text-muted">Add a class and save to preview.</div>
+        <?php else: ?>
+          <?php foreach ($shownCls as $c): ?>
+            <div class="fc-tile">
+              <div class="fw-bold"><?php echo e($c['name']); ?></div>
+              <div class="small text-muted"><?php echo e($c['age']); ?></div>
+              <?php $feeTxt = $inr($c['fees']); ?>
+              <?php if ($feeTxt !== ''): ?><div class="small fw-bold mt-1"><?php echo e($feeTxt); ?></div><?php endif; ?>
+            </div>
+          <?php endforeach; ?>
+        <?php endif; ?>
+      </div>
+    </div>
+  </div>
+
+  <div class="fc-bar">
+    <button class="btn btn-success" type="submit">Save</button>
+  </div>
+</form>
+
 <script>
-  // Tag UI syncing with textarea
-  const facTags = document.getElementById('facTags');
-  const facInput = document.getElementById('facInput');
-  const addFacBtn = document.getElementById('addFacBtn');
-  const facilitiesTextarea = document.getElementById('facilities_lines');
-
-  function addTag(value) {
-    value = (value || '').trim();
-    if (!value) return;
-    // avoid duplicates
-    const existing = Array.from(facTags.querySelectorAll('.tag')).map(t => t.textContent.replace(' ✖','').trim());
-    if (existing.indexOf(value) !== -1) return;
-    const span = document.createElement('span');
-    span.className = 'tag';
-    span.innerHTML = escapeHtml(value) + ' <a class="remove" data-value="' + escapeHtml(value) + '">✖</a>';
-    facTags.appendChild(span);
-    syncTextareaFromTags();
+document.getElementById('addFac').addEventListener('click', function () {
+  var wrap = document.getElementById('facList');
+  var div = document.createElement('div');
+  div.className = 'fc-row';
+  div.innerHTML = '<div class="row g-2"><div class="col-md-4"><input name="fac_title[]" class="form-control" placeholder="Title"></div><div class="col-md-7"><input name="fac_desc[]" class="form-control" placeholder="One short line"></div><div class="col-md-1"><button type="button" class="btn btn-outline-secondary w-100" onclick="removeRow(this,\'.fc-row\',\'facList\')">×</button></div></div>';
+  wrap.appendChild(div);
+  div.querySelector('input').focus();
+});
+document.getElementById('addCls').addEventListener('click', function () {
+  var wrap = document.getElementById('clsList');
+  var div = document.createElement('div');
+  div.className = 'fc-row fc-cls';
+  div.innerHTML = '<div class="row g-2"><div class="col-md-4"><input name="class_name[]" class="form-control" placeholder="Class name"></div><div class="col-md-4"><input name="class_age[]" class="form-control" placeholder="Age, e.g. 3–4 years"></div><div class="col-md-3"><input name="class_fees[]" class="form-control" inputmode="numeric" placeholder="Fees (optional)"></div><div class="col-md-1"><button type="button" class="btn btn-outline-secondary w-100" onclick="removeRow(this,\'.fc-cls\',\'clsList\')">×</button></div></div>';
+  wrap.appendChild(div);
+  div.querySelector('input').focus();
+});
+function removeRow(btn, sel, wrapId) {
+  var item = btn.closest(sel);
+  var wrap = document.getElementById(wrapId);
+  if (!item || !wrap) return;
+  if (wrap.children.length <= 1) {
+    item.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+    return;
   }
-
-  addFacBtn.addEventListener('click', () => { addTag(facInput.value); facInput.value=''; facInput.focus(); });
-  facInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(facInput.value); facInput.value=''; } });
-
-  facTags.addEventListener('click', function (e) {
-    if (e.target && e.target.matches('.remove')) {
-      const val = e.target.getAttribute('data-value');
-      const span = e.target.closest('.tag');
-      if (span) span.remove();
-      syncTextareaFromTags();
-    }
-  });
-
-  function syncTextareaFromTags() {
-    const items = Array.from(facTags.querySelectorAll('.tag')).map(t => t.textContent.replace(' ✖','').trim());
-    facilitiesTextarea.value = items.join("\n");
-  }
-
-  // escape HTML helper
-  function escapeHtml(str) {
-    return str.replace(/[&<>"']/g, function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]; });
-  }
-
-  // initialize: ensure textarea reflects tags (if user removed or added via raw textarea this will keep tags in sync on page load)
-  (function initSync() {
-    // if textarea has content, populate tags from it
-    const txt = facilitiesTextarea.value.trim();
-    if (txt.length > 0 && facTags.children.length === 0) {
-      const lines = txt.split(/\r\n|\r|\n/).map(s=>s.trim()).filter(Boolean);
-      facTags.innerHTML = '';
-      lines.forEach(l => {
-        const span = document.createElement('span');
-        span.className = 'tag';
-        span.innerHTML = escapeHtml(l) + ' <a class="remove" data-value="' + escapeHtml(l) + '">✖</a>';
-        facTags.appendChild(span);
-      });
-    }
-  })();
+  item.remove();
+}
 </script>
-
-
 <?php
 require_once __DIR__ . '/../footer.php';
