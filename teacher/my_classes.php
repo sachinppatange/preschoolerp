@@ -1,224 +1,207 @@
 <?php
 /**
- * teacher/my_classes.php
- *
- * Shows classes assigned to the logged-in teacher and students for a selected class.
- * This version uses the provided students table schema (students.class_id) and
- * a straightforward mapping strategy:
- *  - Prefer classes.teacher_id (if classes table has teacher_id)
- *  - Else use teacher_classes (mapping table) with columns teacher_id and class_id
- *
- * Place at: /pioneerplayschool01/teacher/my_classes.php
+ * teacher/my_classes.php — teacher's classes and children.
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('teacher');
 $DEBUG = panel_debug();
 
-/* ---------- Require teacher login ---------- */
-if (!defined('DEV_SHOW_ERRORS')) define('DEV_SHOW_ERRORS', false);
-/* ---------- Helper functions (fallbacks) ---------- */
-
-/* ---------- Page state ---------- */
-$messages = [];
-$errors = [];
-
-/* ---------- Teacher identity ---------- */
-$teacherId = auth_user_id() ?? 0;
-$teacherSession = auth_user() ?? [];
-
-/* ---------- Determine assigned classes (simple and reliable) ---------- */
-/* Strategy:
-   1) If classes.teacher_id column exists, use it.
-   2) Else if teacher_classes table exists, use mapping teacher_id -> class_id.
-   3) Only handle the common column names (teacher_id, class_id). This avoids heuristic errors.
-*/
-
+$teacherId = (int) (auth_user_id() ?? 0);
 $assignedClasses = panel_teacher_assigned_classes($teacherId);
 
-/* ---------- Selected class handling ---------- */
-$selectedClassId = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
-if ($selectedClassId === 0 && !empty($assignedClasses)) {
-    // choose first assigned class by default
-    $selectedClassId = (int)$assignedClasses[0]['id'];
+$classRank = static function (array $c): int {
+    $n = strtolower((string) ($c['name'] ?? ''));
+    if (str_starts_with($n, 'play')) {
+        return 1;
+    }
+    if (str_starts_with($n, 'nurs')) {
+        return 2;
+    }
+    if (str_starts_with($n, 'l')) {
+        return 3;
+    }
+    if (str_starts_with($n, 'u')) {
+        return 4;
+    }
+    return 9;
+};
+usort($assignedClasses, static function (array $a, array $b) use ($classRank): int {
+    $d = $classRank($a) <=> $classRank($b);
+    return $d !== 0 ? $d : strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+});
+
+$allowedIds = array_values(array_filter(array_map(static fn($r) => (int) ($r['id'] ?? 0), $assignedClasses)));
+$selectedClassId = isset($_GET['class_id']) ? (int) $_GET['class_id'] : 0;
+if ($selectedClassId <= 0 && $allowedIds !== []) {
+    $selectedClassId = $allowedIds[0];
 }
-// Validate selection belongs to teacher
-$allowedIds = array_map(function($r){ return (int)$r['id']; }, $assignedClasses);
 if ($selectedClassId > 0 && !in_array($selectedClassId, $allowedIds, true)) {
     $selectedClassId = 0;
 }
 
-/* ---------- Pagination for students ---------- */
-$perPage = 30;
-$page = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
-$offset = ($page - 1) * $perPage;
+$qraw = trim((string) ($_GET['q'] ?? ''));
+$ayStu = function_exists('ay_sql_student') ? ay_sql_student('s') : '1=1';
+$statusSql = "LOWER(COALESCE(s.status,'active')) IN ('active','pending')";
 
-/* ---------- Fetch students for selected class (using students.class_id) ---------- */
-/* Students table schema provided by you contains class_id column */
-$students = [];
-$totalStudents = 0;
-if ($selectedClassId > 0 && table_exists('students')) {
-    $stuWhere = 'class_id = :cid AND (status IS NULL OR status = \'active\')';
-    $stuParams = [':cid' => $selectedClassId];
-    if (function_exists('ay_students_have_column') && ay_students_have_column()) {
-        $stuWhere .= ' AND academic_year = :panel_ay';
-        $stuParams[':panel_ay'] = ay_selected();
-    }
-    $count = safe_db_get_one("SELECT COUNT(*) AS cnt FROM students WHERE {$stuWhere}", $stuParams);
-    $totalStudents = intval($count['cnt'] ?? 0);
-
-    if ($totalStudents > 0) {
-        $listParams = [$selectedClassId];
-        $listSql = "SELECT id, first_name, middle_name, last_name, form_no, dob, father_phone, mother_phone, photo_path, admission_date, status, created_at
-             FROM students
-             WHERE class_id = ? AND (status IS NULL OR status = 'active')";
-        if (function_exists('ay_students_have_column') && ay_students_have_column()) {
-            $listSql .= ' AND academic_year = ?';
-            $listParams[] = ay_selected();
-        }
-        $listSql .= ' ORDER BY (form_no IS NULL), form_no ASC, first_name ASC LIMIT ? OFFSET ?';
-        $listParams[] = $perPage;
-        $listParams[] = $offset;
-        $students = safe_db_get_all($listSql, $listParams);
+$counts = [];
+if ($allowedIds !== [] && function_exists('table_exists') && table_exists('students')) {
+    $in = implode(',', array_map('intval', $allowedIds));
+    $rows = safe_db_get_all(
+        "SELECT s.class_id, COUNT(*) AS c
+         FROM students s
+         WHERE s.class_id IN ($in) AND {$statusSql} AND {$ayStu}
+         GROUP BY s.class_id",
+        function_exists('ay_params_student') ? ay_params_student() : []
+    ) ?: [];
+    foreach ($rows as $r) {
+        $counts[(int) ($r['class_id'] ?? 0)] = (int) ($r['c'] ?? 0);
     }
 }
 
-/* ---------- Page render ---------- */
-$pageTitle = auth_is_owner_super() ? 'All Classes (Owner)' : 'My Classes';
+$students = [];
+if ($selectedClassId > 0 && function_exists('table_exists') && table_exists('students')) {
+    $params = function_exists('ay_params_student') ? ay_params_student([':cid' => $selectedClassId]) : [':cid' => $selectedClassId];
+    $searchSql = '';
+    if ($qraw !== '') {
+        $searchSql = ' AND CONCAT(IFNULL(s.first_name,\'\'), \' \', IFNULL(s.last_name,\'\')) LIKE :q';
+        $params[':q'] = '%' . $qraw . '%';
+    }
+    $students = safe_db_get_all(
+        "SELECT s.id, s.first_name, s.middle_name, s.last_name, s.dob, s.father_phone, s.mother_phone, s.photo_path, s.status
+         FROM students s
+         WHERE s.class_id = :cid AND {$statusSql} AND {$ayStu}{$searchSql}
+         ORDER BY s.first_name ASC, s.last_name ASC",
+        $params
+    ) ?: [];
+}
+
+$selectedName = '';
+foreach ($assignedClasses as $c) {
+    if ((int) $c['id'] === $selectedClassId) {
+        $selectedName = trim((string) ($c['name'] ?? ''));
+        break;
+    }
+}
+
+$t = static function (string $path): string {
+    return function_exists('site_url') ? site_url('/teacher/' . ltrim($path, '/')) : $path;
+};
+$assignUrl = function_exists('site_url') ? site_url('/owner/teacher_assign.php') : '../owner/teacher_assign.php';
+$ayLabel = function_exists('ay_display_short') ? ay_display_short() : '';
+
+$parentPhone = static function (array $s): string {
+    $f = preg_replace('/\D+/', '', (string) ($s['father_phone'] ?? '')) ?? '';
+    $m = preg_replace('/\D+/', '', (string) ($s['mother_phone'] ?? '')) ?? '';
+    if (strlen($f) >= 10) {
+        return substr($f, -10);
+    }
+    if (strlen($m) >= 10) {
+        return substr($m, -10);
+    }
+    return trim((string) ($s['father_phone'] ?? $s['mother_phone'] ?? ''));
+};
+
+$ageLabel = static function (array $s): string {
+    $dob = substr((string) ($s['dob'] ?? ''), 0, 10);
+    if ($dob === '' || $dob === '0000-00-00') {
+        return '';
+    }
+    try {
+        $y = (new DateTimeImmutable($dob))->diff(new DateTimeImmutable('today'))->y;
+        return $y > 0 ? $y . ' yrs' : '';
+    } catch (Throwable $e) {
+        return '';
+    }
+};
+
+$page_title = (function_exists('auth_is_owner_super') && auth_is_owner_super()) ? 'Classes' : 'My Classes';
+$pageTitle = $page_title;
 require_once __DIR__ . '/../includes/header.php';
 ?>
+<style>
+.mc-chip { display:inline-flex; align-items:center; gap:.4rem; border:1px solid #dbe7fb; background:#fff; border-radius:999px; padding:.35rem .85rem; text-decoration:none; color:#1e3a5f; font-weight:600; font-size:.9rem; margin:0 .4rem .5rem 0; }
+.mc-chip.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+.mc-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:14px 16px; }
+.mc-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid #eef3fb; }
+.mc-row:last-child { border-bottom:0; }
+.mc-photo { width:44px; height:44px; border-radius:50%; object-fit:cover; background:#e2e8f0; flex-shrink:0; }
+.mc-name { font-weight:700; color:#1e3a5f; }
+.mc-meta { font-size:.82rem; color:#64748b; }
+</style>
 
-<?php if (auth_is_owner_super()): ?>
-  <div class="alert alert-info small mb-3"><i class="bi bi-shield-check me-1"></i>Owner view — all classes are available.</div>
+<?php if (function_exists('auth_is_owner_super') && auth_is_owner_super()): ?>
+  <p class="small text-muted mb-2">Owner view — all classes. Assign teachers on <a href="<?php echo e($assignUrl); ?>">Assign Teachers</a>.</p>
 <?php endif; ?>
 
-<div class="row g-3">
-  <div class="col-12 col-md-4">
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <h6 class="mb-3">Assigned Classes</h6>
-        <?php if (empty($assignedClasses)): ?>
-          <div class="small-muted">You are not assigned to any class yet. Contact administrator.</div>
-          <?php if ($DEBUG): ?>
-            <pre class="mt-2 small text-muted">DEBUG: assignedClasses = <?php echo e(json_encode($assignedClasses)); ?></pre>
-          <?php endif; ?>
-        <?php else: ?>
-          <ul class="list-group list-group-flush">
-            <?php foreach ($assignedClasses as $c): $cid = (int)$c['id']; ?>
-              <li class="list-group-item d-flex justify-content-between align-items-center <?php echo $cid === $selectedClassId ? 'active text-white' : ''; ?>">
-                <div>
-                  <div class="fw-semibold"><?php echo e(trim((($c['short_name'] ?? '') . ' ' . ($c['name'] ?? '')))); ?></div>
-                  <div class="small-muted"><?php echo e(!empty($c['section']) ? 'Section: ' . $c['section'] : ''); ?></div>
-                </div>
-                <div>
-                  <a class="btn btn-sm btn-<?php echo $cid === $selectedClassId ? 'light' : 'outline-primary'; ?>" href="?class_id=<?php echo $cid; ?>"><?php echo $cid === $selectedClassId ? 'Selected' : 'Open'; ?></a>
-                </div>
-              </li>
-            <?php endforeach; ?>
-          </ul>
-        <?php endif; ?>
-      </div>
-    </div>
+<?php if ($assignedClasses === []): ?>
+  <div class="alert alert-info mb-0">No class is assigned yet. Ask the owner to assign you a class<?php echo function_exists('auth_is_owner_super') && auth_is_owner_super() ? ' on Assign Teachers' : ''; ?>.</div>
+<?php else: ?>
 
-    <div class="card mt-3 shadow-sm">
-      <div class="card-body">
-        <h6 class="mb-2">Quick actions</h6>
-        <div class="d-grid gap-2">
-          <?php if ($selectedClassId > 0): ?>
-            <a class="btn btn-outline-primary" href="../teacher/attendance_mark.php?class_id=<?php echo $selectedClassId; ?>"><i class="bi bi-check2-square me-1"></i> Mark Attendance</a>
-            <a class="btn btn-outline-success" href="../teacher/homeworks.php?class_id=<?php echo $selectedClassId; ?>"><i class="bi bi-journal-text me-1"></i> Homeworks</a>
-          <?php else: ?>
-            <div class="small-muted">Select a class to view class-specific actions.</div>
-          <?php endif; ?>
-        </div>
-      </div>
-    </div>
-
+  <div class="mb-3">
+    <?php foreach ($assignedClasses as $c):
+        $cid = (int) $c['id'];
+        $n = (int) ($counts[$cid] ?? 0);
+        ?>
+      <a class="mc-chip<?php echo $cid === $selectedClassId ? ' active' : ''; ?>" href="?class_id=<?php echo $cid; ?>">
+        <?php echo e((string) ($c['name'] ?? 'Class')); ?>
+        <span><?php echo $n; ?></span>
+      </a>
+    <?php endforeach; ?>
   </div>
 
-  <div class="col-12 col-md-8">
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <h6 class="mb-3">Students in class <?php if ($selectedClassId>0): ?><small class="text-muted">#<?php echo $selectedClassId; ?></small><?php endif; ?></h6>
+  <div class="mc-card">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+      <div>
+        <div class="h5 mb-0"><?php echo e($selectedName !== '' ? $selectedName : 'Class'); ?></div>
+        <div class="mc-meta"><?php echo count($students); ?> child<?php echo count($students) === 1 ? '' : 'ren'; ?><?php echo $ayLabel !== '' ? ' · ' . e($ayLabel) : ''; ?><?php echo $qraw !== '' ? ' · search' : ''; ?></div>
+      </div>
+      <?php if ($selectedClassId > 0): ?>
+        <div class="d-flex flex-wrap gap-2">
+          <a class="btn btn-sm btn-primary" href="<?php echo e($t('attendance_mark.php?class_id=' . $selectedClassId)); ?>">Attendance</a>
+          <a class="btn btn-sm btn-outline-primary" href="<?php echo e($t('homeworks.php?class_id=' . $selectedClassId)); ?>">Homework</a>
+          <a class="btn btn-sm btn-outline-secondary" href="<?php echo e($t('student_remarks.php?class_id=' . $selectedClassId)); ?>">Remarks</a>
+        </div>
+      <?php endif; ?>
+    </div>
 
-        <?php if ($selectedClassId === 0): ?>
-          <div class="small-muted">No class selected. Choose a class from the left.</div>
-        <?php else: ?>
+    <form method="get" class="d-flex gap-2 mb-3">
+      <input type="hidden" name="class_id" value="<?php echo (int) $selectedClassId; ?>">
+      <input class="form-control" name="q" value="<?php echo e($qraw); ?>" placeholder="Find a child by name" style="max-width:280px">
+      <button class="btn btn-outline-primary" type="submit">Search</button>
+      <?php if ($qraw !== ''): ?><a class="btn btn-outline-secondary" href="?class_id=<?php echo (int) $selectedClassId; ?>">Clear</a><?php endif; ?>
+    </form>
 
-          <div class="mb-3 d-flex justify-content-between align-items-center">
-            <div><strong><?php echo number_format($totalStudents); ?></strong> students</div>
-            <div>
-              <?php if ($totalStudents > 0): $totalPages = (int) ceil($totalStudents / $perPage); ?>
-                <nav aria-label="students pagination">
-                  <ul class="pagination pagination-sm mb-0">
-                    <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>"><a class="page-link" href="?class_id=<?php echo $selectedClassId; ?>&p=<?php echo max(1,$page-1); ?>">Prev</a></li>
-                    <li class="page-item disabled"><span class="page-link">Page <?php echo $page; ?> / <?php echo max(1,$totalPages); ?></span></li>
-                    <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>"><a class="page-link" href="?class_id=<?php echo $selectedClassId; ?>&p=<?php echo min($totalPages,$page+1); ?>">Next</a></li>
-                  </ul>
-                </nav>
-              <?php endif; ?>
+    <?php if ($students === []): ?>
+      <div class="text-muted"><?php echo $qraw !== '' ? 'No child matches that name.' : 'No children in this class for this year.'; ?></div>
+    <?php else: ?>
+      <?php foreach ($students as $s):
+          $sid = (int) $s['id'];
+          $name = function_exists('student_full_name') ? student_full_name($s) : trim((string) ($s['first_name'] ?? '') . ' ' . (string) ($s['last_name'] ?? ''));
+          $photo = function_exists('student_photo_url') ? student_photo_url((string) ($s['photo_path'] ?? '')) : '';
+          $phone = $parentPhone($s);
+          $age = $ageLabel($s);
+          ?>
+        <div class="mc-row">
+          <?php if ($photo !== ''): ?>
+            <img class="mc-photo" src="<?php echo e($photo); ?>" alt="">
+          <?php else: ?>
+            <div class="mc-photo"></div>
+          <?php endif; ?>
+          <div class="flex-grow-1">
+            <div class="mc-name"><?php echo e($name !== '' ? $name : ('Child #' . $sid)); ?></div>
+            <div class="mc-meta">
+              <?php echo $age !== '' ? e($age) : 'Age not set'; ?>
+              <?php if ($phone !== ''): ?> · <?php echo e($phone); ?><?php endif; ?>
             </div>
           </div>
-
-          <?php if (empty($students)): ?>
-            <div class="small-muted">No students found in this class.</div>
-            <?php if ($DEBUG): ?>
-              <pre class="mt-2 small text-muted">DEBUG: selectedClassId=<?php echo e($selectedClassId); ?>; totalStudents=<?php echo e($totalStudents); ?></pre>
-            <?php endif; ?>
-          <?php else: ?>
-            <div class="table-responsive">
-              <table class="table table-sm table-hover align-middle">
-                <thead>
-                  <tr>
-                    <th style="width:60px">#</th>
-                    <th>Photo</th>
-                    <th>Form No</th>
-                    <th>Name</th>
-                    <th style="width:120px">DOB</th>
-                    <th style="width:160px" class="text-nowrap">Contact</th>
-                    <th style="width:120px" class="text-end">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <?php $i = 1; foreach ($students as $s): 
-                    $sid = (int)$s['id'];
-                    $fullname = trim((($s['first_name'] ?? '') . ' ' . ($s['middle_name'] ?? '') . ' ' . ($s['last_name'] ?? '')));
-                    $photo = function_exists('student_photo_url') ? student_photo_url((string) ($s['photo_path'] ?? '')) : (string) ($s['photo_path'] ?? '');
-                  ?>
-                    <tr>
-                      <td><?php echo $i++; ?></td>
-                      <td>
-                        <?php if ($photo): ?>
-                          <img src="<?php echo e($photo); ?>" alt="photo" class="student-photo">
-                        <?php else: ?>
-                          <div style="width:40px;height:40px;background:#f1f1f1;border-radius:4px;"></div>
-                        <?php endif; ?>
-                      </td>
-                      <td><?php echo e($s['form_no'] ?? '—'); ?></td>
-                      <td class="student-name"><?php echo e($fullname ?: ('Student #' . $sid)); ?><br><small class="small-muted">Admitted: <?php echo e(substr($s['admission_date'] ?? '',0,10) ?: '—'); ?></small></td>
-                      <td><?php echo e(substr($s['dob'] ?? '',0,10) ?: '—'); ?></td>
-                      <td class="small-muted text-nowrap">Father: <?php echo e($s['father_phone'] ?? '—'); ?><br>Mother: <?php echo e($s['mother_phone'] ?? '—'); ?></td>
-                      <td class="text-end">
-                        <a class="btn btn-sm btn-outline-primary" href="../teacher/student_view.php?id=<?php echo $sid; ?>">View</a>
-                        <a class="btn btn-sm btn-outline-secondary" href="../teacher/attendance_mark.php?class_id=<?php echo $selectedClassId; ?>&student_id=<?php echo $sid; ?>">Attendance</a>
-                      </td>
-                    </tr>
-                  <?php endforeach; ?>
-                </tbody>
-              </table>
-            </div>
-          <?php endif; ?>
-
-        <?php endif; ?>
-      </div>
-    </div>
+          <a class="btn btn-sm btn-outline-primary" href="<?php echo e($t('student_view.php?id=' . $sid)); ?>">View</a>
+        </div>
+      <?php endforeach; ?>
+    <?php endif; ?>
   </div>
-</div>
 
-<?php
-/* ---------- Footer ---------- */
-require_once __DIR__ . '/../includes/footer.php';
+<?php endif; ?>
 
-?>
+<?php require_once __DIR__ . '/../includes/footer.php'; ?>
