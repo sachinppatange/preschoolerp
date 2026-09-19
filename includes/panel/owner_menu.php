@@ -15,7 +15,6 @@ function owner_panel_menu(): array
     $reception = panel_base_url('reception');
     $accounts = panel_base_url('accounts');
     $teacher = panel_base_url('teacher');
-    $parent = panel_base_url('parent');
 
     return [
         [
@@ -59,20 +58,6 @@ function owner_panel_menu(): array
                 ['url' => $teacher . '/class_photo_upload.php', 'icon' => 'bi-camera', 'label' => 'Class Photos', 'match' => 'class_photo'],
                 ['url' => $teacher . '/timetable.php', 'icon' => 'bi-calendar-week', 'label' => 'Timetable', 'match' => 'timetable'],
                 ['url' => $teacher . '/notices.php', 'icon' => 'bi-megaphone', 'label' => 'Teacher Notices', 'match' => 'notices'],
-            ],
-        ],
-        [
-            'section' => 'Parent Portal (View)',
-            'items' => [
-                ['url' => $owner . '/parent_portal.php', 'icon' => 'bi-eye', 'label' => 'Parent Hub', 'match' => 'parent_portal'],
-                ['url' => $parent . '/children.php', 'icon' => 'bi-people', 'label' => 'My Children', 'match' => 'children'],
-                ['url' => $parent . '/attendance.php', 'icon' => 'bi-calendar2-check', 'label' => 'Child Attendance', 'match' => 'attendance'],
-                ['url' => $parent . '/homeworks.php', 'icon' => 'bi-journal', 'label' => 'Child Homework', 'match' => 'homeworks'],
-                ['url' => $parent . '/fees.php', 'icon' => 'bi-cash-stack', 'label' => 'Child Fees', 'match' => 'fees'],
-                ['url' => $parent . '/receipt.php', 'icon' => 'bi-receipt', 'label' => 'Fee Receipts', 'match' => 'receipt'],
-                ['url' => $parent . '/notices.php', 'icon' => 'bi-bell', 'label' => 'School Notices', 'match' => 'notices'],
-                ['url' => $parent . '/events.php', 'icon' => 'bi-calendar-event', 'label' => 'Events', 'match' => 'events'],
-                ['url' => $parent . '/gallery.php', 'icon' => 'bi-images', 'label' => 'Gallery', 'match' => 'gallery'],
             ],
         ],
         [

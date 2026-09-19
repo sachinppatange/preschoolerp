@@ -139,12 +139,12 @@ function panel_shell_role(?string $detectedRole): ?string
  */
 function panel_owner_parent_gate_html(): string
 {
-    if (!auth_is_owner_super() || panel_parent_context_id() > 0) {
+    if (!auth_is_owner_super()) {
         return '';
     }
-    $hub = function_exists('site_url') ? site_url('/owner/parent_portal.php') : '/owner/parent_portal.php';
-    return '<div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2">'
-        . '<span><i class="bi bi-exclamation-triangle me-1"></i>Select a parent first to preview this page.</span>'
-        . '<a class="btn btn-sm btn-warning" href="' . htmlspecialchars($hub, ENT_QUOTES, 'UTF-8') . '">Open Parent Hub</a>'
+    $url = function_exists('site_url') ? site_url('/owner/parents.php') : '../owner/parents.php';
+    return '<div class="alert alert-info d-flex align-items-center justify-content-between flex-wrap gap-2">'
+        . '<span>This screen is the parent app. Parent logins are set on <strong>Parents</strong>.</span>'
+        . '<a class="btn btn-sm btn-outline-primary" href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">Parents</a>'
         . '</div>';
 }
