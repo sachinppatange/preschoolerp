@@ -373,6 +373,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <a class="btn btn-sm btn-outline-info" href="<?php echo e(function_exists('site_url') ? site_url('/owner/students_view.php?id=' . (int)$s['id']) : ('students_view.php?id=' . (int)$s['id'])); ?>">View</a>
                 <a class="btn btn-sm btn-outline-warning" href="<?php echo e(function_exists('site_url') ? site_url('/owner/students_edit.php?id=' . (int)$s['id']) : ('students_edit.php?id=' . (int)$s['id'])); ?>">Edit</a>
                 <a class="btn btn-sm btn-outline-success" href="<?php echo e(function_exists('site_url') ? site_url('/reception/students_form_print.php?id=' . (int)$s['id']) : ('../reception/students_form_print.php?id=' . (int)$s['id'])); ?>" target="_blank">PDF</a>
+                <a class="btn btn-sm btn-outline-primary" href="<?php echo e(function_exists('site_url') ? site_url('/owner/id_cards.php?id=' . (int)$s['id'] . '&print=1') : ('id_cards.php?id=' . (int)$s['id'] . '&print=1')); ?>" target="_blank">ID card</a>
                 <?php echo render_secure_delete_button((int)$s['id'], 'Delete', 'Delete student?'); ?>
               </td>
             </tr>

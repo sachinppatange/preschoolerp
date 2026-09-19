@@ -14,6 +14,7 @@ function reception_panel_menu(): array
         ['section' => 'Admissions', 'items' => [
             ['url' => $base . '/admission.php', 'icon' => 'bi-person-plus', 'label' => 'Admission', 'match' => 'admission'],
             ['url' => $base . '/students_list.php', 'icon' => 'bi-people', 'label' => 'Students', 'match' => 'students'],
+            ['url' => $base . '/id_cards.php', 'icon' => 'bi-person-badge', 'label' => 'ID cards', 'match' => 'id_cards'],
             ['url' => $base . '/enquiry_list.php', 'icon' => 'bi-chat-left-text', 'label' => 'Enquiries', 'match' => 'enquiry'],
         ]],
         ['section' => 'Daily Work', 'items' => [

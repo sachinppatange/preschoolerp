@@ -276,6 +276,16 @@ function student_print_url(int $id): string
     return function_exists('site_url') ? site_url($path) : $path;
 }
 
+function student_idcard_page_url(int $id): string
+{
+    if (function_exists('student_idcard_staff_url')) {
+        return student_idcard_staff_url($id);
+    }
+    $role = function_exists('auth_role') ? (string) auth_role() : 'owner';
+    $path = ($role === 'reception' ? '/reception/id_cards.php' : '/owner/id_cards.php') . '?id=' . $id . '&print=1';
+    return function_exists('site_url') ? site_url($path) : $path;
+}
+
 /**
  * Absolute photo URL. Stored paths like uploads/students/x.jpg must not resolve as /owner/uploads/...
  */

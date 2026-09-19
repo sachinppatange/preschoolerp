@@ -40,6 +40,9 @@ function panel_bootstrap(?string $role = null, array $options = []): void
     if (file_exists($includesDir . '/student_record.php')) {
         require_once $includesDir . '/student_record.php';
     }
+    if (file_exists($includesDir . '/student_idcard.php')) {
+        require_once $includesDir . '/student_idcard.php';
+    }
 
     require_once $includesDir . '/auth.php';
     if (file_exists($includesDir . '/otp_settings.php')) {

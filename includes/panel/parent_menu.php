@@ -11,6 +11,7 @@ function parent_panel_menu(): array
         ['section' => 'Overview', 'items' => [
             ['url' => $base . '/dashboard.php', 'icon' => 'bi-speedometer2', 'label' => 'Dashboard', 'match' => 'dashboard'],
             ['url' => $base . '/children.php', 'icon' => 'bi-people', 'label' => 'My Children', 'match' => 'children'],
+            ['url' => $base . '/id_card.php', 'icon' => 'bi-person-badge', 'label' => 'ID card', 'match' => 'id_card'],
         ]],
         ['section' => 'School Life', 'items' => [
             ['url' => $base . '/attendance.php', 'icon' => 'bi-person-check', 'label' => 'Attendance', 'match' => 'attendance'],

@@ -194,7 +194,8 @@ echo panel_owner_parent_gate_html();
         <a class="btn btn-success" href="<?php echo e($u('/parent/attendance.php') . '?student_id=' . $cid); ?>">Attendance</a>
         <a class="btn btn-outline-primary" href="<?php echo e($u('/parent/homeworks.php') . '?student_id=' . $cid); ?>">Homework</a>
         <a class="btn btn-outline-primary" href="<?php echo e($u('/parent/fees.php') . '?student_id=' . $cid); ?>">Fees</a>
-        <a class="btn btn-outline-secondary" href="<?php echo e($u('/parent/gallery.php')); ?>">Photos</a>
+        <a class="btn btn-outline-secondary" href="<?php echo e($u('/parent/gallery.php') . '?student_id=' . $cid); ?>">Photos</a>
+        <a class="btn btn-outline-secondary" href="<?php echo e($u('/parent/id_card.php') . '?student_id=' . $cid); ?>">ID card</a>
       </div>
     </div>
   <?php endforeach; ?>

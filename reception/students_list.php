@@ -388,6 +388,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <a class="btn btn-sm btn-outline-info" href="students_view.php?id=<?php echo (int)$s['id']; ?>">View</a>
                 <a class="btn btn-sm btn-outline-warning" href="students_list_edit.php?id=<?php echo (int)$s['id']; ?>">Edit</a>
                 <a class="btn btn-sm btn-outline-success" href="students_form_print.php?id=<?php echo (int)$s['id']; ?>" target="_blank">PDF</a>
+                <a class="btn btn-sm btn-outline-primary" href="id_cards.php?id=<?php echo (int)$s['id']; ?>&amp;print=1" target="_blank">ID card</a>
                 <?php echo function_exists('render_secure_delete_button') ? render_secure_delete_button((int)$s['id'], 'Delete', 'Delete student?') : ''; ?>
               </td>
             </tr>

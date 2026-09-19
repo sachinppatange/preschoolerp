@@ -86,6 +86,7 @@ $viewUrl = function_exists('student_view_url') ? student_view_url($id) : ('?id='
 $editUrl = function_exists('student_edit_url') ? student_edit_url($id) : ('../reception/students_list_edit.php?id=' . $id);
 $listUrl = function_exists('student_list_url') ? student_list_url() : '../reception/students_list.php';
 $printUrl = function_exists('student_print_url') ? student_print_url($id) : ('../reception/students_form_print.php?id=' . $id);
+$cardUrl = function_exists('student_idcard_page_url') ? student_idcard_page_url($id) : ('../owner/id_cards.php?id=' . $id . '&print=1');
 $collectUrl = function_exists('site_url')
     ? site_url('/accounts/fees_collection.php?student_id=' . $id)
     : '../accounts/fees_collection.php?student_id=' . $id;
@@ -136,6 +137,7 @@ require_once __DIR__ . '/header.php';
   <a class="btn btn-outline-warning" href="<?php echo e($editUrl); ?>">Edit</a>
   <a class="btn btn-outline-primary" href="<?php echo e($collectUrl); ?>">Collect Fees</a>
   <a class="btn btn-success" href="<?php echo e($printUrl); ?>" target="_blank">Download PDF</a>
+  <a class="btn btn-outline-success" href="<?php echo e($cardUrl); ?>" target="_blank">ID card</a>
 </div>
 
 <?php if (!empty($errors)): ?>
