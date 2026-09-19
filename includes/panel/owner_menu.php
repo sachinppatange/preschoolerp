@@ -88,7 +88,7 @@ function owner_panel_menu(): array
             'section' => 'Academic Year',
             'items' => [
                 ['url' => $owner . '/academic_year_hub.php', 'icon' => 'bi-calendar2-range', 'label' => 'New school year', 'match' => 'academic_year_hub'],
-                ['url' => $owner . '/year_end_report.php', 'icon' => 'bi-file-earmark-pdf', 'label' => 'Year-end PDF', 'match' => 'year_end_report'],
+                ['url' => $owner . '/year_end_report.php', 'icon' => 'bi-clipboard-data', 'label' => 'Year summary', 'match' => 'year_end_report'],
             ],
         ],
         [

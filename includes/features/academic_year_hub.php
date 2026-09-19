@@ -302,7 +302,7 @@ $nextLabel = static function (int $cid) use ($promoMap, $classNameById): string 
   </div>
 <?php endif; ?>
 
-<p class="small text-muted mb-0">Need numbers for a year? Use <a href="<?php echo e($ownerBase); ?>/year_end_report.php?ay=<?php echo urlencode($fromAy); ?>">Year-end report</a>.</p>
+<p class="small text-muted mb-0">Need numbers for a year? Use <a href="<?php echo e($ownerBase); ?>/year_end_report.php?ay=<?php echo urlencode($fromAy); ?>">Year summary</a>.</p>
 
 <script>
 document.getElementById('aySelectAll')?.addEventListener('click', () => document.querySelectorAll('.ay-continue-cb').forEach(c => c.checked = true));
