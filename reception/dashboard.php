@@ -1,6 +1,6 @@
 <?php
 /**
- * Reception home — admit, call enquiries, finish incomplete forms for this academic year.
+ * Reception home — preschool front desk: admit, call, finish forms.
  */
 declare(strict_types=1);
 
@@ -9,8 +9,11 @@ panel_bootstrap('reception');
 
 $page_title = 'Reception';
 $pageTitle = $page_title;
+$skip_panel_ay_banner = true;
 $lastUpdated = date('d M Y, h:i A');
+$todayLabel = date('d M Y');
 $userId = (int) (auth_user_id() ?? 0);
+$ay = function_exists('ay_selected') ? ay_selected() : '';
 
 $u = static function (string $path): string {
     return function_exists('site_url') ? site_url($path) : $path;
@@ -32,8 +35,14 @@ $hasTasks = function_exists('table_exists') && table_exists('tasks');
 $hasNotices = function_exists('table_exists') && table_exists('notices');
 
 $stuName = static function (array $s): string {
+    if (function_exists('student_full_name')) {
+        $n = trim(student_full_name($s));
+        if ($n !== '') {
+            return $n;
+        }
+    }
     $n = trim(preg_replace('/\s+/', ' ', trim(($s['first_name'] ?? '') . ' ' . ($s['middle_name'] ?? '') . ' ' . ($s['last_name'] ?? ''))) ?? '');
-    return $n !== '' ? $n : 'Student #' . (int) ($s['id'] ?? 0);
+    return $n !== '' ? $n : 'Child #' . (int) ($s['id'] ?? 0);
 };
 $editStu = static function (int $id): string {
     return function_exists('student_edit_url') ? student_edit_url($id) : ('students_list_edit.php?id=' . $id);
@@ -47,6 +56,7 @@ $enqUrl = $u('/reception/enquiry_list.php');
 $stuUrl = $u('/reception/students_list.php');
 $alertUrl = $u('/reception/pending_alerts.php');
 $todoUrl = $u('/reception/pending_tasks.php');
+$todoHelpUrl = $u('/reception/pending_tasks.php') . '?tab=help';
 $noticeUrl = $u('/reception/notices_publish.php');
 $newsUrl = $u('/reception/news_events.php');
 
@@ -55,6 +65,7 @@ $pendingAdmissions = 0;
 $enquiriesOpen = 0;
 $enquiriesToday = 0;
 $todoOpen = 0;
+$todoHelp = 0;
 $noticesLive = 0;
 $alertCount = 0;
 
@@ -99,15 +110,15 @@ if ($hasEnquiries) {
 
 if ($hasTasks) {
     try {
-        $r = $userId > 0
-            ? safe_db_get_one(
-                "SELECT COUNT(*) AS c FROM tasks WHERE status <> 'done' AND (assigned_to = :u OR assigned_to IS NULL)",
-                [':u' => $userId]
-            )
-            : safe_db_get_one("SELECT COUNT(*) AS c FROM tasks WHERE status <> 'done'");
+        $mine = $userId > 0 ? ' AND (assigned_to = :u OR assigned_to IS NULL)' : '';
+        $p = $userId > 0 ? [':u' => $userId] : [];
+        $r = safe_db_get_one("SELECT COUNT(*) AS c FROM tasks WHERE status = 'pending'{$mine}", $p);
         $todoOpen = (int) ($r['c'] ?? 0);
+        $r = safe_db_get_one("SELECT COUNT(*) AS c FROM tasks WHERE status IN ('blocked','in_progress'){$mine}", $p);
+        $todoHelp = (int) ($r['c'] ?? 0);
     } catch (Throwable $e) {
         $todoOpen = 0;
+        $todoHelp = 0;
     }
 }
 
@@ -126,11 +137,11 @@ if ($hasNotices) {
     }
 }
 
+$noPhoto = 0;
+$noPhone = 0;
+$noClass = 0;
 if ($hasStudents) {
     $baseWhere = "LOWER(COALESCE(s.status,'active')) IN ('active','pending') AND {$ayStu}";
-    $noPhoto = 0;
-    $noPhone = 0;
-    $noClass = 0;
     if (function_exists('column_exists') && column_exists('students', 'photo_path')) {
         $r = safe_db_get_one(
             "SELECT COUNT(*) AS c FROM students s
@@ -167,7 +178,7 @@ if ($hasEnquiries) {
          WHERE LOWER(COALESCE(status,'new')) IN ('new','pending')
            AND created_at BETWEEN :a AND :b
          ORDER BY created_at DESC
-         LIMIT 8",
+         LIMIT 6",
         [':a' => $ayStart, ':b' => $ayEnd]
     ) ?: [];
 }
@@ -180,38 +191,107 @@ if ($hasStudents) {
          LEFT JOIN classes c ON c.id = s.class_id
          WHERE LOWER(COALESCE(s.status,'')) = 'pending' AND {$ayStu}
          ORDER BY s.created_at DESC
-         LIMIT 8",
+         LIMIT 6",
         $ayP()
     ) ?: [];
 }
 
+$birthdays = function_exists('dash_birthdays_today')
+    ? dash_birthdays_today($ay !== '' ? $ay : null)
+    : ['students' => [], 'count' => 0];
+
 require_once __DIR__ . '/../includes/header.php';
 ?>
 <link href="<?php echo htmlspecialchars(rtrim(defined('BASE_URL') ? BASE_URL : '/', '/')); ?>/assets/css/dashboard-cards.css" rel="stylesheet">
+<style>
+.rx-action { display:flex; flex-direction:column; align-items:flex-start; gap:.35rem; min-height:108px; }
+.rx-action i { font-size:1.45rem; }
+.rx-action strong { font-size:1.02rem; }
+.rx-action span { font-size:.8rem; color:#64748b; font-weight:600; }
+</style>
 
 <div class="dc-page">
   <div class="dc-ay-bar">
-    <div class="dc-ay-chip"><i class="bi bi-person-plus"></i> Reception · <?php echo e($ayLabel); ?> · Updated <?php echo e($lastUpdated); ?></div>
+    <div class="dc-ay-chip d-none d-md-inline-flex"><i class="bi bi-person-plus"></i> Reception · <?php echo e($ayLong); ?> · Updated <?php echo e($lastUpdated); ?></div>
+    <div class="dc-ay-mobile d-md-none">
+      <?php if (function_exists('render_dashboard_academic_year_dropdown')) {
+          render_dashboard_academic_year_dropdown();
+      } ?>
+      <span class="dc-ay-mobile-meta">Updated <?php echo e($lastUpdated); ?></span>
+    </div>
   </div>
+
+  <p class="text-muted small mb-3">Front desk for today: add a child, call a parent, or finish a form. Graphs stay on the owner dashboard.</p>
 
   <section class="dc-section">
     <h2 class="dc-section-title">Do this now</h2>
-    <div class="row g-2 mb-2">
-      <div class="col-md-6">
-        <a href="<?php echo e($admUrl); ?>" class="btn btn-success w-100 py-3 fw-semibold">
-          <i class="bi bi-person-plus-fill me-1"></i> New admission
-        </a>
-      </div>
-      <div class="col-md-6">
-        <a href="<?php echo e($enqUrl); ?>" class="btn btn-outline-success w-100 py-3 fw-semibold">
-          <i class="bi bi-telephone me-1"></i> Call enquiries
-        </a>
-      </div>
+    <div class="dc-grid dc-grid-3">
+      <a href="<?php echo e($admUrl); ?>" class="dc-card dc-card--link rx-action">
+        <i class="bi bi-person-plus-fill text-success"></i>
+        <strong>New child</strong>
+        <span>Fill admission for this year</span>
+      </a>
+      <a href="<?php echo e($enqUrl); ?>" class="dc-card dc-card--link rx-action">
+        <i class="bi bi-telephone-fill" style="color:#d97706"></i>
+        <strong>Call parents</strong>
+        <span><?php echo (int) $enquiriesOpen; ?> enquiry<?php echo $enquiriesOpen === 1 ? '' : 'ies'; ?> waiting</span>
+      </a>
+      <a href="<?php echo e($alertUrl); ?>" class="dc-card dc-card--link rx-action">
+        <i class="bi bi-clipboard-check" style="color:#3aa8f0"></i>
+        <strong>Finish forms</strong>
+        <span><?php echo (int) $pendingAdmissions; ?> admission<?php echo $pendingAdmissions === 1 ? '' : 's'; ?> not complete</span>
+      </a>
     </div>
   </section>
 
   <section class="dc-section">
-    <h2 class="dc-section-title">This year</h2>
+    <h2 class="dc-section-title">Today at preschool · <?php echo e($todayLabel); ?></h2>
+    <div class="dc-grid dc-grid-3">
+      <div class="dc-card">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--amber"><i class="bi bi-cake2-fill"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">Birthdays</span>
+            <span class="dc-card-value"><?php echo (int) ($birthdays['count'] ?? 0); ?></span>
+            <span class="dc-card-meta">Wish them in class</span>
+          </div>
+        </div>
+        <?php if (!empty($birthdays['students'])): ?>
+          <ul class="dc-birthday-list">
+            <?php foreach (array_slice($birthdays['students'], 0, 5) as $b): ?>
+              <li>
+                <span class="name"><?php echo e($stuName($b)); ?></span>
+                <span class="meta"><?php echo e((string) ($b['class_name'] ?? '')); ?><?php echo isset($b['age_years']) ? ' · ' . (int) $b['age_years'] . ' yrs' : ''; ?></span>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
+      </div>
+      <a href="<?php echo e($enqUrl); ?>" class="dc-card dc-card--link">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--pink"><i class="bi bi-chat-dots-fill"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">New enquiries today</span>
+            <span class="dc-card-value"><?php echo $todayInAy ? (int) $enquiriesToday : 0; ?></span>
+            <span class="dc-card-meta"><?php echo $todayInAy ? 'Call if they asked about admission' : 'Outside this year'; ?></span>
+          </div>
+        </div>
+      </a>
+      <a href="<?php echo e($todoHelpUrl); ?>" class="dc-card dc-card--link">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--rose"><i class="bi bi-exclamation-triangle-fill"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">Problems</span>
+            <span class="dc-card-value<?php echo $todoHelp > 0 ? ' dc-card-value--warn' : ''; ?>"><?php echo (int) $todoHelp; ?></span>
+            <span class="dc-card-meta">Stuck to-do — ask owner</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <section class="dc-section">
+    <h2 class="dc-section-title">This year · <?php echo e($ayLabel); ?></h2>
     <div class="dc-grid dc-grid-4">
       <a href="<?php echo e($stuUrl); ?>" class="dc-card dc-card--link">
         <div class="dc-card-top">
@@ -219,17 +299,17 @@ require_once __DIR__ . '/../includes/header.php';
           <div class="dc-card-info">
             <span class="dc-card-label">Children</span>
             <span class="dc-card-value"><?php echo number_format($studentsYear); ?></span>
-            <span class="dc-card-meta"><?php echo e($ayLabel); ?></span>
+            <span class="dc-card-meta">On the register</span>
           </div>
         </div>
       </a>
       <a href="<?php echo e($enqUrl); ?>" class="dc-card dc-card--link">
         <div class="dc-card-top">
-          <div class="dc-card-icon dc-card-icon--pink"><i class="bi bi-chat-left-text"></i></div>
+          <div class="dc-card-icon dc-card-icon--pink"><i class="bi bi-telephone"></i></div>
           <div class="dc-card-info">
-            <span class="dc-card-label">Enquiries to call</span>
+            <span class="dc-card-label">To call</span>
             <span class="dc-card-value"><?php echo number_format($enquiriesOpen); ?></span>
-            <span class="dc-card-meta"><?php echo $todayInAy ? (number_format($enquiriesToday) . ' today') : 'Not in this year'; ?></span>
+            <span class="dc-card-meta">Open enquiries</span>
           </div>
         </div>
       </a>
@@ -237,9 +317,9 @@ require_once __DIR__ . '/../includes/header.php';
         <div class="dc-card-top">
           <div class="dc-card-icon dc-card-icon--amber"><i class="bi bi-exclamation-circle"></i></div>
           <div class="dc-card-info">
-            <span class="dc-card-label">Need attention</span>
+            <span class="dc-card-label">Need a photo / phone / class</span>
             <span class="dc-card-value dc-card-value--warn"><?php echo number_format($alertCount); ?></span>
-            <span class="dc-card-meta"><?php echo number_format($pendingAdmissions); ?> admission not finished</span>
+            <span class="dc-card-meta"><?php echo (int) $noPhoto; ?> photo · <?php echo (int) $noPhone; ?> phone · <?php echo (int) $noClass; ?> class</span>
           </div>
         </div>
       </a>
@@ -270,7 +350,7 @@ require_once __DIR__ . '/../includes/header.php';
             <?php foreach ($recentEnq as $item):
                 $ph = $phoneDigits($item['phone'] ?? '');
                 $ph10 = $ph !== '' ? substr($ph, -10) : '';
-            ?>
+                ?>
               <li class="d-flex justify-content-between gap-2 py-2 border-bottom">
                 <div>
                   <div class="fw-semibold"><?php echo e(trim((string) ($item['name'] ?? '')) !== '' ? (string) $item['name'] : 'Enquiry'); ?></div>
@@ -302,7 +382,7 @@ require_once __DIR__ . '/../includes/header.php';
               <li class="d-flex justify-content-between gap-2 py-2 border-bottom">
                 <div>
                   <div class="fw-semibold"><?php echo e($stuName($s)); ?></div>
-                  <div class="small text-muted"><?php echo e((string) ($s['class_name'] ?? '') !== '' ? (string) $s['class_name'] : 'No class'); ?></div>
+                  <div class="small text-muted"><?php echo e((string) ($s['class_name'] ?? '') !== '' ? (string) $s['class_name'] : 'No class yet'); ?></div>
                 </div>
                 <a class="btn btn-sm btn-outline-primary text-nowrap" href="<?php echo e($editStu((int) $s['id'])); ?>">Open</a>
               </li>
@@ -314,18 +394,17 @@ require_once __DIR__ . '/../includes/header.php';
   </section>
 
   <section class="dc-section">
-    <h2 class="dc-section-title">Other pages</h2>
+    <h2 class="dc-section-title">Also</h2>
     <div class="row g-2">
       <?php
       $quick = [
-          [$stuUrl, 'bi-people', 'Students'],
-          [$alertUrl, 'bi-bell', 'Alerts'],
+          [$stuUrl, 'bi-people', 'Children list'],
           [$todoUrl, 'bi-check2-square', 'To-do'],
-          [$noticeUrl, 'bi-megaphone', 'Notices' . ($noticesLive > 0 ? ' (' . $noticesLive . ')' : '')],
-          [$newsUrl, 'bi-newspaper', 'News & Events'],
+          [$noticeUrl, 'bi-megaphone', 'Parent notice' . ($noticesLive > 0 ? ' (' . $noticesLive . ')' : '')],
+          [$newsUrl, 'bi-newspaper', 'News'],
       ];
       foreach ($quick as $q): ?>
-        <div class="col-6 col-md-4 col-lg">
+        <div class="col-6 col-md-3">
           <a href="<?php echo e($q[0]); ?>" class="btn btn-outline-primary w-100 py-3 d-flex flex-column align-items-center gap-1">
             <i class="bi <?php echo e($q[1]); ?> fs-4"></i>
             <span class="small fw-semibold"><?php echo e($q[2]); ?></span>
