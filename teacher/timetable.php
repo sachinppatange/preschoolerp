@@ -1,373 +1,443 @@
 <?php
 /**
- * teacher/timetable.php
- *
- * Timetable - Add / View entries (teacher)
- *
- * Change requested: provide a text box for Subject (free text) in addition to existing subject_id dropdown.
- * Behavior:
- *  - Shows classes assigned to the logged-in teacher (classes.teacher_id or teacher_classes mapping).
- *  - Subject input:
- *      * If timetable table has a text column for subject (subject_name / subject_text / subject), the entered text is stored there.
- *      * Else, if a subjects table exists, a new subject row will be inserted and its id used.
- *      * Else, if subject_id dropdown chosen, that will be used.
- *  - Uses CSRF protection and PDO prepared statements.
- *  - Safe: detects available columns and tables, avoids redeclaring functions if project provides them.
- *
- * Place this file at: /pioneerplayschool01/teacher/timetable.php
+ * teacher/timetable.php — weekly class routine for this class.
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('teacher');
 $DEBUG = panel_debug();
 
-/* ---------- Config ---------- */
-$TT_TABLE = 'timetable';
-$AUTO_CREATE_TABLE = false; // set true for local/dev to auto-create timetable table
-
-/* ---------- Require teacher login ---------- */
-$teacherId = auth_user_id() ?? 0;
-$teacherSession = auth_user() ?? [];
-
-/* ---------- Determine classes assigned to this teacher ---------- */
+$teacherId = (int) (auth_user_id() ?? 0);
+$schoolId = function_exists('auth_school_id') ? (int) auth_school_id() : 1;
+$csrf = function_exists('get_csrf_token') ? get_csrf_token() : '';
 $assignedClasses = panel_teacher_assigned_classes($teacherId);
-$assignedClassIds = array_map(fn($c)=>(int)$c['id'], $assignedClasses);
 
-$ttExists = table_exists($TT_TABLE);
-if (!$ttExists && $AUTO_CREATE_TABLE) {
-    $createSql = <<<SQL
-CREATE TABLE IF NOT EXISTS `{$TT_TABLE}` (
-  `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `school_id` INT DEFAULT NULL,
-  `class_id` INT NOT NULL,
-  `day_of_week` VARCHAR(16) NOT NULL,
-  `period` VARCHAR(32) DEFAULT NULL,
-  `start_time` TIME DEFAULT NULL,
-  `end_time` TIME DEFAULT NULL,
-  `subject_id` INT DEFAULT NULL,
-  `subject_name` VARCHAR(255) DEFAULT NULL,
-  `teacher_id` INT DEFAULT NULL,
-  `room` VARCHAR(64) DEFAULT NULL,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME DEFAULT NULL,
-  INDEX `idx_class_day` (`class_id`, `day_of_week`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-SQL;
-    safe_db_run($createSql);
-    $ttExists = table_exists($TT_TABLE);
-}
+$classRank = static function (array $c): int {
+    $n = strtolower((string) ($c['name'] ?? ''));
+    if (str_starts_with($n, 'play')) {
+        return 1;
+    }
+    if (str_starts_with($n, 'nurs')) {
+        return 2;
+    }
+    if (str_starts_with($n, 'l')) {
+        return 3;
+    }
+    if (str_starts_with($n, 'u')) {
+        return 4;
+    }
+    return 9;
+};
+usort($assignedClasses, static function (array $a, array $b) use ($classRank): int {
+    $d = $classRank($a) <=> $classRank($b);
+    return $d !== 0 ? $d : strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+});
 
-/* ---------- Detect which subject columns are available ---------- */
-$ttCols = $ttExists ? get_table_columns($TT_TABLE) : [];
-$col_tt_subject_id = in_array('subject_id', $ttCols, true) ? 'subject_id' : null;
-$col_tt_subject_text = null;
-foreach (['subject_name','subject_text','subject'] as $c) { if (in_array($c, $ttCols, true)) { $col_tt_subject_text = $c; break; } }
+$allowedIds = array_values(array_filter(array_map(static fn($c) => (int) ($c['id'] ?? 0), $assignedClasses)));
+$canClass = static function (int $classId) use ($allowedIds): bool {
+    if (function_exists('auth_is_owner_super') && auth_is_owner_super()) {
+        return true;
+    }
+    return in_array($classId, $allowedIds, true);
+};
 
-/* ---------- Subjects table detection (for creating new subjects if needed) ---------- */
-$subjectTable = null;
-foreach (['subjects','subject','subjects_master','subject_master','subject_list'] as $t) {
-    if (table_exists($t)) { $subjectTable = $t; break; }
-}
-$subjectDisplayCol = null;
-if ($subjectTable) {
-    $subCols = get_table_columns($subjectTable);
-    foreach (['name','title','subject_name','subject'] as $c) { if (in_array($c, $subCols, true)) { $subjectDisplayCol = $c; break; } }
-    $subjectIdCol = in_array('id', $subCols, true) ? 'id' : (in_array('subject_id', $subCols, true) ? 'subject_id' : null);
-}
+$days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+$todayName = date('l');
+$defaultDay = in_array($todayName, $days, true) ? $todayName : 'Monday';
 
-$teachers = [];
-$tTable = null;
-if (table_exists('teachers')) $tTable = 'teachers';
-elseif (table_exists('staff')) $tTable = 'staff';
-elseif (table_exists('users')) $tTable = 'users';
-if ($tTable) {
-    $cols = get_table_columns($tTable);
-    if (in_array('name', $cols, true)) {
-        $rows = safe_db_get_all("SELECT id, name FROM `$tTable` ORDER BY name ASC");
-        foreach ($rows as $r) $teachers[] = ['id'=>(int)$r['id'],'label'=>$r['name']];
-    } else {
-        $rows = safe_db_get_all("SELECT id, first_name, last_name FROM `$tTable` ORDER BY id ASC");
-        foreach ($rows as $r) $teachers[] = ['id'=>(int)$r['id'],'label'=>trim(($r['first_name'] ?? '') . ' ' . ($r['last_name'] ?? ''))];
+$activities = ['Circle time', 'Free play', 'Snack', 'Outdoor', 'Art', 'Story', 'Nap', 'Music'];
+
+$ttExists = table_exists('timetable');
+$hasCol = static function (string $name) use ($ttExists): bool {
+    return $ttExists && function_exists('column_exists') && column_exists('timetable', $name);
+};
+
+$textCol = null;
+foreach (['subject_name', 'subject_text', 'subject'] as $c) {
+    if ($hasCol($c)) {
+        $textCol = $c;
+        break;
     }
 }
 
-/* ---------- POST: create timetable entry (handles subject_text logic) ---------- */
-$messages = []; $errors = [];
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['action']) && $_POST['action'] === 'create')) {
-    // CSRF
-    if (!validate_csrf_token($_POST['csrf'] ?? '')) {
-        $errors[] = 'Invalid CSRF token.';
-    } elseif (empty($assignedClassIds)) {
-        $errors[] = 'You are not assigned to any class.';
-    } elseif (!$ttExists) {
-        $errors[] = "Timetable table '{$TT_TABLE}' does not exist.";
+$subjectTable = null;
+$subjectDisplayCol = null;
+$subjectIdCol = null;
+if (table_exists('subjects')) {
+    $subjectTable = 'subjects';
+} elseif (table_exists('subject')) {
+    $subjectTable = 'subject';
+}
+if ($subjectTable) {
+    $subCols = function_exists('get_table_columns') ? get_table_columns($subjectTable) : [];
+    foreach (['name', 'title', 'subject_name', 'subject'] as $c) {
+        if (in_array($c, $subCols, true)) {
+            $subjectDisplayCol = $c;
+            break;
+        }
+    }
+    $subjectIdCol = in_array('id', $subCols, true) ? 'id' : (in_array('subject_id', $subCols, true) ? 'subject_id' : null);
+}
+
+$fmtTime = static function (?string $t): string {
+    $t = trim((string) $t);
+    if ($t === '' || $t === '00:00:00') {
+        return '';
+    }
+    $ts = strtotime('1970-01-01 ' . $t);
+    return $ts ? date('g:i a', $ts) : substr($t, 0, 5);
+};
+
+$messages = [];
+$errors = [];
+
+$selectedClassId = (int) ($_POST['class_id'] ?? $_GET['class_id'] ?? 0);
+if ($selectedClassId <= 0 && $allowedIds !== []) {
+    $selectedClassId = $allowedIds[0];
+}
+if ($selectedClassId > 0 && !$canClass($selectedClassId)) {
+    $selectedClassId = 0;
+}
+
+$selectedDay = trim((string) ($_POST['day_of_week'] ?? $_GET['day'] ?? $defaultDay));
+if (!in_array($selectedDay, $days, true)) {
+    $selectedDay = $defaultDay;
+}
+
+if (function_exists('secure_delete_blocked_get') && secure_delete_blocked_get((string) ($_REQUEST['action'] ?? ''))) {
+    $errors[] = 'Delete needs confirmation.';
+}
+$deleteId = function_exists('secure_delete_id') ? secure_delete_id() : 0;
+if ($deleteId > 0 && $ttExists) {
+    $row = safe_db_get_one('SELECT id, class_id, teacher_id FROM timetable WHERE id = :id LIMIT 1', [':id' => $deleteId]);
+    $okDel = $row && $canClass((int) ($row['class_id'] ?? 0));
+    if (!$okDel) {
+        $errors[] = 'You cannot delete this slot.';
+    } elseif (safe_db_run('DELETE FROM timetable WHERE id = :id', [':id' => $deleteId])) {
+        $backDay = trim((string) ($_POST['day'] ?? $selectedDay));
+        if (!in_array($backDay, $days, true)) {
+            $backDay = $selectedDay;
+        }
+        header('Location: ?class_id=' . (int) ($row['class_id'] ?? 0) . '&day=' . rawurlencode($backDay) . '&deleted=1');
+        exit;
     } else {
-        // read inputs
-        $class_id = isset($_POST['class_id']) ? (int)$_POST['class_id'] : 0;
-        $day = isset($_POST['day_of_week']) ? trim($_POST['day_of_week']) : '';
-        $period = isset($_POST['period']) ? trim($_POST['period']) : null;
-        $start_time = isset($_POST['start_time']) && $_POST['start_time'] !== '' ? trim($_POST['start_time']) : null;
-        $end_time = isset($_POST['end_time']) && $_POST['end_time'] !== '' ? trim($_POST['end_time']) : null;
-        $subject_id_post = isset($_POST['subject_id']) && $_POST['subject_id'] !== '' ? (int)$_POST['subject_id'] : null;
-        $subject_text = isset($_POST['subject_text']) ? trim($_POST['subject_text']) : '';
-        $teacher_id = isset($_POST['teacher_id']) && $_POST['teacher_id'] !== '' ? (int)$_POST['teacher_id'] : null;
-        $room = isset($_POST['room']) ? trim($_POST['room']) : null;
+        $errors[] = 'Could not delete.';
+    }
+}
 
-        // validations
-        if ($class_id <= 0) $errors[] = 'Please select a class.';
-        elseif (!in_array($class_id, $assignedClassIds, true)) $errors[] = 'Invalid class selection. Choose one of your assigned classes.';
-        if ($day === '') $errors[] = 'Please select a day.';
-        if (empty($period) && empty($start_time)) $errors[] = 'Provide period label or start time.';
-        if ($start_time !== null && !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $start_time)) $errors[] = 'Start time invalid format.';
-        if ($end_time !== null && !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $end_time)) $errors[] = 'End time invalid format.';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'create') {
+    if (!function_exists('validate_csrf_token') || !validate_csrf_token((string) ($_POST['csrf'] ?? ''))) {
+        $errors[] = 'Please reload the page and try again.';
+    } elseif (!$ttExists) {
+        $errors[] = 'Timetable is not set up yet.';
+    } elseif ($selectedClassId <= 0 || !$canClass($selectedClassId)) {
+        $errors[] = 'Choose a class.';
+    } else {
+        $activity = trim((string) ($_POST['activity'] ?? ''));
+        $start = trim((string) ($_POST['start_time'] ?? ''));
+        $end = trim((string) ($_POST['end_time'] ?? ''));
+        $place = trim((string) ($_POST['room'] ?? ''));
+        if ($activity === '') {
+            $errors[] = 'Write what the children will do.';
+        }
+        if ($start === '') {
+            $errors[] = 'Pick a start time.';
+        } elseif (!preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $start)) {
+            $errors[] = 'Start time is not valid.';
+        }
+        if ($end !== '' && !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $end)) {
+            $errors[] = 'End time is not valid.';
+        }
+        if ($end === '') {
+            $end = null;
+        }
 
-        if (empty($errors)) {
-            $pdo = pdo_connect();
-            if (!($pdo instanceof PDO)) {
-                $errors[] = 'Database connection failed.';
-            } else {
-                try {
-                    // Decide how to store subject:
-                    // Priority:
-                    // 1) If subject_text provided and timetable has a subject text column -> store subject text there and subject_id as provided (optional)
-                    // 2) Else if subject_text provided and subjects table exists -> insert new subject (if not exists) and use its id
-                    // 3) Else if subject_id selected -> use subject_id
-                    $use_subject_id = null;
-                    $use_subject_text = null;
-
-                    if ($subject_text !== '') {
-                        if ($col_tt_subject_text) {
-                            $use_subject_text = $subject_text;
-                            // if user also selected subject_id, keep it; else null
-                            $use_subject_id = $subject_id_post;
-                        } elseif ($subjectTable && $subjectIdCol && $subjectDisplayCol) {
-                            // try to find existing subject with same display value
-                            $found = safe_db_get_one("SELECT `{$subjectIdCol}` AS id FROM `{$subjectTable}` WHERE `{$subjectDisplayCol}` = :val LIMIT 1", [':val'=>$subject_text]);
-                            if ($found && !empty($found['id'])) {
-                                $use_subject_id = (int)$found['id'];
-                            } else {
-                                // insert new subject
-                                $ins = $pdo->prepare("INSERT INTO `{$subjectTable}` (`{$subjectDisplayCol}`) VALUES (:val)");
-                                $ins->execute([':val'=>$subject_text]);
-                                $use_subject_id = (int)$pdo->lastInsertId();
-                            }
-                        } else {
-                            // cannot store text anywhere; fall back to subject_id_post if provided
-                            $use_subject_id = $subject_id_post;
+        if ($errors === []) {
+            $useSubjectId = null;
+            $useText = $activity;
+            if ($textCol === null && $subjectTable && $subjectIdCol && $subjectDisplayCol && $hasCol('subject_id')) {
+                $found = safe_db_get_one(
+                    "SELECT `{$subjectIdCol}` AS id FROM `{$subjectTable}` WHERE `{$subjectDisplayCol}` = :val LIMIT 1",
+                    [':val' => $activity]
+                );
+                if ($found && !empty($found['id'])) {
+                    $useSubjectId = (int) $found['id'];
+                } else {
+                    try {
+                        $pdo = function_exists('pdo_connect') ? pdo_connect() : null;
+                        if ($pdo instanceof PDO) {
+                            $ins = $pdo->prepare("INSERT INTO `{$subjectTable}` (`{$subjectDisplayCol}`) VALUES (:val)");
+                            $ins->execute([':val' => $activity]);
+                            $useSubjectId = (int) $pdo->lastInsertId();
                         }
-                    } else {
-                        // no subject text provided, use subject_id if any
-                        $use_subject_id = $subject_id_post;
+                    } catch (Throwable $e) {
+                        $errors[] = 'Could not save the activity name.';
                     }
-
-                    // Build insert columns depending on table structure
-                    $insertCols = ['class_id','day_of_week','period','start_time','end_time','teacher_id','room','created_at'];
-                    $placeholders = [':class_id',':day',':period',':start_time',':end_time',':teacher_id',':room',':created_at'];
-                    $params = [
-                        ':class_id' => $class_id,
-                        ':day' => $day,
-                        ':period' => $period,
-                        ':start_time' => $start_time,
-                        ':end_time' => $end_time,
-                        ':teacher_id' => $teacher_id,
-                        ':room' => $room,
-                        ':created_at' => date('Y-m-d H:i:s'),
-                    ];
-
-                    if ($col_tt_subject_id && $use_subject_id !== null) {
-                        $insertCols[] = $col_tt_subject_id;
-                        $placeholders[] = ':subject_id';
-                        $params[':subject_id'] = $use_subject_id;
-                    }
-                    if ($col_tt_subject_text && $use_subject_text !== null) {
-                        $insertCols[] = $col_tt_subject_text;
-                        $placeholders[] = ':subject_text';
-                        $params[':subject_text'] = $use_subject_text;
-                    }
-
-                    $sql = "INSERT INTO `{$TT_TABLE}` (" . implode(',', array_map(fn($c) => "`{$c}`", $insertCols)) . ") VALUES (" . implode(',', $placeholders) . ")";
-                    $stmt = $pdo->prepare($sql);
-                    $stmt->execute($params);
-
-                    // success: redirect (PRG)
-                    $_SESSION['timetable_msg'] = 'Timetable entry added successfully.';
-                    $redirect = strtok($_SERVER['REQUEST_URI'], '?') . '?class_id=' . $class_id;
-                    header('Location: ' . $redirect);
-                    exit;
-                } catch (Throwable $e) {
-                    $errors[] = 'Failed to save entry.' . (defined('DEV_SHOW_ERRORS') && DEV_SHOW_ERRORS ? ' ' . $e->getMessage() : '');
                 }
+            }
+
+            if ($errors === []) {
+                $cols = ['class_id', 'day_of_week'];
+                $ph = [':class_id', ':day'];
+                $params = [
+                    ':class_id' => $selectedClassId,
+                    ':day' => $selectedDay,
+                ];
+                if ($hasCol('start_time')) {
+                    $cols[] = 'start_time';
+                    $ph[] = ':start_time';
+                    $params[':start_time'] = $start;
+                }
+                if ($hasCol('end_time')) {
+                    $cols[] = 'end_time';
+                    $ph[] = ':end_time';
+                    $params[':end_time'] = $end;
+                }
+                if ($hasCol('period')) {
+                    $cols[] = 'period';
+                    $ph[] = ':period';
+                    $params[':period'] = $fmtTime($start);
+                }
+                if ($hasCol('teacher_id')) {
+                    $cols[] = 'teacher_id';
+                    $ph[] = ':teacher_id';
+                    $params[':teacher_id'] = $teacherId > 0 ? $teacherId : null;
+                }
+                if ($hasCol('room')) {
+                    $cols[] = 'room';
+                    $ph[] = ':room';
+                    $params[':room'] = $place !== '' ? $place : null;
+                }
+                if ($hasCol('school_id')) {
+                    $cols[] = 'school_id';
+                    $ph[] = ':school_id';
+                    $params[':school_id'] = $schoolId > 0 ? $schoolId : null;
+                }
+                if ($textCol !== null) {
+                    $cols[] = $textCol;
+                    $ph[] = ':activity';
+                    $params[':activity'] = $useText;
+                }
+                if ($hasCol('subject_id') && $useSubjectId !== null) {
+                    $cols[] = 'subject_id';
+                    $ph[] = ':subject_id';
+                    $params[':subject_id'] = $useSubjectId;
+                }
+                if ($hasCol('created_at')) {
+                    $cols[] = 'created_at';
+                    $ph[] = ':created_at';
+                    $params[':created_at'] = date('Y-m-d H:i:s');
+                }
+
+                $sql = 'INSERT INTO `timetable` (' . implode(',', array_map(static fn($c) => '`' . $c . '`', $cols)) . ') VALUES (' . implode(',', $ph) . ')';
+                if (safe_db_run($sql, $params)) {
+                    header('Location: ?class_id=' . $selectedClassId . '&day=' . rawurlencode($selectedDay) . '&saved=1');
+                    exit;
+                }
+                $errors[] = 'Could not save this slot.';
             }
         }
     }
 }
 
-/* show session message */
-if (!empty($_SESSION['timetable_msg'])) { $messages[] = $_SESSION['timetable_msg']; unset($_SESSION['timetable_msg']); }
+if (!empty($_GET['saved'])) {
+    $messages[] = 'Slot added to the weekly routine.';
+}
+if (!empty($_GET['deleted'])) {
+    $messages[] = 'Slot removed.';
+}
 
-$subjects = [];
-if ($subjectTable && $subjectDisplayCol && $subjectIdCol) {
-    $rows = safe_db_get_all("SELECT `$subjectIdCol` AS id, `$subjectDisplayCol` AS label FROM `$subjectTable` ORDER BY `$subjectDisplayCol` ASC");
-    foreach ($rows as $r) $subjects[] = ['id'=>(int)$r['id'],'label'=>$r['label']];
-} else {
-    // fallback: distinct subject_id values from timetable (to show something if present)
-    if ($ttExists) {
-        $rows = safe_db_get_all("SELECT DISTINCT subject_id FROM `{$TT_TABLE}` WHERE subject_id IS NOT NULL AND subject_id != ''");
-        foreach ($rows as $r) {
-            $sid = isset($r['subject_id']) ? (int)$r['subject_id'] : 0;
-            if ($sid > 0) $subjects[] = ['id'=>$sid,'label'=>'Subject #' . $sid];
+$weekEntries = [];
+$dayEntries = [];
+$subjectMap = [];
+if ($ttExists && $selectedClassId > 0) {
+    $weekEntries = safe_db_get_all(
+        "SELECT * FROM timetable
+         WHERE class_id = :cid
+         ORDER BY FIELD(day_of_week,'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'), start_time ASC, id ASC",
+        [':cid' => $selectedClassId]
+    ) ?: [];
+    $sids = [];
+    foreach ($weekEntries as $r) {
+        $d = (string) ($r['day_of_week'] ?? '');
+        if ($d === $selectedDay) {
+            $dayEntries[] = $r;
+        }
+        $sid = (int) ($r['subject_id'] ?? 0);
+        if ($sid > 0) {
+            $sids[$sid] = $sid;
+        }
+    }
+    if ($sids !== [] && $subjectTable && $subjectDisplayCol && $subjectIdCol) {
+        $in = implode(',', array_map('intval', array_values($sids)));
+        $rows = safe_db_get_all("SELECT `{$subjectIdCol}` AS id, `{$subjectDisplayCol}` AS label FROM `{$subjectTable}` WHERE `{$subjectIdCol}` IN ({$in})");
+        foreach ($rows ?: [] as $sr) {
+            $subjectMap[(int) $sr['id']] = (string) ($sr['label'] ?? '');
         }
     }
 }
 
-/* ---------- Fetch classes for preview (only assigned classes shown) ---------- */
-$selected_class = isset($_GET['class_id']) ? (int)$_GET['class_id'] : ($assignedClassIds[0] ?? 0);
-$entries = [];
-if ($ttExists && $selected_class > 0 && in_array($selected_class, $assignedClassIds, true)) {
-    $entries = safe_db_get_all("SELECT * FROM `{$TT_TABLE}` WHERE class_id = :cid ORDER BY FIELD(day_of_week,'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'), COALESCE(period,'') ASC, start_time ASC", [':cid'=>$selected_class]);
+$activityLabel = static function (array $r) use ($textCol, $subjectMap): string {
+    if ($textCol && trim((string) ($r[$textCol] ?? '')) !== '') {
+        return trim((string) $r[$textCol]);
+    }
+    foreach (['subject_name', 'subject_text', 'subject'] as $c) {
+        if (!is_numeric((string) ($r[$c] ?? '')) && trim((string) ($r[$c] ?? '')) !== '') {
+            return trim((string) $r[$c]);
+        }
+    }
+    $sid = (int) ($r['subject_id'] ?? 0);
+    if ($sid > 0 && isset($subjectMap[$sid]) && $subjectMap[$sid] !== '') {
+        return $subjectMap[$sid];
+    }
+    return trim((string) ($r['period'] ?? '')) !== '' ? (string) $r['period'] : 'Activity';
+};
+
+$byDay = [];
+foreach ($days as $d) {
+    $byDay[$d] = [];
+}
+foreach ($weekEntries as $r) {
+    $d = (string) ($r['day_of_week'] ?? '');
+    if (isset($byDay[$d])) {
+        $byDay[$d][] = $r;
+    }
 }
 
-/* ---------- CSRF token ---------- */
-$csrf = get_csrf_token();
+$selectedName = '';
+foreach ($assignedClasses as $c) {
+    if ((int) $c['id'] === $selectedClassId) {
+        $selectedName = (string) ($c['name'] ?? '');
+        break;
+    }
+}
 
-/* ---------- Render page ---------- */
-$pageTitle = 'Timetable - Add Entry';
+$qs = static function (int $classId, string $day): string {
+    return '?class_id=' . $classId . '&day=' . rawurlencode($day);
+};
+
+$page_title = 'Class routine';
+$pageTitle = $page_title;
 require_once __DIR__ . '/../includes/header.php';
 ?>
+<style>
+.tt-chip { display:inline-flex; border:1px solid #dbe7fb; background:#fff; border-radius:999px; padding:.35rem .85rem; text-decoration:none; color:#1e3a5f; font-weight:600; font-size:.9rem; margin:0 .4rem .5rem 0; cursor:pointer; }
+.tt-chip.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+.tt-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:14px 16px; margin-bottom:10px; }
+.tt-slot { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; padding:10px 0; border-bottom:1px solid #eef2f7; }
+.tt-slot:last-child { border-bottom:0; padding-bottom:0; }
+.tt-time { font-weight:800; color:#1d4ed8; min-width:7.5rem; }
+.tt-act { font-weight:700; color:#1e3a5f; }
+.tt-week { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; }
+.tt-weekcol { background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:8px 10px; }
+.tt-weekcol h6 { font-size:.78rem; margin:0 0 6px; color:#64748b; text-transform:uppercase; letter-spacing:.03em; }
+.tt-mini { font-size:.8rem; margin-bottom:4px; color:#334155; }
+</style>
 
-<?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo e($m); ?></div><?php endforeach; ?>
-<?php foreach ($errors as $er): ?><div class="alert alert-danger"><?php echo e($er); ?></div><?php endforeach; ?>
+<?php foreach ($messages as $m): ?><div class="alert alert-success py-2"><?php echo e($m); ?></div><?php endforeach; ?>
+<?php foreach ($errors as $er): ?><div class="alert alert-danger py-2"><?php echo e($er); ?></div><?php endforeach; ?>
 
-<?php if (empty($assignedClasses)): ?>
-  <div class="alert alert-warning">You have no assigned classes. Contact administrator to assign classes to you.</div>
-<?php endif; ?>
+<?php if ($assignedClasses === []): ?>
+  <div class="alert alert-info mb-0">No class is assigned yet. Ask the owner to assign you a class.</div>
+<?php elseif (!$ttExists): ?>
+  <div class="alert alert-warning mb-0">Class routine is not set up yet.</div>
+<?php else: ?>
 
-<?php if (!$ttExists): ?>
-  <div class="alert alert-warning">Timetable table '<?php echo e($TT_TABLE); ?>' not found. Create it first or enable AUTO_CREATE_TABLE in the script.</div>
-<?php endif; ?>
+  <p class="text-muted mb-2">This is the <strong>weekly class routine</strong> — what children do each day (circle time, snack, outdoor). Fill it once; change a slot if the day changes.</p>
 
-<div class="card mb-4">
-  <div class="card-body">
-    <form method="post" class="row g-3">
-      <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
-      <input type="hidden" name="action" value="create">
-
-      <div class="col-md-4">
-        <label class="form-label small">Class</label>
-        <select name="class_id" class="form-select" required <?php if (empty($assignedClasses)) echo 'disabled'; ?>>
-          <option value="">Select class</option>
-          <?php foreach ($assignedClasses as $c): $cid=(int)$c['id']; $label = (!empty($c['short_name']) ? $c['short_name'].' ' : '') . ($c['name'] ?? ''); ?>
-            <option value="<?php echo $cid; ?>" <?php if ($selected_class === $cid) echo 'selected'; ?>><?php echo e($label ?: ('Class #'.$cid)); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label small">Day</label>
-        <select name="day_of_week" class="form-select" required>
-          <option value="">Select day</option>
-          <?php foreach (['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] as $d): ?>
-            <option value="<?php echo e($d); ?>"><?php echo e($d); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label small">Period</label>
-        <input name="period" class="form-control" placeholder="e.g. 1, 2, Morning">
-      </div>
-
-      <div class="col-md-3">
-        <label class="form-label small">Start time</label>
-        <input type="time" name="start_time" class="form-control">
-      </div>
-
-      <div class="col-md-3">
-        <label class="form-label small">End time</label>
-        <input type="time" name="end_time" class="form-control">
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label small">Subject (choose or type)</label>
-        <div class="input-group">
-          <select name="subject_id" class="form-select">
-            <option value="">Select existing subject (optional)</option>
-            <?php foreach ($subjects as $s): ?>
-              <option value="<?php echo (int)$s['id']; ?>"><?php echo e($s['label']); ?></option>
-            <?php endforeach; ?>
-          </select>
-          <input type="text" name="subject_text" class="form-control" placeholder="Or type subject here (will be saved)">
-        </div>
-        <div class="form-text small">If you type text, it will be stored. If timetable supports subject text column it's saved there; otherwise a new subject will be created if possible.</div>
-      </div>
-
-      <div class="col-md-3">
-        <label class="form-label small">Teacher</label>
-        <select name="teacher_id" class="form-select">
-          <option value="">Select teacher (optional)</option>
-          <?php foreach ($teachers as $t): ?>
-            <option value="<?php echo (int)$t['id']; ?>"><?php echo e($t['label']); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-
-      <div class="col-md-5">
-        <label class="form-label small">Room</label>
-        <input name="room" class="form-control" placeholder="e.g. A101">
-      </div>
-
-      <div class="col-12 text-end">
-        <button class="btn btn-primary" <?php if (empty($assignedClasses) || !$ttExists) echo 'disabled'; ?>>Add Timetable Entry</button>
-      </div>
-    </form>
+  <div class="mb-3">
+    <?php foreach ($assignedClasses as $c):
+        $cid = (int) $c['id'];
+        ?>
+      <a class="tt-chip<?php echo $cid === $selectedClassId ? ' active' : ''; ?>" href="<?php echo e($qs($cid, $selectedDay)); ?>"><?php echo e((string) ($c['name'] ?? 'Class')); ?></a>
+    <?php endforeach; ?>
   </div>
-</div>
 
-<?php if ($ttExists && $selected_class > 0): ?>
-  <div class="card">
-    <div class="card-body">
-      <h6>Timetable for <?php $cn = array_values(array_filter($assignedClasses, fn($c)=> (int)$c['id'] === $selected_class)); echo e($cn[0]['name'] ?? ('Class #'.$selected_class)); ?></h6>
-      <?php if (empty($entries)): ?>
-        <div class="small-muted">No entries yet.</div>
-      <?php else: ?>
-        <table class="table table-sm mt-2">
-          <thead><tr><th>#</th><th>Day</th><th>Period</th><th>Start</th><th>End</th><th>Subject</th><th>Teacher</th><th>Room</th></tr></thead>
-          <tbody>
-            <?php $i=1; foreach ($entries as $r): ?>
-              <tr>
-                <td><?php echo $i++; ?></td>
-                <td><?php echo e($r['day_of_week'] ?? $r['day'] ?? ''); ?></td>
-                <td><?php echo e($r['period'] ?? ''); ?></td>
-                <td><?php echo e($r['start_time'] ?? ''); ?></td>
-                <td><?php echo e($r['end_time'] ?? ''); ?></td>
-                <td><?php
-                    // subject display: prefer subject text column, else try subject_id mapping, else show id
-                    $subLabel = '';
-                    if ($col_tt_subject_text && !empty($r[$col_tt_subject_text])) $subLabel = $r[$col_tt_subject_text];
-                    elseif (!empty($r['subject_name'])) $subLabel = $r['subject_name'];
-                    elseif (!empty($r['subject']) && !is_numeric($r['subject'])) $subLabel = $r['subject'];
-                    elseif (!empty($r['subject_id'])) {
-                        // try to map to subjects table label
-                        if ($subjectTable && $subjectDisplayCol && $subjectIdCol) {
-                            $srow = safe_db_get_one("SELECT `$subjectDisplayCol` AS label FROM `$subjectTable` WHERE `$subjectIdCol` = :id LIMIT 1", [':id'=>$r['subject_id']]);
-                            $subLabel = $srow['label'] ?? ('Subject #'.$r['subject_id']);
-                        } else $subLabel = 'Subject #'.$r['subject_id'];
-                    } else $subLabel = '';
-                    echo e($subLabel);
-                ?></td>
-                <td><?php echo e($r['teacher_id'] ?? ''); ?></td>
-                <td><?php echo e($r['room'] ?? ''); ?></td>
-              </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
-      <?php endif; ?>
+  <div class="mb-3">
+    <?php foreach ($days as $d):
+        $short = substr($d, 0, 3);
+        $isToday = $d === $todayName;
+        ?>
+      <a class="tt-chip<?php echo $d === $selectedDay ? ' active' : ''; ?>" href="<?php echo e($qs($selectedClassId, $d)); ?>"><?php echo e($short); ?><?php echo $isToday ? ' · today' : ''; ?></a>
+    <?php endforeach; ?>
+  </div>
+
+  <form method="post" class="tt-card" id="ttAddForm">
+    <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+    <input type="hidden" name="action" value="create">
+    <input type="hidden" name="class_id" value="<?php echo (int) $selectedClassId; ?>">
+    <input type="hidden" name="day_of_week" value="<?php echo e($selectedDay); ?>">
+    <div class="fw-bold mb-2">Add a slot · <?php echo e($selectedDay); ?><?php echo $selectedName !== '' ? ' · ' . e($selectedName) : ''; ?></div>
+    <div class="mb-2">
+      <?php foreach ($activities as $a): ?>
+        <button type="button" class="tt-chip act-chip" data-act="<?php echo e($a); ?>"><?php echo e($a); ?></button>
+      <?php endforeach; ?>
     </div>
+    <div class="d-flex flex-wrap gap-2 mb-2">
+      <input class="form-control" name="activity" id="activityField" required maxlength="120" placeholder="What will they do?" style="flex:1; min-width:180px">
+      <input type="time" name="start_time" class="form-control" required style="max-width:130px" title="Start">
+      <input type="time" name="end_time" class="form-control" style="max-width:130px" title="End">
+      <input class="form-control" name="room" maxlength="64" placeholder="Place (optional)" style="max-width:160px">
+      <button class="btn btn-success" type="submit">Add</button>
+    </div>
+    <div class="small text-muted">Tap a chip or type your own. Example: 9:00 – Circle time.</div>
+  </form>
+
+  <div class="tt-card">
+    <div class="fw-bold mb-2"><?php echo e($selectedDay); ?> for <?php echo e($selectedName !== '' ? $selectedName : 'this class'); ?></div>
+    <?php if ($dayEntries === []): ?>
+      <div class="text-muted">No slots yet this day. Add the first one above.</div>
+    <?php else: ?>
+      <?php foreach ($dayEntries as $r):
+          $eid = (int) ($r['id'] ?? 0);
+          $st = $fmtTime((string) ($r['start_time'] ?? ''));
+          $en = $fmtTime((string) ($r['end_time'] ?? ''));
+          $when = $st !== '' ? ($en !== '' ? $st . ' – ' . $en : $st) : (string) ($r['period'] ?? '');
+          $place = trim((string) ($r['room'] ?? ''));
+          ?>
+        <div class="tt-slot">
+          <div>
+            <div class="tt-time"><?php echo e($when !== '' ? $when : 'Time not set'); ?></div>
+            <div class="tt-act"><?php echo e($activityLabel($r)); ?></div>
+            <?php if ($place !== ''): ?><div class="small text-muted"><?php echo e($place); ?></div><?php endif; ?>
+          </div>
+          <div>
+            <?php echo render_secure_delete_button($eid, 'Remove', 'Remove this slot from the routine?', 'btn btn-sm btn-outline-danger', ['class_id' => $selectedClassId, 'day' => $selectedDay]); ?>
+          </div>
+        </div>
+      <?php endforeach; ?>
+    <?php endif; ?>
   </div>
+
+  <div class="fw-bold mb-2 mt-3">Whole week</div>
+  <div class="tt-week">
+    <?php foreach ($days as $d): ?>
+      <div class="tt-weekcol<?php echo $d === $selectedDay ? ' border-primary' : ''; ?>">
+        <h6><?php echo e(substr($d, 0, 3)); ?><?php echo $d === $todayName ? ' · today' : ''; ?></h6>
+        <?php if ($byDay[$d] === []): ?>
+          <div class="text-muted small">—</div>
+        <?php else: ?>
+          <?php foreach ($byDay[$d] as $r):
+              $st = $fmtTime((string) ($r['start_time'] ?? ''));
+              ?>
+            <div class="tt-mini"><?php echo e($st !== '' ? $st : ''); ?> <?php echo e($activityLabel($r)); ?></div>
+          <?php endforeach; ?>
+        <?php endif; ?>
+      </div>
+    <?php endforeach; ?>
+  </div>
+
+<script>
+document.querySelectorAll('.act-chip').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var field = document.getElementById('activityField');
+    if (field) field.value = btn.getAttribute('data-act') || '';
+    field && field.focus();
+  });
+});
+</script>
+
 <?php endif; ?>
 
-<?php
-require_once __DIR__ . '/../includes/footer.php';
-?>
+<?php require_once __DIR__ . '/../includes/footer.php'; ?>
