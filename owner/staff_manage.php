@@ -27,6 +27,9 @@ require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('owner');
 $DEBUG = panel_debug();
 require_once __DIR__ . '/../includes/staff_user.php';
+if (file_exists(__DIR__ . '/../includes/password_login.php')) {
+    require_once __DIR__ . '/../includes/password_login.php';
+}
 if (file_exists(__DIR__ . '/../includes/whatsapp_config.php')) {
     require_once __DIR__ . '/../includes/whatsapp_config.php';
 }
@@ -58,6 +61,25 @@ echo '<div class="container py-4"><div class="alert alert-danger">The <strong>us
 $roles = staff_all_roles();
 $addRoles = staff_addable_roles();
 $csrf = function_exists('get_csrf_token') ? get_csrf_token() : '';
+$pwReady = function_exists('user_password_column_ready') && user_password_column_ready();
+$pwMin = function_exists('login_password_min_length') ? login_password_min_length() : 6;
+
+$staffPostedPassword = static function (array &$errors, int $minLen): string {
+    $pw = (string) ($_POST['new_password'] ?? '');
+    $cf = (string) ($_POST['new_password_confirm'] ?? '');
+    if ($pw === '' && $cf === '') {
+        return '';
+    }
+    if ($pw !== $cf) {
+        $errors[] = 'New password and confirmation do not match.';
+        return '';
+    }
+    if (strlen($pw) < $minLen) {
+        $errors[] = 'Password must be at least ' . $minLen . ' characters.';
+        return '';
+    }
+    return $pw;
+};
 
 /* -------------------------
    Actions
@@ -69,6 +91,12 @@ if (!empty($_GET['added'])) {
 }
 if (!empty($_GET['updated'])) {
     $messages[] = 'User updated.';
+}
+if (!empty($_GET['pw']) && (string) $_GET['pw'] === '1') {
+    $messages[] = 'Login password saved. They sign in with User ID (10-digit mobile) and this password.';
+}
+if (isset($_GET['pw']) && (string) $_GET['pw'] === '0') {
+    $errors[] = 'Details saved, but the password could not be set. Open Edit and try again.';
 }
 
 /* OTP send / verify (AJAX) */
@@ -134,6 +162,10 @@ if ($action === 'add' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($dup) {
         $errors[] = 'This mobile number is already in use.';
     }
+    $plainPw = $staffPostedPassword($errors, $pwMin);
+    if ($plainPw !== '' && !$pwReady) {
+        $errors[] = 'Password login is not available on this database yet.';
+    }
 
     if ($errors === []) {
         try {
@@ -171,7 +203,18 @@ if ($action === 'add' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if ($ok) {
                 staff_add_otp_clear();
-                header('Location: ?added=1');
+                $newId = function_exists('db_last_insert_id') ? (int) db_last_insert_id() : 0;
+                if ($newId <= 0) {
+                    $just = staff_find_by_phone10($phone10, 0);
+                    $newId = (int) ($just['id'] ?? 0);
+                }
+                $pwQs = '';
+                if ($plainPw !== '') {
+                    $pwQs = ($newId > 0 && function_exists('login_set_user_password') && login_set_user_password($newId, $plainPw))
+                        ? '&pw=1'
+                        : '&pw=0';
+                }
+                header('Location: ?added=1' . $pwQs);
                 exit;
             }
             $errors[] = 'Failed to add user.';
@@ -190,6 +233,11 @@ if ($action === 'get' && !empty($_GET['id'])) {
     $row = safe_db_get_one("SELECT id, school_id, name, phone, role, whatsapp_id, is_active, meta FROM users WHERE id = :id LIMIT 1", [':id'=>$id]);
     if (!$row) { echo json_encode(['error'=>'User not found']); exit; }
     $row['email'] = staff_user_email_from_meta($row['meta'] ?? null);
+    $row['has_password'] = false;
+    if ($pwReady) {
+        $ph = safe_db_get_one('SELECT password_hash FROM users WHERE id = :id LIMIT 1', [':id' => $id]);
+        $row['has_password'] = !empty($ph['password_hash']);
+    }
     echo json_encode(['ok'=>true, 'data'=>$row]);
     exit;
 }
@@ -207,6 +255,9 @@ if ($action === 'view' && !empty($_GET['id'])) {
     echo '<dt class="col-sm-3">Phone</dt><dd class="col-sm-9">'.e($row['phone']).'</dd>';
     echo '<dt class="col-sm-3">WhatsApp</dt><dd class="col-sm-9">'.e($row['whatsapp_id'] ?? '').'</dd>';
     echo '<dt class="col-sm-3">Email</dt><dd class="col-sm-9">'.e(staff_user_email_from_meta($row['meta'] ?? null) ?: '—').'</dd>';
+    echo '<dt class="col-sm-3">Login User ID</dt><dd class="col-sm-9">'.e(staff_phone_last10((string)($row['phone'] ?? '')) ?: '—').'</dd>';
+    $hasPwView = $pwReady && !empty($row['password_hash']);
+    echo '<dt class="col-sm-3">Password</dt><dd class="col-sm-9">'.($hasPwView ? 'Set — owner can reset from Edit' : 'Not set — set from Edit').'</dd>';
     echo '<dt class="col-sm-3">Role</dt><dd class="col-sm-9">'.e(ucfirst($row['role'] ?? '')).'</dd>';
     echo '<dt class="col-sm-3">Active</dt><dd class="col-sm-9">'.((int)$row['is_active'] ? 'Yes' : 'No').'</dd>';
     echo '<dt class="col-sm-3">Created</dt><dd class="col-sm-9">'.e((string)($row['created_at'] ?? '')).'</dd>';
@@ -265,6 +316,10 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($dup) {
         $errors[] = 'This mobile number is already in use.';
     }
+    $plainPw = $staffPostedPassword($errors, $pwMin);
+    if ($plainPw !== '' && !$pwReady) {
+        $errors[] = 'Password login is not available on this database yet.';
+    }
 
     if (empty($errors)) {
         try {
@@ -287,7 +342,13 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $ok = safe_db_run($sql, $params);
             if ($ok) {
                 staff_add_otp_clear();
-                header('Location: ?updated=1'); exit;
+                $pwQs = '';
+                if ($plainPw !== '') {
+                    $pwQs = (function_exists('login_set_user_password') && login_set_user_password($id, $plainPw))
+                        ? '&pw=1'
+                        : '&pw=0';
+                }
+                header('Location: ?updated=1' . $pwQs); exit;
             } else {
                 $errors[] = 'Failed to update user.';
             }
@@ -398,7 +459,7 @@ try {
 
 $users = [];
 try {
-    $sql = "SELECT u.id, u.school_id, u.name, u.phone, u.role, u.whatsapp_id, u.is_active, u.meta, u.created_at, u.updated_at
+    $sql = "SELECT u.id, u.school_id, u.name, u.phone, u.role, u.whatsapp_id, u.is_active, u.meta, u.created_at, u.updated_at" . ($pwReady ? ", u.password_hash" : "") . "
             FROM users u
             $whereSql
             ORDER BY u.name ASC
@@ -499,6 +560,9 @@ require_once __DIR__ . '/../includes/header.php';
                 <?php $uEmail = staff_user_email_from_meta($u['meta'] ?? null); if ($uEmail !== ''): ?>
                   <div class="small"><?php echo $esc($uEmail); ?></div>
                 <?php endif; ?>
+                <?php if ($pwReady): ?>
+                  <div class="small"><?php echo !empty($u['password_hash']) ? '<span class="text-success">Password set</span>' : '<span class="text-muted">No password — set in Edit</span>'; ?></div>
+                <?php endif; ?>
               </td>
               <td><?php echo $esc($roles[$u['role']] ?? $u['role']); ?></td>
               <td><?php echo $esc($u['whatsapp_id'] ?? ''); ?></td>
@@ -581,6 +645,26 @@ require_once __DIR__ . '/../includes/header.php';
               <div class="small text-muted">Untick only if you want SMS / WhatsApp / email OTP before saving.</div>
             </div>
           </div>
+          <?php if ($pwReady): ?>
+          <div class="border rounded-3 p-3 mt-3">
+            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+              <strong>Login password</strong>
+              <button type="button" class="btn btn-sm btn-outline-secondary btn-gen-pw" data-pw="add_new_password" data-cf="add_new_password_confirm" data-note="addPwNote">Make a password</button>
+            </div>
+            <p class="small text-muted mb-2">Optional. User ID is their 10-digit mobile. Tell them this password so they can login without OTP.</p>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label">Password</label>
+                <input type="password" name="new_password" id="add_new_password" class="form-control" minlength="<?php echo (int)$pwMin; ?>" autocomplete="new-password">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Confirm password</label>
+                <input type="password" name="new_password_confirm" id="add_new_password_confirm" class="form-control" minlength="<?php echo (int)$pwMin; ?>" autocomplete="new-password">
+              </div>
+            </div>
+            <div class="small mt-2" id="addPwNote"></div>
+          </div>
+          <?php endif; ?>
           <div class="border rounded-3 p-3 mt-3 bg-light" id="addOtpBox">
             <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
               <strong>OTP verification</strong>
@@ -665,6 +749,26 @@ require_once __DIR__ . '/../includes/header.php';
               </label>
             </div>
           </div>
+          <?php if ($pwReady): ?>
+          <div class="border rounded-3 p-3 mt-3">
+            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+              <strong>Set / reset login password</strong>
+              <button type="button" class="btn btn-sm btn-outline-secondary btn-gen-pw" data-pw="edit_new_password" data-cf="edit_new_password_confirm" data-note="editPwNote">Make a password</button>
+            </div>
+            <p class="small text-muted mb-2" id="editPwHint">User ID is their 10-digit mobile. Leave blank to keep the current password. Fill both boxes to reset a forgotten password.</p>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label">New password</label>
+                <input type="password" name="new_password" id="edit_new_password" class="form-control" minlength="<?php echo (int)$pwMin; ?>" autocomplete="new-password">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Confirm password</label>
+                <input type="password" name="new_password_confirm" id="edit_new_password_confirm" class="form-control" minlength="<?php echo (int)$pwMin; ?>" autocomplete="new-password">
+              </div>
+            </div>
+            <div class="small mt-2" id="editPwNote"></div>
+          </div>
+          <?php endif; ?>
           <div class="border rounded-3 p-3 mt-3 bg-light" id="editOtpBox">
             <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
               <strong>OTP verification</strong>
@@ -842,6 +946,20 @@ document.addEventListener('DOMContentLoaded', function(){
       if (!skipOn() && !(verified.phone && verified.whatsapp && verified.email)) {
         ev.preventDefault();
         alert('Verify mobile, WhatsApp, and email OTPs first, or tick Skip OTP.');
+        return;
+      }
+      var pw = document.getElementById(opt.pwField);
+      var cf = document.getElementById(opt.pwConfirm);
+      if (pw && cf && (pw.value !== '' || cf.value !== '')) {
+        if (pw.value !== cf.value) {
+          ev.preventDefault();
+          alert('New password and confirmation do not match.');
+          return;
+        }
+        if (pw.value.length < 6) {
+          ev.preventDefault();
+          alert('Password must be at least 6 characters.');
+        }
       }
     });
     return { reset: function () { verified = { phone: false, whatsapp: false, email: false }; refresh(); syncWa(); } };
@@ -866,7 +984,9 @@ document.addEventListener('DOMContentLoaded', function(){
     stPhone: 'otp_phone_status',
     stWa: 'otp_whatsapp_status',
     stEmail: 'otp_email_status',
-    exceptId: null
+    exceptId: null,
+    pwField: 'add_new_password',
+    pwConfirm: 'add_new_password_confirm'
   });
 
   var editOtp = bindOtpPanel({
@@ -888,16 +1008,22 @@ document.addEventListener('DOMContentLoaded', function(){
     stPhone: 'eotp_phone_status',
     stWa: 'eotp_whatsapp_status',
     stEmail: 'eotp_email_status',
-    exceptId: 'edit_id'
+    exceptId: 'edit_id',
+    pwField: 'edit_new_password',
+    pwConfirm: 'edit_new_password_confirm'
   });
 
   var editModal = document.getElementById('editUserModal');
   if (editModal) {
     editModal.addEventListener('show.bs.modal', function(event){
       var id = event.relatedTarget && event.relatedTarget.getAttribute('data-id');
-      ['edit_id','edit_name','edit_phone','edit_role','edit_whatsapp','edit_email','eotp_phone','eotp_whatsapp','eotp_email'].forEach(function(idn){ var el = document.getElementById(idn); if (el) el.value = ''; });
+      ['edit_id','edit_name','edit_phone','edit_role','edit_whatsapp','edit_email','eotp_phone','eotp_whatsapp','eotp_email','edit_new_password','edit_new_password_confirm'].forEach(function(idn){ var el = document.getElementById(idn); if (el) el.value = ''; });
       document.getElementById('edit_active').checked = false;
       document.getElementById('editOtpMsg').textContent = '';
+      var note = document.getElementById('editPwNote');
+      if (note) note.textContent = '';
+      var hint = document.getElementById('editPwHint');
+      if (hint) hint.textContent = 'User ID is their 10-digit mobile. Leave blank to keep the current password. Fill both boxes to reset a forgotten password.';
       editOtp.reset();
       fetch('?action=get&id=' + encodeURIComponent(id), { credentials:'same-origin' })
         .then(function(resp){ return resp.ok ? resp.json() : Promise.reject(); })
@@ -918,6 +1044,11 @@ document.addEventListener('DOMContentLoaded', function(){
             document.getElementById('edit_email').value = d.email || '';
             document.getElementById('edit_active').checked = (parseInt(d.is_active) === 1);
             document.getElementById('edit_wa_same').checked = last10(d.phone || '') === last10(d.whatsapp_id || '') || !d.whatsapp_id;
+            if (hint) {
+              hint.textContent = d.has_password
+                ? 'Password is already set. Leave blank to keep it, or type a new one to reset (for a forgotten password). User ID: ' + last10(d.phone || '')
+                : 'No password yet. Type one below so they can login with User ID ' + last10(d.phone || '') + ' without OTP.';
+            }
             editOtp.reset();
           } else {
             alert(json.error || 'Failed to load user for edit.');
@@ -932,6 +1063,21 @@ document.addEventListener('DOMContentLoaded', function(){
         });
     });
   }
+
+  document.querySelectorAll('.btn-gen-pw').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pw = document.getElementById(btn.getAttribute('data-pw'));
+      var cf = document.getElementById(btn.getAttribute('data-cf'));
+      var note = document.getElementById(btn.getAttribute('data-note'));
+      var made = 'Staff' + String(Math.floor(1000 + Math.random() * 9000));
+      if (pw) { pw.type = 'text'; pw.value = made; }
+      if (cf) { cf.type = 'text'; cf.value = made; }
+      if (note) {
+        note.className = 'small mt-2 text-success';
+        note.textContent = 'Password: ' + made + ' — tell this to the staff member, then Save.';
+      }
+    });
+  });
 
   var viewModal = document.getElementById('viewUserModal');
   if (viewModal) {
