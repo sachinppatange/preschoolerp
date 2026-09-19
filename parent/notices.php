@@ -1,372 +1,331 @@
 <?php
 /**
- * parent/notices.php
- *
- * Parent-facing Notices board.
- *
- * Features
- * - Requires parent login ($_SESSION['parent_auth_user'])
- * - Determines classes linked to parent (parents_children -> students.class_id) and shows:
- *     - Global notices (class_id IS NULL)
- *     - Class-specific notices for parent's classes
- * - Filtering by class (including "All / Global + my classes"), date range, pagination
- * - View notice details in a modal (AJAX fragment via ?action=view&id=...)
- * - Export visible notices to CSV
- * - Defensive: checks for table existence, works with different DB setups
- *
- * Expected (optional) notices table schema (common):
- * - id (PK)
- * - school_id
- * - class_id         (nullable)  -- when NULL => global notice
- * - title
- * - body / description
- * - published_at     (datetime / date)
- * - expires_at       (datetime / date) optional
- * - created_by
- * - attachment_path  (optional)
- * - created_at
- * - updated_at
- *
- * Place this file at: /pioneerplayschool01/parent/notices.php
+ * parent/notices.php — short notes from school / class teacher.
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('parent');
-$DEBUG = panel_debug();
 
-/* ------------------------
-   Require parent login
-   ------------------------ */
-/* ------------------------
-   Helper functions & DB fallbacks
-   ------------------------ */
-
-/* ------------------------
-   Identify user and tables
-   ------------------------ */
-$parent = auth_user() ?? [];
 $parentId = panel_parent_context_id();
+$today = date('Y-m-d');
+$tableOk = table_exists('notices');
 
-$hasParentsChildren = table_exists('parents_children');
-$hasStudents = table_exists('students');
-$hasNotices = table_exists('notices'); // primary data source
-$hasClasses = table_exists('classes'); // optional metadata
+$col = static function (string $name) use ($tableOk): bool {
+    return $tableOk && function_exists('column_exists') && column_exists('notices', $name);
+};
 
-/* ------------------------
-   Determine class IDs for the parent
-   ------------------------ */
-$classIds = [];   // classes parent has children in
 $childIds = [];
-
-if ($hasParentsChildren) {
-    $maps = safe_db_get_all("SELECT child_student_id FROM parents_children WHERE parent_user_id = :pid", [':pid' => $parentId]);
+if ($parentId > 0 && table_exists('parents_children')) {
+    $maps = safe_db_get_all(
+        'SELECT child_student_id FROM parents_children WHERE parent_user_id = :pid ORDER BY id DESC',
+        [':pid' => $parentId]
+    ) ?: [];
     foreach ($maps as $m) {
-        $cid = (int)($m['child_student_id'] ?? 0);
-        if ($cid) $childIds[] = $cid;
-    }
-}
-
-if (!empty($childIds) && $hasStudents) {
-    $ph = implode(',', array_fill(0, count($childIds), '?'));
-    $rows = safe_db_get_all("SELECT DISTINCT class_id FROM students WHERE id IN ($ph) AND class_id IS NOT NULL", $childIds);
-    foreach ($rows as $r) {
-        if (!empty($r['class_id'])) $classIds[] = (int)$r['class_id'];
-    }
-}
-
-/* fallback: look for students.parent_id if no parents_children */
-if (empty($classIds) && $hasStudents) {
-    $rows = safe_db_get_all("SELECT DISTINCT class_id FROM students WHERE parent_id = :pid AND class_id IS NOT NULL", [':pid' => $parentId]);
-    foreach ($rows as $r) {
-        if (!empty($r['class_id'])) $classIds[] = (int)$r['class_id'];
-    }
-}
-
-/* Build class options for filter */
-$classOptions = [];
-if (!empty($classIds) && $hasClasses) {
-    $ph = implode(',', array_fill(0, count($classIds), '?'));
-    $crows = safe_db_get_all("SELECT id, name, short_name, section FROM classes WHERE id IN ($ph)", $classIds);
-    foreach ($crows as $cr) {
-        $id = (int)$cr['id'];
-        $label = trim((($cr['short_name'] ?? '') . ' ' . ($cr['name'] ?? '')));
-        if (!empty($cr['section'])) $label .= ' • Sec: ' . $cr['section'];
-        $classOptions[$id] = $label;
-    }
-    foreach ($classIds as $cid) {
-        if (!isset($classOptions[$cid])) $classOptions[$cid] = 'Class #' . $cid;
-    }
-}
-
-/* ------------------------
-   Handle actions: view (modal) and export
-   ------------------------ */
-$action = $_REQUEST['action'] ?? 'list';
-
-if ($action === 'view' && !empty($_GET['id'])) {
-    $nid = (int)$_GET['id'];
-    if ($nid <= 0) { echo '<div class="p-3 text-danger">Invalid notice id.</div>'; exit; }
-    if (!$hasNotices) { echo '<div class="p-3 text-muted">Notices table not present.</div>'; exit; }
-
-    $notice = safe_db_get_one("SELECT id, school_id, class_id, title, body, description, published_at, expires_at, attachment_path, created_by, created_at, updated_at FROM notices WHERE id = :id LIMIT 1", [':id' => $nid]);
-    if (!$notice) { echo '<div class="p-3 text-muted">Notice not found.</div>'; exit; }
-
-    // authorization: show if global (class_id IS NULL) or if class_id in parent's classIds
-    $nClass = isset($notice['class_id']) ? (int)$notice['class_id'] : 0;
-    if ($nClass !== 0 && !in_array($nClass, $classIds, true)) {
-        echo '<div class="p-3 text-muted">You are not authorized to view this notice.</div>'; exit;
-    }
-
-    // optional class name
-    $classLabel = '';
-    if ($nClass && $hasClasses) {
-        $c = safe_db_get_one("SELECT name, short_name, section FROM classes WHERE id = :id LIMIT 1", [':id' => $nClass]);
-        if ($c) $classLabel = trim((($c['short_name'] ?? '') . ' ' . ($c['name'] ?? ''))) . (!empty($c['section']) ? ' • Sec: ' . $c['section'] : '');
-    }
-
-    echo '<div class="p-3">';
-    echo '<h5>' . e($notice['title'] ?? '') . '</h5>';
-    if ($nClass) echo '<div class="small-muted mb-2">Class: ' . e($classLabel ?: $nClass) . '</div>';
-    echo '<div class="small-muted mb-2">Published: ' . e(substr((string)($notice['published_at'] ?? ''), 0, 10) ?: '—') . ' • Expires: ' . e(substr((string)($notice['expires_at'] ?? ''), 0, 10) ?: '—') . '</div>';
-    echo '<div>' . nl2br(e((string)($notice['body'] ?? $notice['description'] ?? ''))) . '</div>';
-    if (!empty($notice['attachment_path'])) {
-        $att = e($notice['attachment_path']);
-        echo '<div class="mt-3"><a class="btn btn-sm btn-outline-secondary" href="' . $att . '" target="_blank">Download attachment</a></div>';
-    }
-    echo '<hr>';
-    echo '<div class="small-muted">Posted by: ' . e($notice['created_by'] ?? '—') . ' • Created: ' . e($notice['created_at'] ?? '—') . '</div>';
-    echo '</div>';
-    exit;
-}
-
-/* Export CSV for current filters */
-if ($action === 'export') {
-    if (!$hasNotices) { http_response_code(404); echo "No notices table."; exit; }
-
-    // determine filters
-    $filterClass = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0; // 0 = global + my classes
-    $from = isset($_GET['from']) ? substr((string)$_GET['from'], 0, 10) : '';
-    $to = isset($_GET['to']) ? substr((string)$_GET['to'], 0, 10) : '';
-
-    // Build where logic: show global notices (class_id IS NULL) and class-specific notices for parent's classes
-    $where = [];
-    $params = [];
-
-    if (!empty($classIds)) {
-        // if filterClass >0 and valid, restrict further to that class (or 0 for global+myclasses)
-        if ($filterClass > 0 && in_array($filterClass, $classIds, true)) {
-            $where[] = "class_id = ?";
-            $params[] = $filterClass;
-        } else {
-            // show class_id IS NULL OR class_id IN (my classes)
-            $ph = implode(',', array_fill(0, count($classIds), '?'));
-            $where[] = "(class_id IS NULL OR class_id IN ($ph))";
-            foreach ($classIds as $v) $params[] = $v;
+        $id = (int) ($m['child_student_id'] ?? 0);
+        if ($id > 0) {
+            $childIds[] = $id;
         }
-    } else {
-        // parent has no classes: only global notices
-        $where[] = "class_id IS NULL";
     }
-
-    if ($from !== '') { $where[] = "DATE(published_at) >= ?"; $params[] = $from; }
-    if ($to   !== '') { $where[] = "DATE(published_at) <= ?"; $params[] = $to; }
-
-    $whereSql = count($where) ? ('WHERE ' . implode(' AND ', $where)) : '';
-
-    $rows = safe_db_get_all("SELECT id, school_id, class_id, title, body, published_at, expires_at, created_by, created_at, updated_at FROM notices $whereSql ORDER BY published_at DESC", $params);
-
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=notices_' . date('Ymd_His') . '.csv');
-    $out = fopen('php://output', 'w');
-    fputcsv($out, ['id','school_id','class_id','title','body','published_at','expires_at','created_by','created_at','updated_at']);
+}
+if ($childIds === [] && $parentId > 0 && table_exists('students')) {
+    $or = ['parent_id = :pid'];
+    $params = [':pid' => $parentId];
+    if (function_exists('column_exists') && column_exists('students', 'father_id')) {
+        $or[] = 'father_id = :pid';
+    }
+    if (function_exists('column_exists') && column_exists('students', 'mother_id')) {
+        $or[] = 'mother_id = :pid';
+    }
+    $rows = safe_db_get_all('SELECT id FROM students WHERE ' . implode(' OR ', $or), $params) ?: [];
     foreach ($rows as $r) {
-        fputcsv($out, [
-            $r['id'] ?? '',
-            $r['school_id'] ?? '',
-            $r['class_id'] ?? '',
-            $r['title'] ?? '',
-            $r['body'] ?? '',
-            $r['published_at'] ?? '',
-            $r['expires_at'] ?? '',
-            $r['created_by'] ?? '',
-            $r['created_at'] ?? '',
-            $r['updated_at'] ?? '',
-        ]);
+        $id = (int) ($r['id'] ?? 0);
+        if ($id > 0) {
+            $childIds[] = $id;
+        }
     }
-    fclose($out);
-    exit;
+}
+$childIds = array_values(array_unique($childIds));
+
+$children = [];
+if ($childIds !== [] && table_exists('students')) {
+    $in = implode(',', array_map('intval', $childIds));
+    $join = table_exists('classes') ? 'LEFT JOIN classes c ON c.id = s.class_id' : '';
+    $classSel = table_exists('classes') ? ', c.name AS class_name' : '';
+    $rows = safe_db_get_all(
+        "SELECT s.id, s.first_name, s.middle_name, s.last_name, s.class_id, s.photo_path{$classSel}
+         FROM students s {$join}
+         WHERE s.id IN ({$in})"
+    ) ?: [];
+    $byId = [];
+    foreach ($rows as $r) {
+        $byId[(int) $r['id']] = $r;
+    }
+    foreach ($childIds as $id) {
+        if (isset($byId[$id])) {
+            $children[] = $byId[$id];
+        }
+    }
 }
 
-/* ------------------------
-   Build listing (filters, pagination)
-   ------------------------ */
-$perPage = 20;
-$page = max(1, (int)($_GET['p'] ?? 1));
-$offset = ($page - 1) * $perPage;
+$selectedId = (int) ($_GET['student_id'] ?? 0);
+if ($selectedId <= 0 && $childIds !== []) {
+    $selectedId = $childIds[0];
+}
+if ($selectedId > 0 && !in_array($selectedId, $childIds, true)) {
+    $selectedId = $childIds[0] ?? 0;
+}
 
-$filterClass = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0; // 0 == global + my classes
-$from = isset($_GET['from']) ? substr((string)$_GET['from'], 0, 10) : '';
-$to   = isset($_GET['to'])   ? substr((string)$_GET['to'], 0, 10) : '';
+$selected = null;
+foreach ($children as $c) {
+    if ((int) $c['id'] === $selectedId) {
+        $selected = $c;
+        break;
+    }
+}
+
+$nameOf = static function (array $s): string {
+    if (function_exists('student_full_name')) {
+        $n = trim(student_full_name($s));
+        if ($n !== '') {
+            return $n;
+        }
+    }
+    return trim((string) ($s['first_name'] ?? '') . ' ' . (string) ($s['middle_name'] ?? '') . ' ' . (string) ($s['last_name'] ?? ''));
+};
+
+$fmtDay = static function (string $raw): string {
+    $d = substr($raw, 0, 10);
+    if ($d === '' || $d === '0000-00-00') {
+        return '';
+    }
+    $ts = strtotime($d);
+    if ($ts === false) {
+        return $d;
+    }
+    if ($d === date('Y-m-d')) {
+        return 'Today';
+    }
+    if ($d === date('Y-m-d', strtotime('-1 day'))) {
+        return 'Yesterday';
+    }
+    return date('D, d M', $ts);
+};
+
+$classId = $selected ? (int) ($selected['class_id'] ?? 0) : 0;
+$className = $selected ? trim((string) ($selected['class_name'] ?? '')) : '';
+$childName = $selected ? $nameOf($selected) : 'Your child';
+$photo = $selected && function_exists('student_photo_url')
+    ? student_photo_url((string) ($selected['photo_path'] ?? ''))
+    : '';
+
+$ayFrom = $ayTo = $today;
+if (function_exists('ay_limit_dates')) {
+    [$ayFrom, $ayTo] = ay_limit_dates('2000-01-01', '2099-12-31');
+}
+
+$noticeText = static function (array $n): string {
+    foreach (['message', 'body', 'content', 'description'] as $c) {
+        if (isset($n[$c]) && trim((string) $n[$c]) !== '') {
+            return trim((string) $n[$c]);
+        }
+    }
+    return '';
+};
+
+$noticeWhen = static function (array $n): string {
+    foreach (['published_at', 'created_at'] as $c) {
+        $d = substr((string) ($n[$c] ?? ''), 0, 10);
+        if ($d !== '' && $d !== '0000-00-00') {
+            return $d;
+        }
+    }
+    return '';
+};
+
+$classNames = [];
+if (table_exists('classes')) {
+    foreach ($children as $ch) {
+        $cid = (int) ($ch['class_id'] ?? 0);
+        $nm = trim((string) ($ch['class_name'] ?? ''));
+        if ($cid > 0 && $nm !== '') {
+            $classNames[$cid] = $nm;
+        }
+    }
+}
 
 $notices = [];
-$total = 0;
-
-if ($hasNotices) {
-    // Build where clauses similar to export
-    $where = [];
+if ($tableOk) {
+    $where = ['1=1'];
     $params = [];
 
-    if (!empty($classIds)) {
-        if ($filterClass > 0 && in_array($filterClass, $classIds, true)) {
-            $where[] = "class_id = ?";
-            $params[] = $filterClass;
-        } else {
-            $ph = implode(',', array_fill(0, count($classIds), '?'));
-            $where[] = "(class_id IS NULL OR class_id IN ($ph))";
-            foreach ($classIds as $v) $params[] = $v;
-        }
-    } else {
-        $where[] = "class_id IS NULL";
+    if ($col('published_at')) {
+        $where[] = 'published_at IS NOT NULL AND DATE(published_at) <= :pubto';
+        $params[':pubto'] = $today;
+        $where[] = 'DATE(published_at) >= :ayfrom';
+        $params[':ayfrom'] = $ayFrom;
+    } elseif ($col('created_at')) {
+        $where[] = 'DATE(created_at) BETWEEN :ayfrom AND :ayto';
+        $params[':ayfrom'] = $ayFrom;
+        $params[':ayto'] = $ayTo;
     }
 
-    if ($from !== '') { $where[] = "DATE(published_at) >= ?"; $params[] = $from; }
-    if ($to   !== '') { $where[] = "DATE(published_at) <= ?"; $params[] = $to; }
+    if ($col('expires_at')) {
+        $where[] = '(expires_at IS NULL OR DATE(expires_at) = :zero OR DATE(expires_at) >= :expto)';
+        $params[':zero'] = '0000-00-00';
+        $params[':expto'] = $today;
+    }
 
-    $whereSql = count($where) ? ('WHERE ' . implode(' AND ', $where)) : '';
+    if ($col('class_id')) {
+        if ($classId > 0) {
+            $where[] = '(class_id IS NULL OR class_id = 0 OR class_id = :cid)';
+            $params[':cid'] = $classId;
+        } else {
+            $where[] = '(class_id IS NULL OR class_id = 0)';
+        }
+    }
 
-    // count
-    $countRow = safe_db_get_one("SELECT COUNT(*) AS cnt FROM notices $whereSql", $params);
-    $total = intval($countRow['cnt'] ?? 0);
+    if ($col('audience')) {
+        $where[] = "(audience IS NULL OR audience = '' OR LOWER(audience) IN ('all','parents','parent'))";
+    }
 
-    if ($total > 0) {
-        // append limit params
-        $paramsWithLimit = $params;
-        $paramsWithLimit[] = $perPage;
-        $paramsWithLimit[] = $offset;
-        $sql = "SELECT id, school_id, class_id, title, body, published_at, expires_at, attachment_path, created_by, created_at, updated_at
-                FROM notices $whereSql
-                ORDER BY published_at DESC
-                LIMIT ? OFFSET ?";
-        $notices = safe_db_get_all($sql, $paramsWithLimit);
+    $order = $col('published_at')
+        ? ($col('created_at') ? 'COALESCE(published_at, created_at) DESC, id DESC' : 'published_at DESC, id DESC')
+        : ($col('created_at') ? 'created_at DESC, id DESC' : 'id DESC');
+
+    $notices = safe_db_get_all(
+        'SELECT * FROM notices WHERE ' . implode(' AND ', $where) . ' ORDER BY ' . $order . ' LIMIT 40',
+        $params
+    ) ?: [];
+}
+
+$todayN = [];
+$weekN = [];
+$earlierN = [];
+$weekStart = date('Y-m-d', strtotime('monday this week') ?: time());
+foreach ($notices as $n) {
+    $when = $noticeWhen($n);
+    if ($when === $today) {
+        $todayN[] = $n;
+    } elseif ($when >= $weekStart) {
+        $weekN[] = $n;
+    } else {
+        $earlierN[] = $n;
     }
 }
 
-/* ------------------------
-   Render page
-   ------------------------ */
-$pageTitle = 'Notices';
+$heroText = 'No notices yet';
+$heroClass = 'none';
+$heroSub = $childName . ($className !== '' ? ' · ' . $className : '');
+if ($todayN !== []) {
+    $heroText = count($todayN) === 1 ? 'New notice today' : (count($todayN) . ' notices today');
+    $heroClass = 'has';
+} elseif ($notices !== []) {
+    $heroText = (string) ($notices[0]['title'] ?? 'Latest notice');
+    $heroClass = 'has';
+    $when = $fmtDay($noticeWhen($notices[0]));
+    $heroSub = ($when !== '' ? $when . ' · ' : '') . $heroSub;
+}
+
+$page_title = 'Notices';
+$pageTitle = $page_title;
 require_once __DIR__ . '/../includes/header.php';
 echo panel_owner_parent_gate_html();
 ?>
+<style>
+.nt-chip { display:inline-flex; align-items:center; gap:.4rem; border:1px solid #dbe7fb; background:#fff; border-radius:999px; padding:.3rem .8rem; text-decoration:none; color:#1e3a5f; font-weight:600; margin:0 .35rem .5rem 0; }
+.nt-chip.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+.nt-chip img, .nt-chip .ph { width:28px; height:28px; border-radius:50%; object-fit:cover; background:#e2e8f0; }
+.nt-hero { background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:18px; margin-bottom:14px; display:flex; gap:14px; align-items:center; }
+.nt-hero.has { border-color:#93c5fd; background:#eff6ff; }
+.nt-photo { width:64px; height:64px; border-radius:16px; object-fit:cover; background:#e2e8f0; flex-shrink:0; }
+.nt-big { font-weight:800; font-size:1.2rem; color:#1e3a5f; }
+.nt-card { background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:14px 16px; margin-bottom:10px; }
+.nt-card.today { border-color:#93c5fd; background:#eff6ff; }
+.nt-title { font-weight:800; color:#1e3a5f; }
+.nt-meta { font-size:.88rem; color:#64748b; }
+.nt-sec { font-size:.75rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:#94a3b8; margin:14px 0 8px; }
+.nt-pill { display:inline-block; border-radius:999px; padding:.12rem .55rem; font-size:.75rem; font-weight:700; background:#e0e7ff; color:#3730a3; }
+.nt-pill.class { background:#dcfce7; color:#166534; }
+</style>
 
-<div class="d-flex gap-2">
-    <a class="btn btn-outline-secondary btn-sm" href="../parent/profile.php">Profile</a>
-    <?php if ($hasNotices): ?>
-      <a class="btn btn-sm btn-success" href="?action=export&class_id=<?php echo e($filterClass); ?>&from=<?php echo e($from); ?>&to=<?php echo e($to); ?>">Export CSV</a>
-    <?php endif; ?>
-  </div>
-</div>
+<p class="text-muted mb-2">Messages from school — holiday, picnic, what to bring.</p>
 
-<div class="card mb-3 p-3">
-  <form method="get" class="row g-2 align-items-end">
-    <div class="col-md-3">
-      <label class="form-label">Class</label>
-      <select name="class_id" class="form-select">
-        <option value="0"<?php if ($filterClass === 0) echo ' selected'; ?>>Global + My classes</option>
-        <?php foreach ($classOptions as $cid => $label): ?>
-          <option value="<?php echo (int)$cid; ?>"<?php if ($filterClass === $cid) echo ' selected'; ?>><?php echo e($label); ?></option>
-        <?php endforeach; ?>
-      </select>
+<?php if ($parentId <= 0): ?>
+<?php elseif ($children === []): ?>
+  <div class="alert alert-info mb-0">No child is linked to this login. Ask the school office.</div>
+<?php elseif (!$tableOk): ?>
+  <div class="alert alert-warning mb-0">Notices are not set up yet.</div>
+<?php else: ?>
+
+  <?php if (count($children) > 1): ?>
+    <div class="mb-3">
+      <?php foreach ($children as $ch):
+          $cid = (int) $ch['id'];
+          $p = function_exists('student_photo_url') ? student_photo_url((string) ($ch['photo_path'] ?? '')) : '';
+          ?>
+        <a class="nt-chip<?php echo $cid === $selectedId ? ' active' : ''; ?>" href="?student_id=<?php echo $cid; ?>">
+          <?php if ($p !== ''): ?><img src="<?php echo e($p); ?>" alt=""><?php else: ?><span class="ph"></span><?php endif; ?>
+          <?php echo e($nameOf($ch)); ?>
+        </a>
+      <?php endforeach; ?>
     </div>
+  <?php endif; ?>
 
-    <div class="col-md-3">
-      <label class="form-label">Published from</label>
-      <input type="date" name="from" class="form-control" value="<?php echo e($from); ?>">
-    </div>
-
-    <div class="col-md-3">
-      <label class="form-label">Published to</label>
-      <input type="date" name="to" class="form-control" value="<?php echo e($to); ?>">
-    </div>
-
-    <div class="col-md-3 text-end">
-      <button class="btn btn-primary">Filter</button>
-    </div>
-  </form>
-</div>
-
-<div class="card mb-3">
-  <div class="card-body">
-    <?php if (!$hasNotices): ?>
-      <div class="small-muted">Notices table not found. Contact admin.</div>
-    <?php elseif (empty($notices)): ?>
-      <div class="small-muted">No notices found for the selected filters.</div>
+  <div class="nt-hero <?php echo e($heroClass); ?>">
+    <?php if ($photo !== ''): ?>
+      <img class="nt-photo" src="<?php echo e($photo); ?>" alt="">
     <?php else: ?>
-      <div class="list-group">
-        <?php foreach ($notices as $n): $nid = (int)$n['id']; ?>
-          <div class="list-group-item d-flex justify-content-between align-items-start">
-            <div>
-              <div class="notice-title"><?php echo e($n['title'] ?? '—'); ?></div>
-              <div class="small-muted"><?php echo e(substr((string)($n['body'] ?? ''), 0, 180)); ?><?php if (strlen((string)($n['body'] ?? '')) > 180) echo '...'; ?></div>
-              <div class="small-muted mt-1">Published: <?php echo e(substr((string)($n['published_at'] ?? ''),0,10) ?: '—'); ?> • Expires: <?php echo e(substr((string)($n['expires_at'] ?? ''),0,10) ?: '—'); ?></div>
-            </div>
-            <div class="text-end">
-              <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#noticeViewModal" data-id="<?php echo $nid; ?>">View</button>
-              <?php if (!empty($n['attachment_path'])): ?>
-                <a class="btn btn-sm btn-outline-secondary ms-1" href="<?php echo e($n['attachment_path']); ?>" target="_blank">Attachment</a>
-              <?php endif; ?>
-            </div>
-          </div>
-        <?php endforeach; ?>
-      </div>
-
-      <?php
-        $totalPages = $perPage > 0 ? (int) ceil($total / $perPage) : 1;
-      ?>
-      <div class="mt-3 d-flex justify-content-between align-items-center">
-        <div class="small-muted">Showing <?php echo min($offset+1, $total); ?> - <?php echo min($offset + count($notices), $total); ?> of <?php echo $total; ?> notices</div>
-        <nav>
-          <ul class="pagination pagination-sm mb-0">
-            <li class="page-item <?php if ($page <= 1) echo 'disabled'; ?>"><a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['p'=>max(1,$page-1)])); ?>">Prev</a></li>
-            <li class="page-item disabled"><span class="page-link">Page <?php echo $page; ?> / <?php echo max(1,$totalPages); ?></span></li>
-            <li class="page-item <?php if ($page >= $totalPages) echo 'disabled'; ?>"><a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['p'=>min($totalPages,$page+1)])); ?>">Next</a></li>
-          </ul>
-        </nav>
-      </div>
+      <div class="nt-photo"></div>
     <?php endif; ?>
-  </div>
-</div>
-
-<!-- Notice view modal -->
-<div class="modal fade" id="noticeViewModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Notice</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body" id="noticeViewBody"><div class="text-center small-muted py-3">Loading…</div></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+    <div>
+      <div class="nt-big"><?php echo e($heroText); ?></div>
+      <div class="text-muted"><?php echo e($heroSub); ?></div>
     </div>
   </div>
-</div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  var modal = document.getElementById('noticeViewModal');
-  if (modal) {
-    modal.addEventListener('show.bs.modal', function (event) {
-      var id = event.relatedTarget.getAttribute('data-id');
-      var body = document.getElementById('noticeViewBody');
-      body.innerHTML = '<div class="text-center small-muted py-3">Loading…</div>';
-      fetch('?action=view&id=' + encodeURIComponent(id), { credentials: 'same-origin' })
-        .then(function(resp){ if (!resp.ok) throw new Error('Network'); return resp.text(); })
-        .then(function(html){ body.innerHTML = html; })
-        .catch(function(){ body.innerHTML = '<div class="text-danger p-3">Failed to load notice details.</div>'; });
-    });
-  }
-});
-</script>
+  <?php if ($notices === []): ?>
+    <div class="nt-card text-muted mb-0">No notices for this year yet.</div>
+  <?php else: ?>
+    <?php
+    $sections = [
+        ['Today', $todayN, true],
+        ['This week', $weekN, false],
+        ['Earlier', $earlierN, false],
+    ];
+    foreach ($sections as [$secLabel, $list, $markToday]):
+        if ($list === []) {
+            continue;
+        }
+        ?>
+      <div class="nt-sec"><?php echo e($secLabel); ?></div>
+      <?php foreach ($list as $n):
+          $nidClass = $col('class_id') ? (int) ($n['class_id'] ?? 0) : 0;
+          $who = $nidClass > 0
+              ? ($classNames[$nidClass] ?? $className ?: 'Your class')
+              : 'Whole school';
+          $pillClass = $nidClass > 0 ? 'class' : '';
+          $when = $fmtDay($noticeWhen($n));
+          $body = $noticeText($n);
+          $att = $col('attachment_path') ? trim((string) ($n['attachment_path'] ?? '')) : '';
+          ?>
+        <div class="nt-card<?php echo $markToday ? ' today' : ''; ?>">
+          <div class="nt-title"><?php echo e((string) ($n['title'] ?? '')); ?></div>
+          <div class="nt-meta">
+            <span class="nt-pill <?php echo e($pillClass); ?>"><?php echo e($who); ?></span>
+            <?php if ($when !== ''): ?> · <?php echo e($when); ?><?php endif; ?>
+          </div>
+          <?php if ($body !== ''): ?>
+            <div class="mt-2" style="white-space:pre-wrap"><?php echo e($body); ?></div>
+          <?php endif; ?>
+          <?php if ($att !== ''): ?>
+            <div class="mt-2"><a class="btn btn-sm btn-outline-primary" href="<?php echo e($att); ?>" target="_blank" rel="noopener">Open file</a></div>
+          <?php endif; ?>
+        </div>
+      <?php endforeach; ?>
+    <?php endforeach; ?>
+  <?php endif; ?>
 
-<?php
-require_once __DIR__ . '/../includes/footer.php';
-?>
+<?php endif; ?>
+
+<?php require_once __DIR__ . '/../includes/footer.php'; ?>
