@@ -8,5 +8,5 @@ require_once __DIR__ . '/../includes/features/feature_run.php';
 
 feature_run('school_profile', [
     'panel' => 'owner',
-    'page_title' => 'School Profile',
+    'page_title' => 'School name & logo',
 ]);
