@@ -394,3 +394,361 @@ function student_idcard_list_for_class(int $classId): array
     }
     return $rows;
 }
+
+/**
+ * @return list<array<string, mixed>>
+ */
+function student_idcard_list_all_classes(): array
+{
+    $out = [];
+    $seen = [];
+    $classes = function_exists('panel_classes_all') ? panel_classes_all() : [];
+    foreach ($classes as $c) {
+        foreach (student_idcard_list_for_class((int) ($c['id'] ?? 0)) as $row) {
+            $id = (int) ($row['id'] ?? 0);
+            if ($id <= 0 || isset($seen[$id])) {
+                continue;
+            }
+            $seen[$id] = true;
+            $out[] = $row;
+        }
+    }
+    return $out;
+}
+
+function student_idcard_http_bytes(string $url): string
+{
+    $url = trim($url);
+    if ($url === '' || !preg_match('#^https?://#i', $url)) {
+        return '';
+    }
+    if (function_exists('curl_init')) {
+        foreach ([true, false] as $verify) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 12,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_SSL_VERIFYPEER => $verify,
+            ]);
+            $out = curl_exec($ch);
+            $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if (is_string($out) && $out !== '' && $code >= 200 && $code < 300) {
+                return $out;
+            }
+        }
+    }
+    if (ini_get('allow_url_fopen')) {
+        $got = @file_get_contents($url);
+        if (is_string($got) && $got !== '') {
+            return $got;
+        }
+    }
+    return '';
+}
+
+function student_idcard_local_bytes(string $storedPath): string
+{
+    $p = trim($storedPath);
+    if ($p === '' || preg_match('#^https?://#i', $p)) {
+        return '';
+    }
+    if (function_exists('normalize_media_path') && function_exists('media_fs_path')) {
+        $rel = normalize_media_path($p);
+        $rel = preg_replace('#^(owner|reception|teacher|parent|accounts)/+#', '', $rel) ?? $rel;
+        $fs = media_fs_path(ltrim((string) $rel, '/'));
+        if (is_file($fs) && filesize($fs) > 0) {
+            $bin = @file_get_contents($fs);
+            return is_string($bin) ? $bin : '';
+        }
+    }
+    return '';
+}
+
+/**
+ * @return \GdImage|resource|null
+ */
+function student_idcard_gd_from_bytes(string $bin)
+{
+    if ($bin === '' || !function_exists('imagecreatefromstring')) {
+        return null;
+    }
+    $im = @imagecreatefromstring($bin);
+    return $im ?: null;
+}
+
+function student_idcard_ttf(): string
+{
+    foreach ([
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+        '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+        '/System/Library/Fonts/Supplemental/Arial.ttf',
+        '/Library/Fonts/Arial Bold.ttf',
+        '/Library/Fonts/Arial.ttf',
+        'C:\\Windows\\Fonts\\arialbd.ttf',
+        'C:\\Windows\\Fonts\\arial.ttf',
+    ] as $f) {
+        if (is_file($f)) {
+            return $f;
+        }
+    }
+    return '';
+}
+
+/**
+ * @param \GdImage|resource $im
+ */
+function student_idcard_gd_text($im, int $x, int $y, string $text, int $sizePx, int $color, int $maxW = 0): void
+{
+    $text = trim($text);
+    if ($text === '') {
+        return;
+    }
+    $ttf = student_idcard_ttf();
+    if ($ttf !== '' && function_exists('imagettftext')) {
+        $angle = 0;
+        $size = max(8, (int) round($sizePx * 0.72));
+        if ($maxW > 0) {
+            while ($size > 8) {
+                $box = imagettfbbox($size, $angle, $ttf, $text);
+                $tw = abs((int) ($box[2] ?? 0) - (int) ($box[0] ?? 0));
+                if ($tw <= $maxW) {
+                    break;
+                }
+                $size--;
+            }
+        }
+        imagettftext($im, $size, $angle, $x, $y + $size, $color, $ttf, $text);
+        return;
+    }
+    imagestring($im, 5, $x, $y, substr($text, 0, 40), $color);
+}
+
+/**
+ * @param \GdImage|resource $dst
+ * @param \GdImage|resource $src
+ */
+function student_idcard_gd_fit($dst, $src, int $x, int $y, int $w, int $h): void
+{
+    $sw = imagesx($src);
+    $sh = imagesy($src);
+    if ($sw < 1 || $sh < 1) {
+        return;
+    }
+    $scale = max($w / $sw, $h / $sh);
+    $cw = (int) round($w / $scale);
+    $ch = (int) round($h / $scale);
+    $sx = (int) max(0, ($sw - $cw) / 2);
+    $sy = (int) max(0, ($sh - $ch) / 2);
+    imagecopyresampled($dst, $src, $x, $y, $sx, $sy, $w, $h, min($cw, $sw), min($ch, $sh));
+}
+
+/**
+ * @param array<string, mixed> $s
+ */
+function student_idcard_jpeg(array $s): string
+{
+    if (!function_exists('imagecreatetruecolor')) {
+        return '';
+    }
+    $mm = 240 / 25.4;
+    $w = (int) round(85.6 * $mm);
+    $h = (int) round(53.98 * $mm);
+    $im = imagecreatetruecolor($w, $h);
+    $navy = imagecolorallocate($im, 20, 58, 122);
+    $white = imagecolorallocate($im, 255, 255, 255);
+    $ink = imagecolorallocate($im, 15, 39, 68);
+    $mute = imagecolorallocate($im, 51, 65, 85);
+    $foot = imagecolorallocate($im, 248, 250, 252);
+    $line = imagecolorallocate($im, 226, 232, 240);
+    $photoBg = imagecolorallocate($im, 226, 232, 240);
+    imagefilledrectangle($im, 0, 0, $w, $h, $white);
+    $headH = (int) round(16 * $mm);
+    imagefilledrectangle($im, 0, 0, $w, $headH, $navy);
+    $footH = (int) round(6.5 * $mm);
+    imagefilledrectangle($im, 0, $h - $footH, $w, $h, $foot);
+    imagefilledrectangle($im, 0, $h - $footH, $w, $h - $footH + 2, $line);
+
+    $id = (int) ($s['id'] ?? 0);
+    $name = function_exists('student_full_name') ? student_full_name($s) : trim((string) ($s['first_name'] ?? '') . ' ' . (string) ($s['last_name'] ?? ''));
+    if ($name === '') {
+        $name = 'Student #' . $id;
+    }
+    $class = trim((string) ($s['class_name'] ?? ''));
+    $form = trim((string) ($s['form_no'] ?? ''));
+    $ay = trim((string) ($s['academic_year'] ?? ''));
+    if ($ay !== '' && function_exists('ay_display_short')) {
+        $ay = ay_display_short($ay);
+    }
+    $em = student_idcard_emergency($s);
+    $meta = $class !== '' ? $class : 'Class';
+    if ($form !== '') {
+        $meta .= ' · ' . $form;
+    }
+    $call = $em['phone'] !== '' ? ('Call ' . $em['phone']) : ($em['name'] !== '' ? $em['name'] : '');
+    $school = student_idcard_school();
+    $schoolName = trim((string) ($school['name'] ?? ''));
+    if ($schoolName === '') {
+        $schoolName = defined('APP_NAME') ? (string) APP_NAME : 'Preschool';
+    }
+
+    $pad = (int) round(3.5 * $mm);
+    $logoS = (int) round(11 * $mm);
+    $logoBin = student_idcard_local_bytes((string) ($school['logo_path'] ?? ''));
+    if ($logoBin === '') {
+        $logoUrl = '';
+        if (!empty($school['logo_path']) && function_exists('resolve_image_url')) {
+            $logoUrl = (string) resolve_image_url((string) $school['logo_path'], '');
+        }
+        if ($logoUrl !== '') {
+            $logoBin = student_idcard_http_bytes($logoUrl);
+        }
+    }
+    $logoIm = student_idcard_gd_from_bytes($logoBin);
+    if ($logoIm) {
+        imagefilledrectangle($im, $pad, (int) round(2.4 * $mm), $pad + $logoS, (int) round(2.4 * $mm) + $logoS, $white);
+        student_idcard_gd_fit($im, $logoIm, $pad + 2, (int) round(2.4 * $mm) + 2, $logoS - 4, $logoS - 4);
+        imagedestroy($logoIm);
+    }
+    $tx = $pad + $logoS + (int) round(2.5 * $mm);
+    $whiteC = imagecolorallocate($im, 255, 255, 255);
+    student_idcard_gd_text($im, $tx, (int) round(4 * $mm), $schoolName, (int) round(3.2 * $mm), $whiteC, $w - $tx - $pad);
+    student_idcard_gd_text($im, $tx, (int) round(8.6 * $mm), 'Student ID card', (int) round(2.3 * $mm), $whiteC, $w - $tx - $pad);
+
+    $photoW = (int) round(22 * $mm);
+    $photoH = (int) round(26 * $mm);
+    $py = $headH + (int) round(2.2 * $mm);
+    imagefilledrectangle($im, $pad, $py, $pad + $photoW, $py + $photoH, $photoBg);
+    $photoBin = student_idcard_local_bytes((string) ($s['photo_path'] ?? ''));
+    if ($photoBin === '') {
+        $purl = function_exists('student_photo_url') ? student_photo_url((string) ($s['photo_path'] ?? '')) : '';
+        if ($purl !== '') {
+            $photoBin = student_idcard_http_bytes($purl);
+        }
+    }
+    $photoIm = student_idcard_gd_from_bytes($photoBin);
+    if ($photoIm) {
+        student_idcard_gd_fit($im, $photoIm, $pad, $py, $photoW, $photoH);
+        imagedestroy($photoIm);
+    }
+
+    $qrS = (int) round(22 * $mm);
+    $qx = $w - $pad - $qrS;
+    $qy = $py;
+    imagefilledrectangle($im, $qx, $qy, $qx + $qrS, $qy + $qrS, $white);
+    $qrBin = student_idcard_http_bytes(student_idcard_qr_src(student_idcard_scan_url($id), 280));
+    $qrIm = student_idcard_gd_from_bytes($qrBin);
+    if ($qrIm) {
+        student_idcard_gd_fit($im, $qrIm, $qx, $qy, $qrS, $qrS);
+        imagedestroy($qrIm);
+    }
+
+    $ix = $pad + $photoW + (int) round(2.5 * $mm);
+    $infoW = $qx - $ix - (int) round(2 * $mm);
+    student_idcard_gd_text($im, $ix, $py + (int) round(1 * $mm), $name, (int) round(4.0 * $mm), $ink, $infoW);
+    student_idcard_gd_text($im, $ix, $py + (int) round(8 * $mm), $meta, (int) round(2.6 * $mm), $mute, $infoW);
+    if ($call !== '') {
+        student_idcard_gd_text($im, $ix, $py + (int) round(13 * $mm), $call, (int) round(2.6 * $mm), $mute, $infoW);
+    }
+
+    $fy = $h - $footH + (int) round(1.6 * $mm);
+    $footC = imagecolorallocate($im, 100, 116, 139);
+    student_idcard_gd_text($im, $pad, $fy, $ay, (int) round(2.2 * $mm), $footC, (int) round(30 * $mm));
+    student_idcard_gd_text($im, $pad + (int) round(32 * $mm), $fy, 'Scan QR for full details', (int) round(2.2 * $mm), $footC, (int) round(50 * $mm));
+
+    ob_start();
+    imagejpeg($im, null, 88);
+    $jpeg = (string) ob_get_clean();
+    imagedestroy($im);
+    return $jpeg;
+}
+
+/**
+ * @param list<array<string, mixed>> $students
+ */
+function student_idcard_pdf_download(array $students, string $filename = 'id-cards.pdf'): void
+{
+    @set_time_limit(180);
+    if (function_exists('ini_set')) {
+        @ini_set('memory_limit', '256M');
+    }
+    $jpegs = [];
+    foreach ($students as $s) {
+        $jpg = student_idcard_jpeg($s);
+        if ($jpg !== '') {
+            $jpegs[] = $jpg;
+        }
+    }
+    if ($jpegs === []) {
+        return;
+    }
+    $pw = 85.6 * 72 / 25.4;
+    $ph = 53.98 * 72 / 25.4;
+    $objs = [];
+    $objs[] = '<< /Type /Catalog /Pages 2 0 R >>';
+    $pageIds = [];
+    $extra = [];
+    $n = count($jpegs);
+    $base = 3;
+    for ($i = 0; $i < $n; $i++) {
+        $pageObj = $base + ($i * 3);
+        $contObj = $pageObj + 1;
+        $imgObj = $pageObj + 2;
+        $pageIds[] = $pageObj . ' 0 R';
+        $jpg = $jpegs[$i];
+        $info = @getimagesizefromstring($jpg);
+        $iw = (int) ($info[0] ?? 1);
+        $ih = (int) ($info[1] ?? 1);
+        $extra[$pageObj] = sprintf(
+            '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.3f %.3f] /Contents %d 0 R /Resources << /XObject << /Im1 %d 0 R >> >> >>',
+            $pw,
+            $ph,
+            $contObj,
+            $imgObj
+        );
+        $stream = sprintf("q\n%.3f 0 0 %.3f 0 0 cm\n/Im1 Do\nQ\n", $pw, $ph);
+        $extra[$contObj] = '<< /Length ' . strlen($stream) . " >>\nstream\n" . $stream . 'endstream';
+        $extra[$imgObj] = '<< /Type /XObject /Subtype /Image /Width ' . $iw . ' /Height ' . $ih
+            . ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' . strlen($jpg)
+            . " >>\nstream\n" . $jpg . "\nendstream";
+    }
+    $kids = implode(' ', $pageIds);
+    $objs[] = '<< /Type /Pages /Kids [' . $kids . '] /Count ' . $n . ' >>';
+
+    $pdf = "%PDF-1.4\n";
+    $offsets = [0];
+    $write = static function (int $id, string $body) use (&$pdf, &$offsets): void {
+        $offsets[$id] = strlen($pdf);
+        $pdf .= $id . " 0 obj\n" . $body . "\nendobj\n";
+    };
+    $write(1, $objs[0]);
+    $write(2, $objs[1]);
+    ksort($extra);
+    foreach ($extra as $id => $body) {
+        $write((int) $id, $body);
+    }
+    $maxId = $base + ($n * 3) - 1;
+    $xref = strlen($pdf);
+    $count = $maxId + 1;
+    $pdf .= "xref\n0 {$count}\n";
+    $pdf .= "0000000000 65535 f \n";
+    for ($i = 1; $i <= $maxId; $i++) {
+        $pdf .= sprintf("%010d 00000 n \n", $offsets[$i] ?? 0);
+    }
+    $pdf .= "trailer << /Size {$count} /Root 1 0 R >>\nstartxref\n{$xref}\n%%EOF";
+
+    $safe = preg_replace('/[^A-Za-z0-9._-]+/', '_', $filename) ?: 'id-cards.pdf';
+    if (!str_ends_with(strtolower($safe), '.pdf')) {
+        $safe .= '.pdf';
+    }
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="' . $safe . '"');
+    header('Content-Length: ' . strlen($pdf));
+    header('Cache-Control: private, max-age=0');
+    echo $pdf;
+    exit;
+}
