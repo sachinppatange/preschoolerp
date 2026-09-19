@@ -1,420 +1,374 @@
 <?php
 /**
- * parent/fees.php
- *
- * Parent -> Fees & Payments page (uses students and fees_records).
- *
- * Behavior:
- * - Requires parent login ($_SESSION['parent_auth_user'])
- * - Loads linked children from parents_children (fallback to students.parent_id)
- * - Uses students.total_fees when present to calculate pending = total_fees - SUM(paid_amount)
- * - If students.total_fees not present, uses fees_records to compute pending as SUM(amount) - SUM(paid_amount)
- * - Shows recent payments from fees_records (fields used: id, school_id, student_id, class_id, amount, paid_amount, status, receipt_no, collected_by, collected_at, created_at, updated_at)
- * - Allows parent to record an offline payment: inserts a fees_records row with paid_amount, receipt_no, collected_at, created_at and status='paid'
- * - Exports payments CSV
- *
- * Place at: /pioneerplayschool01/parent/fees.php
+ * parent/fees.php — how much is due, what was paid at school.
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('parent');
-$DEBUG = panel_debug();
 
-/* ---------- Require parent login ---------- */
-/* ---------- Initialize messages/errors ---------- */
-$messages = [];
-$errors = [];
-
-/* ---------- Parent identity ---------- */
 $parentId = panel_parent_context_id();
-$parentSession = auth_user() ?? [];
-$parentName = auth_user_name('Parent');/* ---------- Detect useful tables ---------- */
-$hasStudents = table_exists('students');
-$hasParentsChildren = table_exists('parents_children');
-$hasFeesRecords = table_exists('fees_records');
+$tableOk = table_exists('fees_records');
 
-/* ---------- fees_records table name ---------- */
-$feesTable = $hasFeesRecords ? 'fees_records' : null;
+$inr = static function (float $n): string {
+    if (function_exists('format_money')) {
+        return format_money($n);
+    }
+    return '₹ ' . number_format($n, 0);
+};
 
-/* ---------- Load linked children (mapping) ---------- */
 $childIds = [];
-$childMappings = [];
-if ($hasParentsChildren) {
-    $childMappings = safe_db_get_all("SELECT id, parent_user_id, child_student_id FROM parents_children WHERE parent_user_id = :pid ORDER BY id DESC", [':pid'=>$parentId]);
-    foreach ($childMappings as $m) $childIds[] = (int)$m['child_student_id'];
-}
-
-/* fallback: students.parent_id / father_id / mother_id */
-if (empty($childIds) && $hasStudents) {
-    $rows = safe_db_get_all("SELECT id FROM students WHERE parent_id = :pid OR father_id = :pid OR mother_id = :pid", [':pid'=>$parentId]);
-    foreach ($rows as $r) $childIds[] = (int)$r['id'];
-}
-
-/* ---------- Load student rows for linked children ---------- */
-$children = [];
-if (!empty($childIds) && $hasStudents) {
-    $ph = implode(',', array_fill(0, count($childIds), '?'));
-    $sql = "SELECT
-                id, school_id, first_name, middle_name, last_name, dob, class_id, parent_id, photo_path, admission_date,
-                status, created_at, updated_at, form_no, location, total_fees,
-                father_first, father_middle, father_last, father_phone,
-                mother_first, mother_middle, mother_last, mother_phone
-            FROM students WHERE id IN ($ph)";
-    $rows = safe_db_get_all($sql, $childIds);
-    $byId = [];
-    foreach ($rows as $r) $byId[(int)$r['id']] = $r;
-    foreach ($childIds as $cid) {
-        if (isset($byId[$cid])) $children[] = $byId[$cid];
-        else $children[] = ['id'=>$cid,'first_name'=>'Student','middle_name'=>'','last_name'=>'#'.$cid,'class_id'=>null,'form_no'=>null,'admission_date'=>null,'photo_path'=>null,'placeholder'=>true];
-    }
-}
-
-/* ---------- Compute pending per child ---------- */
-$pendingByChild = [];
-if (!empty($childIds)) {
-    if ($hasFeesRecords) {
-        // If students.total_fees exists, use it; otherwise compute from fees_records sums
-        try {
-            // Get paid sums and total due sums per student
-            $ph = implode(',', array_fill(0, count($childIds), '?'));
-            $paidRows = safe_db_get_all("SELECT student_id, COALESCE(SUM(paid_amount),0) AS paid_sum, COALESCE(SUM(amount),0) AS due_sum FROM {$feesTable} WHERE student_id IN ($ph) GROUP BY student_id", $childIds);
-            $paidMap = []; $dueMap = [];
-            foreach ($paidRows as $r) { $paidMap[(int)$r['student_id']] = (float)$r['paid_sum']; $dueMap[(int)$r['student_id']] = (float)$r['due_sum']; }
-
-            foreach ($children as $c) {
-                $cid = (int)$c['id'];
-                $totalFees = isset($c['total_fees']) && $c['total_fees'] !== '' ? (float)$c['total_fees'] : null;
-                $paid = $paidMap[$cid] ?? 0.0;
-                $dueSum = $dueMap[$cid] ?? 0.0;
-                if ($totalFees !== null) {
-                    $pendingByChild[$cid] = max(0.0, $totalFees - $paid);
-                } else {
-                    // use fees_records data (sum(amount) - sum(paid_amount))
-                    $pendingByChild[$cid] = max(0.0, $dueSum - $paid);
-                }
-            }
-        } catch (Throwable $e) {
-            if ($DEBUG) error_log('pending calc error: '.$e->getMessage());
-            foreach ($childIds as $cid) $pendingByChild[$cid] = null;
-        }
-    } else {
-        // No fees_records table: we can only show students.total_fees if present
-        foreach ($children as $c) {
-            $cid = (int)$c['id'];
-            $totalFees = isset($c['total_fees']) && $c['total_fees'] !== '' ? (float)$c['total_fees'] : null;
-            $pendingByChild[$cid] = $totalFees;
+if ($parentId > 0 && table_exists('parents_children')) {
+    $maps = safe_db_get_all(
+        'SELECT child_student_id FROM parents_children WHERE parent_user_id = :pid ORDER BY id DESC',
+        [':pid' => $parentId]
+    ) ?: [];
+    foreach ($maps as $m) {
+        $id = (int) ($m['child_student_id'] ?? 0);
+        if ($id > 0) {
+            $childIds[] = $id;
         }
     }
 }
-
-/* ---------- Recent payments (from fees_records) ---------- */
-$recentPayments = [];
-if ($hasFeesRecords && !empty($childIds)) {
-    try {
-        $ph = implode(',', array_fill(0, count($childIds), '?'));
-        $recentPayments = safe_db_get_all(
-            "SELECT id, school_id, student_id, class_id, amount, paid_amount, status, receipt_no, collected_by, collected_at, created_at, updated_at
-             FROM {$feesTable}
-             WHERE student_id IN ($ph)
-             ORDER BY COALESCE(collected_at, created_at) DESC
-             LIMIT 12",
-            $childIds
-        );
-    } catch (Throwable $e) {
-        if ($DEBUG) error_log('recentPayments error: '.$e->getMessage());
-        $recentPayments = [];
+if ($childIds === [] && $parentId > 0 && table_exists('students')) {
+    $or = ['parent_id = :pid'];
+    $params = [':pid' => $parentId];
+    if (function_exists('column_exists') && column_exists('students', 'father_id')) {
+        $or[] = 'father_id = :pid';
     }
-}
-
-/* ---------- Handle offline payment recording by parent ---------- */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'record_payment') {
-    if (!validate_csrf_token($_POST['csrf'] ?? '')) {
-        $errors[] = 'Invalid CSRF token.';
-    } else {
-        if (!$hasFeesRecords) {
-            $errors[] = 'Payment recording not supported on this system.';
-        } else {
-            $student_id = isset($_POST['student_id']) ? (int)$_POST['student_id'] : 0;
-            $paid_amount = isset($_POST['paid_amount']) ? (float)$_POST['paid_amount'] : 0.0;
-            $method = trim((string)($_POST['method'] ?? 'offline'));
-            $note = trim((string)($_POST['note'] ?? 'Recorded by parent (offline)'));
-            if ($student_id <= 0 || $paid_amount <= 0) {
-                $errors[] = 'Valid student and amount required.';
-            } elseif (!in_array($student_id, $childIds, true)) {
-                $errors[] = 'You are not linked to the selected student.';
-            } else {
-                try {
-                    // find student to populate school_id/class_id if possible
-                    $stu = null;
-                    foreach ($children as $c) { if ((int)$c['id'] === $student_id) { $stu = $c; break; } }
-                    $school_id = $stu['school_id'] ?? null;
-                    $class_id = $stu['class_id'] ?? null;
-                    // Create a receipt no
-                    $receipt = 'P' . time() . rand(100,999);
-                    // Insert row: amount = paid_amount (we don't know due amount line), paid_amount set; set status 'paid'
-                    $ok = safe_db_run(
-                        "INSERT INTO {$feesTable} (school_id, student_id, class_id, amount, paid_amount, status, receipt_no, collected_by, collected_at, created_at, updated_at)
-                         VALUES (:school_id, :student_id, :class_id, :amount, :paid_amount, :status, :receipt, :collected_by, NOW(), NOW(), NOW())",
-                        [
-                            ':school_id' => $school_id,
-                            ':student_id' => $student_id,
-                            ':class_id' => $class_id,
-                            ':amount' => $paid_amount,
-                            ':paid_amount' => $paid_amount,
-                            ':status' => 'paid',
-                            ':receipt' => $receipt,
-                            ':collected_by' => null,
-                        ]
-                    );
-                    if ($ok) {
-                        $messages[] = 'Payment recorded (offline). Receipt: ' . e($receipt) . '.';
-                        // refresh recent payments and pending
-                        if (!empty($childIds)) {
-                            $ph = implode(',', array_fill(0, count($childIds), '?'));
-                            $recentPayments = safe_db_get_all(
-                                "SELECT id, school_id, student_id, class_id, amount, paid_amount, status, receipt_no, collected_by, collected_at, created_at, updated_at
-                                 FROM {$feesTable}
-                                 WHERE student_id IN ($ph)
-                                 ORDER BY COALESCE(collected_at, created_at) DESC
-                                 LIMIT 12",
-                                $childIds
-                            );
-                            // recompute pending sums
-                            $paidRows = safe_db_get_all("SELECT student_id, COALESCE(SUM(paid_amount),0) AS paid_sum, COALESCE(SUM(amount),0) AS due_sum FROM {$feesTable} WHERE student_id IN ($ph) GROUP BY student_id", $childIds);
-                            $paidMap = []; $dueMap = [];
-                            foreach ($paidRows as $r) { $paidMap[(int)$r['student_id']] = (float)$r['paid_sum']; $dueMap[(int)$r['student_id']] = (float)$r['due_sum']; }
-                            foreach ($children as $c) {
-                                $cid = (int)$c['id'];
-                                $totalFees = isset($c['total_fees']) && $c['total_fees'] !== '' ? (float)$c['total_fees'] : null;
-                                $paid = $paidMap[$cid] ?? 0.0;
-                                $dueSum = $dueMap[$cid] ?? 0.0;
-                                if ($totalFees !== null) $pendingByChild[$cid] = max(0.0, $totalFees - $paid);
-                                else $pendingByChild[$cid] = max(0.0, $dueSum - $paid);
-                            }
-                        }
-                    } else {
-                        $errors[] = 'Failed to record payment. Contact admin.';
-                    }
-                } catch (Throwable $e) {
-                    if ($DEBUG) error_log('record payment error: '.$e->getMessage());
-                    $errors[] = 'Failed to record payment. Contact admin.';
-                }
-            }
-        }
+    if (function_exists('column_exists') && column_exists('students', 'mother_id')) {
+        $or[] = 'mother_id = :pid';
     }
-}
-
-/* ---------- Export payments CSV (action=export_payments) ---------- */
-if (($action = ($_GET['action'] ?? '')) === 'export_payments') {
-    if ($hasFeesRecords && !empty($childIds)) {
-        $ph = implode(',', array_fill(0, count($childIds), '?'));
-        $rows = safe_db_get_all(
-            "SELECT id, school_id, student_id, class_id, amount, paid_amount, status, receipt_no, collected_by, collected_at, created_at, updated_at FROM {$feesTable} WHERE student_id IN ($ph) ORDER BY COALESCE(collected_at, created_at) DESC",
-            $childIds
-        );
-    } else {
-        $rows = [];
-    }
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=payments_' . date('Ymd_His') . '.csv');
-    $out = fopen('php://output', 'w');
-    fputcsv($out, ['id','school_id','student_id','class_id','amount','paid_amount','status','receipt_no','collected_by','collected_at','created_at','updated_at']);
+    $rows = safe_db_get_all('SELECT id FROM students WHERE ' . implode(' OR ', $or), $params) ?: [];
     foreach ($rows as $r) {
-        fputcsv($out, [
-            $r['id'] ?? '',
-            $r['school_id'] ?? '',
-            $r['student_id'] ?? '',
-            $r['class_id'] ?? '',
-            $r['amount'] ?? '',
-            $r['paid_amount'] ?? '',
-            $r['status'] ?? '',
-            $r['receipt_no'] ?? '',
-            $r['collected_by'] ?? '',
-            $r['collected_at'] ?? '',
-            $r['created_at'] ?? '',
-            $r['updated_at'] ?? '',
-        ]);
+        $id = (int) ($r['id'] ?? 0);
+        if ($id > 0) {
+            $childIds[] = $id;
+        }
     }
-    fclose($out);
+}
+$childIds = array_values(array_unique($childIds));
+
+$feeCol = function_exists('column_exists') && column_exists('students', 'total_fees');
+$children = [];
+if ($childIds !== [] && table_exists('students')) {
+    $in = implode(',', array_map('intval', $childIds));
+    $join = table_exists('classes') ? 'LEFT JOIN classes c ON c.id = s.class_id' : '';
+    $classSel = table_exists('classes') ? ', c.name AS class_name' : '';
+    $feeSel = $feeCol ? ', s.total_fees' : '';
+    $rows = safe_db_get_all(
+        "SELECT s.id, s.first_name, s.middle_name, s.last_name, s.class_id, s.photo_path{$feeSel}{$classSel}
+         FROM students s {$join}
+         WHERE s.id IN ({$in})"
+    ) ?: [];
+    $byId = [];
+    foreach ($rows as $r) {
+        $byId[(int) $r['id']] = $r;
+    }
+    foreach ($childIds as $id) {
+        if (isset($byId[$id])) {
+            $children[] = $byId[$id];
+        }
+    }
+}
+
+$selectedId = (int) ($_GET['student_id'] ?? 0);
+if ($selectedId <= 0 && $childIds !== []) {
+    $selectedId = $childIds[0];
+}
+if ($selectedId > 0 && !in_array($selectedId, $childIds, true)) {
+    $selectedId = $childIds[0] ?? 0;
+}
+
+$selected = null;
+foreach ($children as $c) {
+    if ((int) $c['id'] === $selectedId) {
+        $selected = $c;
+        break;
+    }
+}
+
+$nameOf = static function (array $s): string {
+    if (function_exists('student_full_name')) {
+        $n = trim(student_full_name($s));
+        if ($n !== '') {
+            return $n;
+        }
+    }
+    return trim((string) ($s['first_name'] ?? '') . ' ' . (string) ($s['middle_name'] ?? '') . ' ' . (string) ($s['last_name'] ?? ''));
+};
+
+$fmtDay = static function (string $raw): string {
+    $d = substr($raw, 0, 10);
+    if ($d === '' || $d === '0000-00-00') {
+        return '';
+    }
+    $ts = strtotime($d);
+    if ($ts === false) {
+        return $d;
+    }
+    if ($d === date('Y-m-d')) {
+        return 'Today';
+    }
+    if ($d === date('Y-m-d', strtotime('-1 day'))) {
+        return 'Yesterday';
+    }
+    return date('d M Y', $ts);
+};
+
+$receiptBits = static function (string $raw): array {
+    $raw = trim($raw);
+    $no = $raw;
+    $method = '';
+    if (str_contains($raw, '||')) {
+        $parts = explode('||', $raw);
+        $no = trim((string) ($parts[0] ?? ''));
+        foreach ($parts as $p) {
+            $p = trim($p);
+            if (stripos($p, 'METHOD:') === 0) {
+                $method = trim(substr($p, 7));
+            }
+        }
+    }
+    return [$no, $method];
+};
+
+$className = $selected ? trim((string) ($selected['class_name'] ?? '')) : '';
+$childName = $selected ? $nameOf($selected) : 'Your child';
+$photo = $selected && function_exists('student_photo_url')
+    ? student_photo_url((string) ($selected['photo_path'] ?? ''))
+    : '';
+
+$totalFees = $selected && $feeCol ? (float) ($selected['total_fees'] ?? 0) : 0.0;
+$paid = 0.0;
+$payments = [];
+if ($tableOk && $selectedId > 0) {
+    $sum = safe_db_get_one(
+        'SELECT COALESCE(SUM(paid_amount),0) AS paid_sum FROM fees_records WHERE student_id = :sid',
+        [':sid' => $selectedId]
+    );
+    $paid = (float) ($sum['paid_sum'] ?? 0);
+    $payments = safe_db_get_all(
+        'SELECT id, paid_amount, amount, receipt_no, collected_at, created_at
+         FROM fees_records
+         WHERE student_id = :sid AND paid_amount > 0
+         ORDER BY COALESCE(collected_at, created_at) DESC, id DESC
+         LIMIT 24',
+        [':sid' => $selectedId]
+    ) ?: [];
+}
+
+$pending = max(0.0, $totalFees - $paid);
+$cleared = $pending < 0.5;
+
+$heroText = $cleared ? 'Fees paid' : ($inr($pending) . ' still due');
+$heroClass = $cleared ? 'ok' : 'due';
+$heroSub = $childName;
+if ($className !== '') {
+    $heroSub .= ' · ' . $className;
+}
+
+$feesUrl = static function (int $sid = 0, int $receiptId = 0): string {
+    $q = [];
+    if ($sid > 0) {
+        $q['student_id'] = $sid;
+    }
+    if ($receiptId > 0) {
+        $q['receipt'] = $receiptId;
+    }
+    $path = '/parent/fees.php' . ($q !== [] ? ('?' . http_build_query($q)) : '');
+    return function_exists('site_url') ? site_url($path) : $path;
+};
+
+$receiptId = (int) ($_GET['receipt'] ?? $_GET['payment_id'] ?? 0);
+if ($receiptId > 0 && $tableOk) {
+    $pay = safe_db_get_one(
+        'SELECT id, student_id, paid_amount, amount, receipt_no, collected_at, created_at
+         FROM fees_records WHERE id = :id LIMIT 1',
+        [':id' => $receiptId]
+    );
+    $paySid = (int) ($pay['student_id'] ?? 0);
+    $okPay = $pay && $paySid > 0 && in_array($paySid, $childIds, true);
+
+    $school = [];
+    if (table_exists('schools')) {
+        $school = safe_db_get_one('SELECT * FROM schools ORDER BY id ASC LIMIT 1') ?: [];
+    }
+    $schoolName = trim((string) ($school['name'] ?? ''));
+    if ($schoolName === '') {
+        $schoolName = defined('APP_NAME') ? (string) APP_NAME : 'School';
+    }
+    $schoolAddr = trim((string) ($school['address'] ?? ''));
+    $schoolPhone = trim((string) ($school['contact_phone'] ?? ''));
+    $logo = '';
+    if (!empty($school['logo_path']) && function_exists('resolve_image_url')) {
+        $logo = (string) resolve_image_url((string) $school['logo_path'], '');
+    }
+
+    $payChild = $childName;
+    $payClass = $className;
+    foreach ($children as $ch) {
+        if ((int) $ch['id'] === $paySid) {
+            $payChild = $nameOf($ch);
+            $payClass = trim((string) ($ch['class_name'] ?? ''));
+            break;
+        }
+    }
+    $amt = (float) ($pay['paid_amount'] ?? $pay['amount'] ?? 0);
+    $when = $okPay ? $fmtDay((string) ($pay['collected_at'] ?? $pay['created_at'] ?? '')) : '';
+    [$rno, $method] = $okPay ? $receiptBits((string) ($pay['receipt_no'] ?? '')) : ['', ''];
+
+    $page_title = 'Receipt';
+    $pageTitle = $page_title;
+    require_once __DIR__ . '/../includes/header.php';
+    echo panel_owner_parent_gate_html();
+    ?>
+<style>
+@media print { .no-print { display:none !important; } .fe-slip { border:none !important; box-shadow:none !important; } }
+.fe-slip { max-width:420px; margin:0 auto 16px; background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:22px; text-align:center; }
+.fe-slip .logo { max-height:56px; margin-bottom:8px; }
+.fe-slip h1 { font-size:1.15rem; font-weight:800; color:#1e3a5f; margin:0 0 4px; }
+.fe-slip .amt { font-size:1.8rem; font-weight:800; color:#166534; margin:12px 0; }
+.fe-slip .rowl { display:flex; justify-content:space-between; text-align:left; font-size:.92rem; padding:6px 0; border-bottom:1px dashed #e2e8f0; }
+.fe-slip .muted { color:#64748b; font-size:.85rem; }
+</style>
+    <p class="no-print text-muted mb-3">Fee receipt from school. Save or print if you need a copy.</p>
+    <?php if (!$okPay): ?>
+      <div class="alert alert-info">This receipt was not found. <a href="<?php echo e($feesUrl($selectedId)); ?>">Back to fees</a></div>
+    <?php else: ?>
+      <div class="fe-slip" id="feSlip">
+        <?php if ($logo !== ''): ?><img class="logo" src="<?php echo e($logo); ?>" alt=""><?php endif; ?>
+        <h1><?php echo e($schoolName); ?></h1>
+        <?php if ($schoolAddr !== '' || $schoolPhone !== ''): ?>
+          <div class="muted mb-2"><?php echo e(trim($schoolAddr . ($schoolPhone !== '' ? ' · ' . $schoolPhone : ''))); ?></div>
+        <?php endif; ?>
+        <div class="fw-bold" style="color:#1d4ed8">Fee receipt</div>
+        <div class="amt"><?php echo e($inr($amt)); ?></div>
+        <div class="rowl"><span class="muted">Child</span><span><?php echo e($payChild); ?></span></div>
+        <?php if ($payClass !== ''): ?>
+          <div class="rowl"><span class="muted">Class</span><span><?php echo e($payClass); ?></span></div>
+        <?php endif; ?>
+        <div class="rowl"><span class="muted">Date</span><span><?php echo e($when !== '' ? $when : '—'); ?></span></div>
+        <?php if ($method !== ''): ?>
+          <div class="rowl"><span class="muted">Paid by</span><span><?php echo e($method); ?></span></div>
+        <?php endif; ?>
+        <div class="rowl"><span class="muted">Receipt no.</span><span><?php echo e($rno !== '' ? $rno : ('#' . $receiptId)); ?></span></div>
+        <div class="muted mt-3">Paid at school office</div>
+      </div>
+      <div class="no-print text-center d-flex justify-content-center gap-2 flex-wrap">
+        <button type="button" class="btn btn-success" onclick="window.print()">Print</button>
+        <a class="btn btn-outline-secondary" href="<?php echo e($feesUrl($paySid)); ?>">Back to fees</a>
+      </div>
+    <?php endif; ?>
+    <?php
+    require_once __DIR__ . '/../includes/footer.php';
     exit;
 }
 
-/* ---------- Render page ---------- */
-$pageTitle = 'Fees & Payments';
+$page_title = 'Fees';
+$pageTitle = $page_title;
 require_once __DIR__ . '/../includes/header.php';
 echo panel_owner_parent_gate_html();
 ?>
+<style>
+.fe-chip { display:inline-flex; align-items:center; gap:.4rem; border:1px solid #dbe7fb; background:#fff; border-radius:999px; padding:.3rem .8rem; text-decoration:none; color:#1e3a5f; font-weight:600; margin:0 .35rem .5rem 0; }
+.fe-chip.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+.fe-chip img, .fe-chip .ph { width:28px; height:28px; border-radius:50%; object-fit:cover; background:#e2e8f0; }
+.fe-hero { background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:18px; margin-bottom:14px; display:flex; gap:14px; align-items:center; }
+.fe-hero.ok { border-color:#86efac; background:#f0fdf4; }
+.fe-hero.due { border-color:#fdba74; background:#fff7ed; }
+.fe-photo { width:64px; height:64px; border-radius:16px; object-fit:cover; background:#e2e8f0; flex-shrink:0; }
+.fe-big { font-weight:800; font-size:1.25rem; color:#1e3a5f; }
+.fe-row { display:flex; gap:10px; margin-bottom:14px; }
+.fe-stat { flex:1; background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:12px; text-align:center; }
+.fe-stat .n { font-weight:800; font-size:1.15rem; color:#1e3a5f; }
+.fe-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:12px 14px; margin-bottom:8px; display:flex; justify-content:space-between; gap:10px; align-items:center; }
+.fe-amt { font-weight:800; color:#166534; white-space:nowrap; }
+.fe-meta { font-size:.88rem; color:#64748b; }
+.fe-sec { font-size:.75rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:#94a3b8; margin:8px 0; }
+.fe-note { background:#eff6ff; border-radius:14px; padding:12px 14px; color:#1e3a5f; font-size:.92rem; }
+</style>
 
-<?php if (!empty($messages) && is_array($messages)): foreach ($messages as $m): ?>
-  <div class="alert alert-success"><?php echo e($m); ?></div>
-<?php endforeach; endif; ?>
+<p class="text-muted mb-2">Fees and receipts in one place. Pay at school — the office will update this page.</p>
 
-<?php if (!empty($errors) && is_array($errors)): foreach ($errors as $er): ?>
-  <div class="alert alert-danger"><?php echo e($er); ?></div>
-<?php endforeach; endif; ?>
+<?php if ($parentId <= 0): ?>
+<?php elseif ($children === []): ?>
+  <div class="alert alert-info mb-0">No child is linked to this login. Ask the school office.</div>
+<?php elseif (!$tableOk && !$feeCol): ?>
+  <div class="alert alert-warning mb-0">Fees are not set up yet.</div>
+<?php else: ?>
 
-<div class="row g-3">
-  <div class="col-12 col-md-6">
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <h6 class="mb-3">My Children & Fees</h6>
-
-        <?php if (empty($children)): ?>
-          <div class="small-muted">No children linked to your account.</div>
-        <?php else: ?>
-          <ul class="list-group list-group-flush">
-            <?php foreach ($children as $c): $cid = (int)$c['id']; ?>
-              <li class="list-group-item d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                  <div class="me-2">
-                    <?php if (!empty($c['photo_path'])): ?>
-                      <img src="<?php echo e(function_exists('student_photo_url') ? student_photo_url((string) ($c['photo_path'] ?? '')) : (string) ($c['photo_path'] ?? '')); ?>" alt="" class="child-photo">
-                    <?php else: ?>
-                      <div class="child-photo" style="background:#f1f1f1"></div>
-                    <?php endif; ?>
-                  </div>
-                  <div>
-                    <div class="fw-semibold"><?php echo e(trim((($c['first_name'] ?? '') . ' ' . ($c['middle_name'] ?? '') . ' ' . ($c['last_name'] ?? '')))); ?></div>
-                    <div class="small-muted">Class: <?php echo e($c['class_id'] ?? '—'); ?> • Form: <?php echo e($c['form_no'] ?? '—'); ?></div>
-                  </div>
-                </div>
-
-                <div class="text-end" style="min-width:170px">
-                  <div class="mb-1">
-                    <?php
-                      $pend = array_key_exists($cid, $pendingByChild) ? $pendingByChild[$cid] : null;
-                      if ($pend === null) { echo '<span class="small-muted">Pending: —</span>'; }
-                      else { echo '<span class="fw-semibold">₹ '.number_format($pend,2).'</span>'; }
-                    ?>
-                  </div>
-                  <div>
-                    <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#viewModal" data-id="<?php echo $cid; ?>">View</button>
-                    <a class="btn btn-sm btn-outline-primary" href="?action=pay_online&student_id=<?php echo $cid; ?>">Pay</a>
-                  </div>
-                </div>
-              </li>
-            <?php endforeach; ?>
-          </ul>
-        <?php endif; ?>
-
-      </div>
+  <?php if (count($children) > 1): ?>
+    <div class="mb-3">
+      <?php foreach ($children as $ch):
+          $cid = (int) $ch['id'];
+          $p = function_exists('student_photo_url') ? student_photo_url((string) ($ch['photo_path'] ?? '')) : '';
+          ?>
+        <a class="fe-chip<?php echo $cid === $selectedId ? ' active' : ''; ?>" href="?student_id=<?php echo $cid; ?>">
+          <?php if ($p !== ''): ?><img src="<?php echo e($p); ?>" alt=""><?php else: ?><span class="ph"></span><?php endif; ?>
+          <?php echo e($nameOf($ch)); ?>
+        </a>
+      <?php endforeach; ?>
     </div>
+  <?php endif; ?>
 
-    <div class="card mt-3 shadow-sm">
-      <div class="card-body">
-        <h6 class="mb-2">Record Offline Payment</h6>
-        <?php if (!$hasFeesRecords): ?>
-          <div class="small-muted">Your system does not support recording payments. Contact administrator.</div>
-        <?php else: ?>
-          <form method="post" class="row g-2">
-            <input type="hidden" name="csrf" value="<?php echo e(get_csrf_token()); ?>">
-            <input type="hidden" name="action" value="record_payment">
-            <div class="col-12">
-              <label class="form-label">Select child</label>
-              <select name="student_id" class="form-select" required>
-                <?php foreach ($children as $c): ?>
-                  <option value="<?php echo (int)$c['id']; ?>"><?php echo e(trim((($c['first_name'] ?? '') . ' ' . ($c['last_name'] ?? '')))); ?> (ID: <?php echo (int)$c['id']; ?>)</option>
-                <?php endforeach; ?>
-              </select>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Amount (₹)</label>
-              <input type="number" step="0.01" min="0.01" name="paid_amount" class="form-control" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Method</label>
-              <select name="method" class="form-select">
-                <option value="offline">Offline (Cash/Cheque)</option>
-                <option value="bank">Bank Transfer</option>
-                <option value="upi">UPI</option>
-              </select>
-            </div>
-            <div class="col-12">
-              <label class="form-label">Note (optional)</label>
-              <input name="note" class="form-control" placeholder="Receipt number or note">
-            </div>
-            <div class="col-12 text-end">
-              <button class="btn btn-primary">Record Payment</button>
-            </div>
-          </form>
-        <?php endif; ?>
-      </div>
+  <div class="fe-hero <?php echo e($heroClass); ?>">
+    <?php if ($photo !== ''): ?>
+      <img class="fe-photo" src="<?php echo e($photo); ?>" alt="">
+    <?php else: ?>
+      <div class="fe-photo"></div>
+    <?php endif; ?>
+    <div>
+      <div class="fe-big"><?php echo e($heroText); ?></div>
+      <div class="text-muted"><?php echo e($heroSub); ?></div>
     </div>
   </div>
 
-  <div class="col-12 col-md-6">
-    <div class="card shadow-sm">
-      <div class="card-body">
-        <h6 class="mb-3">Recent Payments</h6>
-        <?php if (empty($recentPayments)): ?>
-          <div class="small-muted">No recent payments found.</div>
-        <?php else: ?>
-          <ul class="list-group list-group-flush">
-            <?php foreach ($recentPayments as $p): ?>
-              <li class="list-group-item d-flex justify-content-between align-items-start">
-                <div>
-                  <div class="fw-semibold">₹ <?php echo number_format((float)($p['paid_amount'] ?? $p['amount'] ?? 0),2); ?></div>
-                  <div class="small-muted">Student ID: <?php echo (int)($p['student_id'] ?? 0); ?> • <?php echo e(substr((string)($p['collected_at'] ?? $p['created_at'] ?? ''),0,16)); ?> • <?php echo e($p['status'] ?? ''); ?></div>
-                  <?php if (!empty($p['receipt_no'])): ?><div class="small-muted">Receipt: <?php echo e($p['receipt_no']); ?></div><?php endif; ?>
-                </div>
-                <div class="text-end small-muted">
-                  <?php echo e($p['collected_by'] ?? ''); ?>
-                </div>
-              </li>
-            <?php endforeach; ?>
-          </ul>
-        <?php endif; ?>
+  <div class="fe-row">
+    <div class="fe-stat">
+      <div class="n"><?php echo e($inr($totalFees)); ?></div>
+      <div class="small text-muted">Year fees</div>
+    </div>
+    <div class="fe-stat">
+      <div class="n" style="color:#166534"><?php echo e($inr($paid)); ?></div>
+      <div class="small text-muted">Paid</div>
+    </div>
+    <div class="fe-stat">
+      <div class="n" style="color:<?php echo $cleared ? '#166534' : '#c2410c'; ?>"><?php echo e($inr($pending)); ?></div>
+      <div class="small text-muted">Still due</div>
+    </div>
+  </div>
 
-        <div class="mt-3 text-end">
-          <a class="btn btn-sm btn-outline-secondary" href="?action=export_payments">Export Payments CSV</a>
+  <?php if (!$cleared): ?>
+    <div class="fe-note mb-3">Pay the remaining amount at school (cash / UPI). The office will update this page.</div>
+  <?php endif; ?>
+
+  <div class="fe-sec">Receipts</div>
+  <?php if ($payments === []): ?>
+    <div class="fe-card text-muted">No payments recorded yet.</div>
+  <?php else: ?>
+    <?php foreach ($payments as $p):
+        $amt = (float) ($p['paid_amount'] ?? $p['amount'] ?? 0);
+        $when = $fmtDay((string) ($p['collected_at'] ?? $p['created_at'] ?? ''));
+        [$rno, $method] = $receiptBits((string) ($p['receipt_no'] ?? ''));
+        $pid = (int) ($p['id'] ?? 0);
+        ?>
+      <div class="fe-card">
+        <div>
+          <div class="fe-amt"><?php echo e($inr($amt)); ?></div>
+          <div class="fe-meta">
+            <?php echo e($when); ?>
+            <?php if ($method !== ''): ?> · <?php echo e($method); ?><?php endif; ?>
+            <?php if ($rno !== ''): ?> · <?php echo e($rno); ?><?php endif; ?>
+          </div>
         </div>
+        <?php if ($pid > 0): ?>
+          <a class="btn btn-sm btn-outline-primary" href="<?php echo e($feesUrl($selectedId, $pid)); ?>">Receipt</a>
+        <?php endif; ?>
       </div>
-    </div>
+    <?php endforeach; ?>
+  <?php endif; ?>
 
-    <div class="card mt-3 shadow-sm">
-      <div class="card-body">
-        <h6 class="mb-3">Help / Notes</h6>
-        <div class="small-muted">
-          - Pending amounts are computed using students.total_fees when present, otherwise from fees records (sum(amount)-sum(paid_amount)).<br>
-          - Recording an offline payment inserts a fees_records row and marks it as 'paid' (admin can adjust).<br>
-          - Replace the "Pay" link with your payment gateway flow when integrating online payments.
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+<?php endif; ?>
 
-<!-- student view modal -->
-<div class="modal fade" id="viewModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-xl modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Student details</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body" id="viewModalBody"><div class="text-center text-muted">Loading…</div></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
-    </div>
-  </div>
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  var viewModal = document.getElementById('viewModal');
-  if (viewModal) {
-    viewModal.addEventListener('show.bs.modal', function (event) {
-      var id = event.relatedTarget.getAttribute('data-id');
-      var body = document.getElementById('viewModalBody');
-      body.innerHTML = '<div class="text-center text-muted">Loading…</div>';
-      fetch('?action=view&student_id=' + encodeURIComponent(id), { credentials: 'same-origin' })
-        .then(function(resp){ if (!resp.ok) throw new Error('Network'); return resp.text(); })
-        .then(function(html){ body.innerHTML = html; })
-        .catch(function(){ body.innerHTML = '<div class="text-danger">Failed to load details.</div>'; });
-    });
-  }
-});
-</script>
-
-<?php
-require_once __DIR__ . '/../includes/footer.php';
-
-?>
+<?php require_once __DIR__ . '/../includes/footer.php'; ?>

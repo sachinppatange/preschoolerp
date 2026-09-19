@@ -21,7 +21,6 @@ function parent_panel_menu(): array
         ]],
         ['section' => 'Fees', 'items' => [
             ['url' => $base . '/fees.php', 'icon' => 'bi-cash-stack', 'label' => 'Fees', 'match' => 'fees'],
-            ['url' => $base . '/receipt.php', 'icon' => 'bi-receipt', 'label' => 'Receipts', 'match' => 'receipt'],
         ]],
         ['section' => 'Account', 'items' => [
             ['url' => $base . '/profile.php', 'icon' => 'bi-gear', 'label' => 'Profile', 'match' => 'profile'],
