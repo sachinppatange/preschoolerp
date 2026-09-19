@@ -149,6 +149,17 @@ if ($selectedClassId > 0 && !$canClass($selectedClassId)) {
     $selectedClassId = 0;
 }
 
+$today = date('Y-m-d');
+$photoDate = trim((string) ($_POST['photo_date'] ?? $_GET['date'] ?? $today));
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $photoDate)) {
+    $photoDate = $today;
+}
+$groups = ['Play', 'Circle time', 'Snack', 'Outing', 'Celebration'];
+$selectedGroup = trim((string) ($_POST['group'] ?? $_GET['group'] ?? 'Play'));
+if ($selectedGroup === '') {
+    $selectedGroup = 'Play';
+}
+
 if (function_exists('secure_delete_blocked_get') && secure_delete_blocked_get((string) ($_REQUEST['action'] ?? ''))) {
     $errors[] = 'Delete needs confirmation.';
 }
@@ -170,7 +181,11 @@ if ($deleteId > 0 && $tableOk) {
         if (is_file($thumb)) {
             @unlink($thumb);
         }
-        header('Location: ?class_id=' . (int) $row['class_id'] . '&deleted=1');
+        $backDate = trim((string) ($_POST['photo_date'] ?? $_GET['date'] ?? $photoDate));
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $backDate)) {
+            $backDate = $photoDate;
+        }
+        header('Location: ?class_id=' . (int) $row['class_id'] . '&date=' . rawurlencode($backDate) . '&deleted=1');
         exit;
     } else {
         $errors[] = 'Could not delete.';
@@ -186,6 +201,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
         $errors[] = 'Choose a class.';
     } else {
         $caption = trim((string) ($_POST['caption'] ?? ''));
+        $group = trim((string) ($_POST['group'] ?? 'Play'));
+        if ($group === '') {
+            $group = 'Play';
+        }
+        if (strlen($group) > 80) {
+            $group = substr($group, 0, 80);
+        }
         $raw = $_FILES['photos'] ?? null;
         $files = [];
         if (is_array($raw) && isset($raw['name'])) {
@@ -212,14 +234,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
             $errors[] = 'Choose one or more photos.';
         }
         $saved = 0;
-        $className = 'Class';
-        foreach ($assignedClasses as $c) {
-            if ((int) $c['id'] === $selectedClassId) {
-                $className = (string) ($c['name'] ?? 'Class');
-                break;
-            }
-        }
-        $autoTitle = $caption !== '' ? $caption : ($className . ' · ' . date('d M'));
+        $when = $photoDate === $today
+            ? date('Y-m-d H:i:s')
+            : ($photoDate . ' ' . date('H:i:s'));
         foreach ($files as $file) {
             if (($file['error'] ?? 0) !== UPLOAD_ERR_OK) {
                 $errors[] = 'Could not read a photo. Try a smaller JPG or PNG.';
@@ -251,14 +268,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
             $publicPath = '/uploads/class_photos/' . $filename;
             $ok = safe_db_run(
                 'INSERT INTO class_photos (school_id, student_id, class_id, title, description, file_path, uploaded_by, uploaded_at, created_at, updated_at)
-                 VALUES (:school_id, NULL, :class_id, :title, :description, :file_path, :uploaded_by, NOW(), NOW(), NOW())',
+                 VALUES (:school_id, NULL, :class_id, :title, :description, :file_path, :uploaded_by, :uploaded_at, NOW(), NOW())',
                 [
                     ':school_id' => $schoolId > 0 ? $schoolId : null,
                     ':class_id' => $selectedClassId,
-                    ':title' => $autoTitle,
-                    ':description' => $caption !== '' ? $caption : null,
+                    ':title' => $group,
+                    ':description' => $caption !== '' ? $caption : $group,
                     ':file_path' => $publicPath,
                     ':uploaded_by' => $teacherId,
+                    ':uploaded_at' => $when,
                 ]
             );
             if ($ok) {
@@ -269,7 +287,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') =
             }
         }
         if ($saved > 0) {
-            header('Location: ?class_id=' . $selectedClassId . '&saved=' . $saved);
+            header('Location: ?class_id=' . $selectedClassId . '&date=' . rawurlencode($photoDate) . '&group=' . rawurlencode($group) . '&saved=' . $saved);
             exit;
         }
         if ($errors === []) {
@@ -286,38 +304,60 @@ if (!empty($_GET['deleted'])) {
     $messages[] = 'Photo removed.';
 }
 
-$todayPhotos = [];
-$olderPhotos = [];
+$dayPhotos = [];
+$dayGroups = [];
+$otherDates = [];
 if ($tableOk && $selectedClassId > 0) {
-    $todayPhotos = safe_db_get_all(
-        'SELECT id, title, file_path, uploaded_at, uploaded_by
+    $dayPhotos = safe_db_get_all(
+        'SELECT id, title, description, file_path, uploaded_at, uploaded_by
          FROM class_photos
          WHERE class_id = :c AND DATE(uploaded_at) = :d
-         ORDER BY uploaded_at DESC',
-        [':c' => $selectedClassId, ':d' => date('Y-m-d')]
+         ORDER BY title ASC, uploaded_at DESC',
+        [':c' => $selectedClassId, ':d' => $photoDate]
     ) ?: [];
-    $olderPhotos = safe_db_get_all(
-        'SELECT id, title, file_path, uploaded_at, uploaded_by
+    foreach ($dayPhotos as $p) {
+        $g = trim((string) ($p['title'] ?? ''));
+        if ($g === '') {
+            $g = 'Class photos';
+        }
+        $dayGroups[$g][] = $p;
+    }
+    $otherDates = safe_db_get_all(
+        'SELECT DATE(uploaded_at) AS d, COUNT(*) AS c
          FROM class_photos
-         WHERE class_id = :c AND DATE(uploaded_at) < :d
-         ORDER BY uploaded_at DESC
-         LIMIT 24',
-        [':c' => $selectedClassId, ':d' => date('Y-m-d')]
+         WHERE class_id = :c
+         GROUP BY DATE(uploaded_at)
+         ORDER BY d DESC
+         LIMIT 21',
+        [':c' => $selectedClassId]
     ) ?: [];
 }
+
+$dateLabel = $photoDate === $today ? 'Today' : date('d M Y', strtotime($photoDate) ?: time());
+$prevDate = date('Y-m-d', strtotime($photoDate . ' -1 day') ?: time());
+$nextDate = date('Y-m-d', strtotime($photoDate . ' +1 day') ?: time());
+$qs = static function (int $classId, string $date, string $group = '') : string {
+    $q = '?class_id=' . $classId . '&date=' . rawurlencode($date);
+    if ($group !== '') {
+        $q .= '&group=' . rawurlencode($group);
+    }
+    return $q;
+};
 
 $page_title = 'Class photos';
 $pageTitle = $page_title;
 require_once __DIR__ . '/../includes/header.php';
 ?>
 <style>
-.ph-chip { display:inline-flex; border:1px solid #dbe7fb; background:#fff; border-radius:999px; padding:.35rem .85rem; text-decoration:none; color:#1e3a5f; font-weight:600; font-size:.9rem; margin:0 .4rem .5rem 0; }
+.ph-chip { display:inline-flex; border:1px solid #dbe7fb; background:#fff; border-radius:999px; padding:.35rem .85rem; text-decoration:none; color:#1e3a5f; font-weight:600; font-size:.9rem; margin:0 .4rem .5rem 0; cursor:pointer; }
 .ph-chip.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
 .ph-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:14px 16px; margin-bottom:12px; }
 .ph-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; }
 .ph-item { position:relative; border-radius:12px; overflow:hidden; background:#e2e8f0; }
 .ph-item img { width:100%; height:140px; object-fit:cover; display:block; }
 .ph-item .ph-del { position:absolute; top:6px; right:6px; }
+.ph-datechip { display:inline-block; border:1px solid #e2e8f0; border-radius:10px; padding:.25rem .6rem; font-size:.82rem; text-decoration:none; color:#334155; margin:0 .35rem .35rem 0; background:#f8fafc; }
+.ph-datechip.active { border-color:#1d4ed8; color:#1d4ed8; background:#eff6ff; font-weight:700; }
 </style>
 
 <?php foreach ($messages as $m): ?><div class="alert alert-success py-2"><?php echo e($m); ?></div><?php endforeach; ?>
@@ -329,70 +369,100 @@ require_once __DIR__ . '/../includes/header.php';
   <div class="alert alert-warning mb-0">Class photos are not set up yet.</div>
 <?php else: ?>
 
-  <p class="text-muted mb-2">Today’s class photos. Parents see them in <strong>Gallery</strong> — circle time, play, snack, outing.</p>
+  <p class="text-muted mb-2">Daily photos for parents’ <strong>Gallery</strong>. Pick the date and group (Play, Snack, Outing), then upload.</p>
 
   <div class="mb-3">
     <?php foreach ($assignedClasses as $c):
         $cid = (int) $c['id'];
         ?>
-      <a class="ph-chip<?php echo $cid === $selectedClassId ? ' active' : ''; ?>" href="?class_id=<?php echo $cid; ?>"><?php echo e((string) ($c['name'] ?? 'Class')); ?></a>
+      <a class="ph-chip<?php echo $cid === $selectedClassId ? ' active' : ''; ?>" href="<?php echo e($qs($cid, $photoDate, $selectedGroup)); ?>"><?php echo e((string) ($c['name'] ?? 'Class')); ?></a>
     <?php endforeach; ?>
   </div>
 
-  <form method="post" enctype="multipart/form-data" class="ph-card">
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <a class="btn btn-sm btn-outline-secondary" href="<?php echo e($qs($selectedClassId, $prevDate, $selectedGroup)); ?>">←</a>
+    <form method="get" class="d-flex gap-2 align-items-center">
+      <input type="hidden" name="class_id" value="<?php echo (int) $selectedClassId; ?>">
+      <input type="hidden" name="group" value="<?php echo e($selectedGroup); ?>">
+      <input type="date" name="date" class="form-control form-control-sm" value="<?php echo e($photoDate); ?>" onchange="this.form.submit()" style="max-width:160px">
+    </form>
+    <a class="btn btn-sm btn-outline-secondary" href="<?php echo e($qs($selectedClassId, $nextDate, $selectedGroup)); ?>">→</a>
+    <?php if ($photoDate !== $today): ?>
+      <a class="btn btn-sm btn-outline-primary" href="<?php echo e($qs($selectedClassId, $today, $selectedGroup)); ?>">Today</a>
+    <?php endif; ?>
+    <span class="text-muted small"><?php echo e($dateLabel); ?></span>
+  </div>
+
+  <form method="post" enctype="multipart/form-data" class="ph-card" id="photoUploadForm">
     <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
     <input type="hidden" name="action" value="upload">
     <input type="hidden" name="class_id" value="<?php echo (int) $selectedClassId; ?>">
-    <div class="fw-bold mb-2">Add photos for today</div>
+    <input type="hidden" name="photo_date" value="<?php echo e($photoDate); ?>">
+    <input type="hidden" name="group" id="groupField" value="<?php echo e($selectedGroup); ?>">
+    <div class="fw-bold mb-2">Add photos · <?php echo e($dateLabel); ?></div>
+    <div class="mb-2">
+      <?php foreach ($groups as $g): ?>
+        <button type="button" class="ph-chip group-chip<?php echo $selectedGroup === $g ? ' active' : ''; ?>" data-group="<?php echo e($g); ?>"><?php echo e($g); ?></button>
+      <?php endforeach; ?>
+    </div>
     <div class="d-flex flex-wrap gap-2 mb-2">
       <input class="form-control" type="file" name="photos[]" accept="image/*" capture="environment" multiple required style="max-width:320px">
-      <input class="form-control" name="caption" maxlength="120" placeholder="Optional caption, e.g. Outdoor play" style="max-width:260px">
+      <input class="form-control" name="caption" maxlength="120" placeholder="Optional note for parents" style="max-width:260px">
       <button class="btn btn-success" type="submit">Upload</button>
     </div>
-    <div class="small text-muted">Phone camera or gallery. JPG/PNG, up to 8 MB each.</div>
+    <div class="small text-muted">Group first (Play / Snack / Outing), then pick photos. Parents see the same groups in Gallery.</div>
   </form>
 
+  <?php if ($otherDates !== []): ?>
+    <div class="mb-3">
+      <?php foreach ($otherDates as $od):
+          $d = (string) ($od['d'] ?? '');
+          if ($d === '') {
+              continue;
+          }
+          $lab = $d === $today ? 'Today' : date('d M', strtotime($d) ?: time());
+          ?>
+        <a class="ph-datechip<?php echo $d === $photoDate ? ' active' : ''; ?>" href="<?php echo e($qs($selectedClassId, $d, $selectedGroup)); ?>"><?php echo e($lab); ?> · <?php echo (int) ($od['c'] ?? 0); ?></a>
+      <?php endforeach; ?>
+    </div>
+  <?php endif; ?>
+
   <div class="ph-card">
-    <div class="fw-bold mb-2">Today · <?php echo count($todayPhotos); ?> photo<?php echo count($todayPhotos) === 1 ? '' : 's'; ?></div>
-    <?php if ($todayPhotos === []): ?>
-      <div class="text-muted">No photos yet today for this class.</div>
+    <div class="fw-bold mb-2"><?php echo e($dateLabel); ?> · <?php echo count($dayPhotos); ?> photo<?php echo count($dayPhotos) === 1 ? '' : 's'; ?></div>
+    <?php if ($dayPhotos === []): ?>
+      <div class="text-muted">No photos on this date. Pick photos above.</div>
     <?php else: ?>
-      <div class="ph-grid">
-        <?php foreach ($todayPhotos as $p):
-            $pid = (int) $p['id'];
-            $src = $photoUrl((string) ($p['file_path'] ?? ''));
-            $canDel = (int) ($p['uploaded_by'] ?? 0) === $teacherId || (function_exists('auth_is_owner_super') && auth_is_owner_super());
-            ?>
-          <div class="ph-item">
-            <?php if ($src !== ''): ?><img src="<?php echo e($src); ?>" alt=""><?php endif; ?>
-            <?php if ($canDel): ?>
-              <div class="ph-del"><?php echo render_secure_delete_button($pid, '×', 'Remove this photo?', 'btn btn-sm btn-light', ['class_id' => $selectedClassId]); ?></div>
-            <?php endif; ?>
-          </div>
-        <?php endforeach; ?>
-      </div>
+      <?php foreach ($dayGroups as $gName => $plist): ?>
+        <div class="fw-semibold mt-3 mb-2"><?php echo e((string) $gName); ?> <span class="text-muted fw-normal">· <?php echo count($plist); ?></span></div>
+        <div class="ph-grid">
+          <?php foreach ($plist as $p):
+              $pid = (int) $p['id'];
+              $src = $photoUrl((string) ($p['file_path'] ?? ''));
+              $canDel = (int) ($p['uploaded_by'] ?? 0) === $teacherId || (function_exists('auth_is_owner_super') && auth_is_owner_super());
+              ?>
+            <div class="ph-item">
+              <?php if ($src !== ''): ?><img src="<?php echo e($src); ?>" alt=""><?php endif; ?>
+              <?php if ($canDel): ?>
+                <div class="ph-del"><?php echo render_secure_delete_button($pid, '×', 'Remove this photo?', 'btn btn-sm btn-light', ['class_id' => $selectedClassId, 'photo_date' => $photoDate]); ?></div>
+              <?php endif; ?>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      <?php endforeach; ?>
     <?php endif; ?>
   </div>
 
-  <?php if ($olderPhotos !== []): ?>
-    <div class="ph-card">
-      <div class="fw-bold mb-2">Earlier</div>
-      <div class="ph-grid">
-        <?php foreach ($olderPhotos as $p):
-            $pid = (int) $p['id'];
-            $src = $photoUrl((string) ($p['file_path'] ?? ''));
-            $canDel = (int) ($p['uploaded_by'] ?? 0) === $teacherId || (function_exists('auth_is_owner_super') && auth_is_owner_super());
-            ?>
-          <div class="ph-item">
-            <?php if ($src !== ''): ?><img src="<?php echo e($src); ?>" alt=""><?php endif; ?>
-            <?php if ($canDel): ?>
-              <div class="ph-del"><?php echo render_secure_delete_button($pid, '×', 'Remove this photo?', 'btn btn-sm btn-light', ['class_id' => $selectedClassId]); ?></div>
-            <?php endif; ?>
-          </div>
-        <?php endforeach; ?>
-      </div>
-    </div>
-  <?php endif; ?>
+<script>
+document.querySelectorAll('.group-chip').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var g = btn.getAttribute('data-group') || 'Play';
+    var field = document.getElementById('groupField');
+    if (field) field.value = g;
+    document.querySelectorAll('.group-chip').forEach(function (b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+  });
+});
+</script>
 
 <?php endif; ?>
 
