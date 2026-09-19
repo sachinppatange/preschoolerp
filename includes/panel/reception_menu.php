@@ -22,6 +22,7 @@ function reception_panel_menu(): array
             ['url' => $base . '/pending_alerts.php', 'icon' => 'bi-bell', 'label' => 'Alerts', 'match' => 'pending_alerts'],
             ['url' => $base . '/notices_publish.php', 'icon' => 'bi-megaphone', 'label' => 'Notices', 'match' => 'notices'],
             ['url' => $base . '/news_events.php', 'icon' => 'bi-newspaper', 'label' => 'News & Events', 'match' => 'news_events'],
+            ['url' => $base . '/month_reports.php', 'icon' => 'bi-send', 'label' => 'Month reports', 'match' => 'month_reports'],
         ]],
         ['section' => 'Account', 'items' => [
             ['url' => $base . '/profile.php', 'icon' => 'bi-gear', 'label' => 'Profile', 'match' => 'profile'],
