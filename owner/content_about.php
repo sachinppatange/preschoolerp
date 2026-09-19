@@ -11,5 +11,5 @@ require_once __DIR__ . '/../includes/features/feature_run.php';
 
 feature_run('content_about', [
     'panel' => 'owner',
-    'page_title' => 'About Content',
+    'page_title' => 'About our school',
 ]);
