@@ -121,12 +121,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $hasTable) {
     $csrfOk = function_exists('validate_csrf_token')
         ? validate_csrf_token($token)
         : ($csrf !== '' && hash_equals($csrf, $token));
-    $honeypot = trim((string) ($_POST['website'] ?? $_POST['company'] ?? ''));
 
     if (!$csrfOk) {
-        $errors[] = 'Please refresh the page and try again.';
-    }
-    if ($honeypot !== '') {
         $errors[] = 'Please refresh the page and try again.';
     }
     if ($name === '') {
@@ -200,6 +196,7 @@ $captchaSrc = function_exists('site_url') ? site_url('/captcha.php') : '/captcha
 public_site_render_head($ps, 'Feedback', 'Tell Pioneer Play School what is going well or what we can improve.', 'public-form');
 public_site_render_nav($ps, 'feedback');
 ?>
+<style>#bottom-social-bar{display:none!important}</style>
 <section class="py-4 public-enquiry">
   <div class="container">
     <div class="row justify-content-center">
@@ -225,10 +222,6 @@ public_site_render_nav($ps, 'feedback');
 
             <form method="post" autocomplete="on">
               <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
-              <p class="fb-hp" hidden aria-hidden="true">
-                <label for="fb_website">Leave blank</label>
-                <input id="fb_website" type="text" name="website" tabindex="-1" autocomplete="off">
-              </p>
 
               <div class="mb-3">
                 <span class="form-label d-block">This is</span>

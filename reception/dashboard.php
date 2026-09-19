@@ -1,324 +1,339 @@
 <?php
 /**
- * reception/dashboard.php
- *
- * Reception Dashboard for Pioneer Play School.
- * - Mobile-first, compact UI inspired by owner/dashboard.php
- * - Shows reception-focused metrics and quick actions
- * - Includes Pending Alerts, Pending Tasks
- *
- * "Pending Notifications" card removed as requested.
- *
- * UPDATE (2026-03-14):
- * - Added "Add Student Admission" link/button pointing to /reception/admission.php
- *
- * Place at: /pioneerplayschool01/reception/dashboard.php
+ * Reception home — admit, call enquiries, finish incomplete forms for this academic year.
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('reception');
-$DEBUG = panel_debug();
 
-/* Auth */
-/* Load project includes if available */
-/* Minimal DB helpers (guarded) */
+$page_title = 'Reception';
+$pageTitle = $page_title;
+$lastUpdated = date('d M Y, h:i A');
+$userId = (int) (auth_user_id() ?? 0);
 
-/* small helpers */
+$u = static function (string $path): string {
+    return function_exists('site_url') ? site_url($path) : $path;
+};
 
-/* detect tables */
-$hasStudents = safe_db_get_one("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'students'") ? true : false;
-$hasEnquiries = safe_db_get_one("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'enquiries'") ? true : false;
-$hasClasses = safe_db_get_one("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'classes'") ? true : false;
-$hasNotices = safe_db_get_one("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'notices'") ? true : false;
-$hasNewsEvents = safe_db_get_one("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'news_events'") ? true : false;
-$hasAlerts = safe_db_get_one("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'alerts'") ? true : false;
-$hasNotifications = safe_db_get_one("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'notifications'") ? true : false;
-$hasTasks = safe_db_get_one("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'tasks'") ? true : false;
+$ayLabel = function_exists('ay_display_short') ? ay_display_short() : '';
+$ayLong = function_exists('ay_display_long') ? ay_display_long() : $ayLabel;
+$ayStu = function_exists('ay_sql_student') ? ay_sql_student('s') : '1=1';
+$ayP = static function (array $extra = []): array {
+    return function_exists('ay_params_student') ? ay_params_student($extra) : $extra;
+};
+$range = function_exists('ay_range') ? ay_range() : ['start' => date('Y') . '-06-01', 'end' => date('Y-m-d')];
+$ayStart = $range['start'] . ' 00:00:00';
+$ayEnd = $range['end'] . ' 23:59:59';
 
-/* metrics */
-$metrics = [
-    'enquiriesToday' => 0,
-    'pendingEnquiries' => 0,
-    'totalStudents' => 0,
-    'admissionsThisMonth' => 0,
-    'activeNotices' => 0,
-    'newsEventsCount' => 0,
-    'pendingAlerts' => 0,
-    'pendingNotifications' => 0,
-    'pendingTasks' => 0
-];
+$hasStudents = function_exists('table_exists') && table_exists('students');
+$hasEnquiries = function_exists('table_exists') && table_exists('enquiries');
+$hasTasks = function_exists('table_exists') && table_exists('tasks');
+$hasNotices = function_exists('table_exists') && table_exists('notices');
 
-if ($hasEnquiries) {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM enquiries WHERE DATE(created_at) = CURDATE()");
-    $metrics['enquiriesToday'] = intval($r['cnt'] ?? 0);
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM enquiries WHERE status IN ('new','pending')");
-    $metrics['pendingEnquiries'] = intval($r['cnt'] ?? 0);
-}
+$stuName = static function (array $s): string {
+    $n = trim(preg_replace('/\s+/', ' ', trim(($s['first_name'] ?? '') . ' ' . ($s['middle_name'] ?? '') . ' ' . ($s['last_name'] ?? ''))) ?? '');
+    return $n !== '' ? $n : 'Student #' . (int) ($s['id'] ?? 0);
+};
+$editStu = static function (int $id): string {
+    return function_exists('student_edit_url') ? student_edit_url($id) : ('students_list_edit.php?id=' . $id);
+};
+$phoneDigits = static function (?string $phone): string {
+    return preg_replace('/\D+/', '', (string) $phone) ?? '';
+};
+
+$admUrl = $u('/reception/admission.php');
+$enqUrl = $u('/reception/enquiry_list.php');
+$stuUrl = $u('/reception/students_list.php');
+$alertUrl = $u('/reception/pending_alerts.php');
+$todoUrl = $u('/reception/pending_tasks.php');
+$noticeUrl = $u('/reception/notices_publish.php');
+$newsUrl = $u('/reception/news_events.php');
+
+$studentsYear = 0;
+$pendingAdmissions = 0;
+$enquiriesOpen = 0;
+$enquiriesToday = 0;
+$todoOpen = 0;
+$noticesLive = 0;
+$alertCount = 0;
+
+$today = date('Y-m-d');
+$todayInAy = !function_exists('ay_contains_date') || ay_contains_date($today);
 
 if ($hasStudents) {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM students WHERE status = 'active'");
-    $metrics['totalStudents'] = intval($r['cnt'] ?? 0);
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM students WHERE MONTH(created_at)=MONTH(CURDATE()) AND YEAR(created_at)=YEAR(CURDATE()) AND status='active'");
-    $metrics['admissionsThisMonth'] = intval($r['cnt'] ?? 0);
+    $r = safe_db_get_one(
+        "SELECT COUNT(*) AS c FROM students s
+         WHERE LOWER(COALESCE(s.status,'active')) IN ('active','pending') AND {$ayStu}",
+        $ayP()
+    );
+    $studentsYear = (int) ($r['c'] ?? 0);
+
+    $r = safe_db_get_one(
+        "SELECT COUNT(*) AS c FROM students s
+         WHERE LOWER(COALESCE(s.status,'')) = 'pending' AND {$ayStu}",
+        $ayP()
+    );
+    $pendingAdmissions = (int) ($r['c'] ?? 0);
+}
+
+if ($hasEnquiries) {
+    $r = safe_db_get_one(
+        "SELECT COUNT(*) AS c FROM enquiries
+         WHERE LOWER(COALESCE(status,'new')) IN ('new','pending')
+           AND created_at BETWEEN :a AND :b",
+        [':a' => $ayStart, ':b' => $ayEnd]
+    );
+    $enquiriesOpen = (int) ($r['c'] ?? 0);
+
+    if ($todayInAy) {
+        $r = safe_db_get_one(
+            "SELECT COUNT(*) AS c FROM enquiries
+             WHERE DATE(created_at) = :d
+               AND created_at BETWEEN :a AND :b",
+            [':d' => $today, ':a' => $ayStart, ':b' => $ayEnd]
+        );
+        $enquiriesToday = (int) ($r['c'] ?? 0);
+    }
+}
+
+if ($hasTasks) {
+    try {
+        $r = $userId > 0
+            ? safe_db_get_one(
+                "SELECT COUNT(*) AS c FROM tasks WHERE status <> 'done' AND (assigned_to = :u OR assigned_to IS NULL)",
+                [':u' => $userId]
+            )
+            : safe_db_get_one("SELECT COUNT(*) AS c FROM tasks WHERE status <> 'done'");
+        $todoOpen = (int) ($r['c'] ?? 0);
+    } catch (Throwable $e) {
+        $todoOpen = 0;
+    }
 }
 
 if ($hasNotices) {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM notices WHERE published_at IS NOT NULL AND published_at <= NOW() AND (expires_at IS NULL OR expires_at > NOW())");
-    $metrics['activeNotices'] = intval($r['cnt'] ?? 0);
+    try {
+        $r = safe_db_get_one(
+            "SELECT COUNT(*) AS c FROM notices
+             WHERE published_at IS NOT NULL AND published_at <= NOW()
+               AND (expires_at IS NULL OR expires_at >= CURDATE())
+               AND published_at BETWEEN :a AND :b",
+            [':a' => $ayStart, ':b' => $ayEnd]
+        );
+        $noticesLive = (int) ($r['c'] ?? 0);
+    } catch (Throwable $e) {
+        $noticesLive = 0;
+    }
 }
 
-if ($hasNewsEvents) {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM news_events");
-    $metrics['newsEventsCount'] = intval($r['cnt'] ?? 0);
-}
-
-/* pending alerts */
-if ($hasAlerts) {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM alerts WHERE status IN ('new','pending') OR resolved = 0");
-    $metrics['pendingAlerts'] = intval($r['cnt'] ?? 0);
+if ($hasStudents) {
+    $baseWhere = "LOWER(COALESCE(s.status,'active')) IN ('active','pending') AND {$ayStu}";
+    $noPhoto = 0;
+    $noPhone = 0;
+    $noClass = 0;
+    if (function_exists('column_exists') && column_exists('students', 'photo_path')) {
+        $r = safe_db_get_one(
+            "SELECT COUNT(*) AS c FROM students s
+             WHERE {$baseWhere} AND (s.photo_path IS NULL OR TRIM(s.photo_path) = '')",
+            $ayP()
+        );
+        $noPhoto = (int) ($r['c'] ?? 0);
+    }
+    $phoneSql = "(s.father_phone IS NULL OR TRIM(s.father_phone) = '')
+           AND (s.mother_phone IS NULL OR TRIM(s.mother_phone) = '')";
+    if (function_exists('column_exists') && column_exists('students', 'guardian_phone')) {
+        $phoneSql .= " AND (s.guardian_phone IS NULL OR TRIM(s.guardian_phone) = '')";
+    }
+    $r = safe_db_get_one(
+        "SELECT COUNT(*) AS c FROM students s WHERE {$baseWhere} AND {$phoneSql}",
+        $ayP()
+    );
+    $noPhone = (int) ($r['c'] ?? 0);
+    $r = safe_db_get_one(
+        "SELECT COUNT(*) AS c FROM students s WHERE {$baseWhere} AND (s.class_id IS NULL OR s.class_id = 0)",
+        $ayP()
+    );
+    $noClass = (int) ($r['c'] ?? 0);
+    $alertCount = $enquiriesOpen + $pendingAdmissions + $noPhoto + $noPhone + $noClass;
 } else {
-    // fallback: fee overdue + pending admissions
-    $feeOver30 = 0;
-    $admissionFollowups = 0;
-    if (safe_db_get_one("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'fees_records'")) {
-        $rr = safe_db_get_one("SELECT COUNT(*) AS cnt FROM fees_records WHERE (amount - paid_amount) > 0 AND due_date IS NOT NULL AND due_date <= DATE_SUB(CURDATE(), INTERVAL 30 DAY)");
-        $feeOver30 = intval($rr['cnt'] ?? 0);
-    }
-    if ($hasStudents) {
-        $rr = safe_db_get_one("SELECT COUNT(*) AS cnt FROM students WHERE status='pending' AND created_at <= DATE_SUB(NOW(), INTERVAL 7 DAY)");
-        $admissionFollowups = intval($rr['cnt'] ?? 0);
-    }
-    $metrics['pendingAlerts'] = $feeOver30 + $admissionFollowups;
+    $alertCount = $enquiriesOpen;
 }
 
-/* pending notifications */
-if ($hasNotifications) {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM notifications WHERE (is_sent = 0 OR status IN ('pending','queued'))");
-    $metrics['pendingNotifications'] = intval($r['cnt'] ?? 0);
+$recentEnq = [];
+if ($hasEnquiries) {
+    $recentEnq = safe_db_get_all(
+        "SELECT id, name, phone, message, status, created_at
+         FROM enquiries
+         WHERE LOWER(COALESCE(status,'new')) IN ('new','pending')
+           AND created_at BETWEEN :a AND :b
+         ORDER BY created_at DESC
+         LIMIT 8",
+        [':a' => $ayStart, ':b' => $ayEnd]
+    ) ?: [];
 }
 
-/* pending tasks */
-if ($hasTasks) {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM tasks WHERE status IN ('pending','open') OR completed = 0");
-    $metrics['pendingTasks'] = intval($r['cnt'] ?? 0);
+$recentPending = [];
+if ($hasStudents) {
+    $recentPending = safe_db_get_all(
+        "SELECT s.id, s.first_name, s.middle_name, s.last_name, COALESCE(c.name,'') AS class_name
+         FROM students s
+         LEFT JOIN classes c ON c.id = s.class_id
+         WHERE LOWER(COALESCE(s.status,'')) = 'pending' AND {$ayStu}
+         ORDER BY s.created_at DESC
+         LIMIT 8",
+        $ayP()
+    ) ?: [];
 }
 
-/* recent lists */
-$recent = [
-    'enquiries' => [],
-    'notices' => [],
-    'news_events' => [],
-    'alerts' => [],
-    'notifications' => [],
-    'tasks' => []
-];
-
-if ($hasEnquiries) $recent['enquiries'] = safe_db_get_all("SELECT id, name, phone, message, created_at FROM enquiries ORDER BY created_at DESC LIMIT 8");
-if ($hasNotices)  $recent['notices']  = safe_db_get_all("SELECT id, title, published_at FROM notices WHERE published_at IS NOT NULL ORDER BY published_at DESC LIMIT 8");
-if ($hasNewsEvents) $recent['news_events'] = safe_db_get_all("SELECT id, type, title, start_date, created_at FROM news_events ORDER BY created_at DESC LIMIT 8");
-if ($hasAlerts) $recent['alerts'] = safe_db_get_all("SELECT id, title, created_at, status FROM alerts WHERE status IN ('new','pending') ORDER BY created_at DESC LIMIT 8");
-if ($hasNotifications) $recent['notifications'] = safe_db_get_all("SELECT id, title, created_at, status FROM notifications WHERE (is_sent = 0 OR status IN ('pending','queued')) ORDER BY created_at DESC LIMIT 8");
-if ($hasTasks) $recent['tasks'] = safe_db_get_all("SELECT id, title, created_at, status FROM tasks WHERE status IN ('pending','open') ORDER BY created_at DESC LIMIT 8");
-
-/* page header */
-$page_title = 'Reception Dashboard';
 require_once __DIR__ . '/../includes/header.php';
 ?>
+<link href="<?php echo htmlspecialchars(rtrim(defined('BASE_URL') ? BASE_URL : '/', '/')); ?>/assets/css/dashboard-cards.css" rel="stylesheet">
 
-  <!-- Quick actions -->
-  <div class="card mb-3 shadow-sm">
-    <div class="card-body">
-      <div class="d-flex justify-content-between align-items-start mb-2">
-        <div><h6 class="mb-0">Quick Actions</h6><div class="small-muted">Common reception tasks</div></div>
-        <div class="d-none d-md-block"><a class="btn btn-sm btn-outline-primary" href="#metrics">Jump</a></div>
-      </div>
-
-      <div class="row gy-2">
-        <?php
-        $actions = [
-          ['/reception/admission.php','bi-person-plus','Add Student Admission'], // also included in quick list
-          ['../reception/enquiry_list.php','bi-chat-left-text','Enquiries'],
-          ['../reception/students_list.php','bi-people','Student List'],
-          ['../reception/notices_publish.php','bi-megaphone','Notices'],
-          ['../reception/news_events.php','bi-newspaper','News & Events'],
-          ['../reception/students_list.php?filter=this_month','bi-person-plus','Admissions']
-        ];
-        foreach ($actions as $act) {
-            ?>
-            <div class="col-12 col-md-6">
-              <a class="btn btn-outline-primary quick-btn d-flex align-items-center" href="<?php echo e($act[0]); ?>">
-                <span class="d-flex align-items-center"><i class="bi <?php echo e($act[1]); ?> fs-5 me-2"></i><span><?php echo e($act[2]); ?></span></span>
-                <i class="bi bi-chevron-right"></i>
-              </a>
-            </div>
-            <?php
-        }
-        ?>
-      </div>
-    </div>
+<div class="dc-page">
+  <div class="dc-ay-bar">
+    <div class="dc-ay-chip"><i class="bi bi-person-plus"></i> Reception · <?php echo e($ayLabel); ?> · Updated <?php echo e($lastUpdated); ?></div>
   </div>
 
-  <!-- Metrics -->
-  <section id="metrics" class="mb-4">
-    <div class="row g-3">
-
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Enquiries Today</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['enquiriesToday']); ?></div>
-            <div class="small-muted"><?php echo number_format($metrics['pendingEnquiries']); ?> pending</div>
-            <div class="mt-2"><a href="../reception/enquiry_list.php" class="btn btn-sm btn-outline-primary w-100 btn-compact">Open</a></div>
-          </div>
-        </div>
+  <section class="dc-section">
+    <h2 class="dc-section-title">Do this now</h2>
+    <div class="row g-2 mb-2">
+      <div class="col-md-6">
+        <a href="<?php echo e($admUrl); ?>" class="btn btn-success w-100 py-3 fw-semibold">
+          <i class="bi bi-person-plus-fill me-1"></i> New admission
+        </a>
       </div>
-
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Total Students</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['totalStudents']); ?></div>
-            <div class="small-muted">Active</div>
-            <div class="mt-2"><a href="../reception/students_list.php" class="btn btn-sm btn-outline-secondary w-100 btn-compact">List</a></div>
-          </div>
-        </div>
+      <div class="col-md-6">
+        <a href="<?php echo e($enqUrl); ?>" class="btn btn-outline-success w-100 py-3 fw-semibold">
+          <i class="bi bi-telephone me-1"></i> Call enquiries
+        </a>
       </div>
-
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Admissions This Month</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['admissionsThisMonth']); ?></div>
-            <div class="small-muted">New active</div>
-            <div class="mt-2"><a href="../reception/students_list.php?filter=this_month" class="btn btn-sm btn-outline-success w-100 btn-compact">View</a></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Active Notices</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['activeNotices']); ?></div>
-            <div class="small-muted">Published</div>
-            <div class="mt-2"><a href="../reception/notices_publish.php" class="btn btn-sm btn-outline-info w-100 btn-compact">Notices</a></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- News & Events -->
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">News & Events</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['newsEventsCount']); ?></div>
-            <div class="small-muted">Total items</div>
-            <div class="mt-2"><a href="../reception/news_events.php" class="btn btn-sm btn-outline-primary w-100 btn-compact">Open</a></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Pending Alerts -->
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Pending Alerts</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['pendingAlerts']); ?></div>
-            <div class="small-muted">Requires attention</div>
-            <div class="mt-2"><a href="../reception/pending_alerts.php" class="btn btn-sm btn-outline-danger w-100 btn-compact">Open Alerts</a></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Pending Tasks -->
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">To-do</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['pendingTasks']); ?></div>
-            <div class="small-muted">Still open</div>
-            <div class="mt-2"><a href="../reception/pending_tasks.php" class="btn btn-sm btn-outline-warning w-100 btn-compact">Open</a></div>
-          </div>
-        </div>
-      </div>
-
     </div>
   </section>
 
-  <!-- Recent panels -->
-  <div class="row g-3">
-
-    <div class="col-12 col-md-4">
-      <div class="card shadow-sm">
-        <div class="card-body">
-          <h6 class="mb-2">Recent Enquiries</h6>
-          <?php if (!empty($recent['enquiries'])): ?>
-            <ul class="list-group list-group-flush">
-              <?php foreach ($recent['enquiries'] as $item): ?>
-                <li class="list-group-item d-flex justify-content-between">
-                  <div>
-                    <div class="fw-semibold"><?php echo e($item['name'] ?: '(no name)'); ?></div>
-                    <div class="small-muted"><?php echo e(mb_strimwidth($item['message'] ?? '', 0, 60, '...')); ?></div>
-                  </div>
-                  <div class="text-muted small"><?php echo e(substr($item['created_at'] ?? '', 0, 16)); ?></div>
-                </li>
-              <?php endforeach; ?>
-            </ul>
-          <?php else: ?>
-            <div class="small-muted">No recent enquiries</div>
-          <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-primary btn-compact" href="../reception/enquiry_list.php">View all</a></div>
+  <section class="dc-section">
+    <h2 class="dc-section-title">This year</h2>
+    <div class="dc-grid dc-grid-4">
+      <a href="<?php echo e($stuUrl); ?>" class="dc-card dc-card--link">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--sky"><i class="bi bi-people-fill"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">Children</span>
+            <span class="dc-card-value"><?php echo number_format($studentsYear); ?></span>
+            <span class="dc-card-meta"><?php echo e($ayLabel); ?></span>
+          </div>
         </div>
+      </a>
+      <a href="<?php echo e($enqUrl); ?>" class="dc-card dc-card--link">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--pink"><i class="bi bi-chat-left-text"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">Enquiries to call</span>
+            <span class="dc-card-value"><?php echo number_format($enquiriesOpen); ?></span>
+            <span class="dc-card-meta"><?php echo $todayInAy ? (number_format($enquiriesToday) . ' today') : 'Not in this year'; ?></span>
+          </div>
+        </div>
+      </a>
+      <a href="<?php echo e($alertUrl); ?>" class="dc-card dc-card--link">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--amber"><i class="bi bi-exclamation-circle"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">Need attention</span>
+            <span class="dc-card-value dc-card-value--warn"><?php echo number_format($alertCount); ?></span>
+            <span class="dc-card-meta"><?php echo number_format($pendingAdmissions); ?> admission not finished</span>
+          </div>
+        </div>
+      </a>
+      <a href="<?php echo e($todoUrl); ?>" class="dc-card dc-card--link">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--green"><i class="bi bi-check2-square"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">To-do</span>
+            <span class="dc-card-value"><?php echo number_format($todoOpen); ?></span>
+            <span class="dc-card-meta">Still open</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <section class="dc-section">
+    <div class="dc-grid dc-grid-2">
+      <div class="dc-card dc-card--panel">
+        <div class="dc-card-header">
+          <span class="dc-card-label">Call these parents</span>
+          <a href="<?php echo e($enqUrl); ?>" class="dc-section-link">All enquiries</a>
+        </div>
+        <?php if ($recentEnq === []): ?>
+          <p class="dc-card-meta mb-0">No open enquiries this year.</p>
+        <?php else: ?>
+          <ul class="list-unstyled mb-0">
+            <?php foreach ($recentEnq as $item):
+                $ph = $phoneDigits($item['phone'] ?? '');
+                $ph10 = $ph !== '' ? substr($ph, -10) : '';
+            ?>
+              <li class="d-flex justify-content-between gap-2 py-2 border-bottom">
+                <div>
+                  <div class="fw-semibold"><?php echo e(trim((string) ($item['name'] ?? '')) !== '' ? (string) $item['name'] : 'Enquiry'); ?></div>
+                  <div class="small text-muted"><?php echo e(mb_strimwidth((string) ($item['message'] ?? ''), 0, 48, '…')); ?>
+                    · <?php echo e(substr((string) ($item['created_at'] ?? ''), 0, 10)); ?></div>
+                </div>
+                <div class="text-nowrap">
+                  <?php if ($ph10 !== ''): ?>
+                    <a class="btn btn-sm btn-outline-primary" href="tel:<?php echo e($ph10); ?>">Call</a>
+                    <a class="btn btn-sm btn-outline-success" href="https://wa.me/91<?php echo e($ph10); ?>" target="_blank" rel="noopener">WA</a>
+                  <?php endif; ?>
+                </div>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
+      </div>
+
+      <div class="dc-card dc-card--panel">
+        <div class="dc-card-header">
+          <span class="dc-card-label">Finish these admissions</span>
+          <a href="<?php echo e($alertUrl); ?>" class="dc-section-link">All alerts</a>
+        </div>
+        <?php if ($recentPending === []): ?>
+          <p class="dc-card-meta mb-0">No pending admissions this year.</p>
+        <?php else: ?>
+          <ul class="list-unstyled mb-0">
+            <?php foreach ($recentPending as $s): ?>
+              <li class="d-flex justify-content-between gap-2 py-2 border-bottom">
+                <div>
+                  <div class="fw-semibold"><?php echo e($stuName($s)); ?></div>
+                  <div class="small text-muted"><?php echo e((string) ($s['class_name'] ?? '') !== '' ? (string) $s['class_name'] : 'No class'); ?></div>
+                </div>
+                <a class="btn btn-sm btn-outline-primary text-nowrap" href="<?php echo e($editStu((int) $s['id'])); ?>">Open</a>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
       </div>
     </div>
+  </section>
 
-    <div class="col-12 col-md-4">
-      <div class="card shadow-sm">
-        <div class="card-body">
-          <h6 class="mb-2">Recent Notices</h6>
-          <?php if (!empty($recent['notices'])): ?>
-            <ul class="list-group list-group-flush">
-              <?php foreach ($recent['notices'] as $item): ?>
-                <li class="list-group-item d-flex justify-content-between">
-                  <div class="fw-semibold"><?php echo e(mb_strimwidth($item['title'] ?? '(no title)', 0, 60, '...')); ?></div>
-                  <div class="text-muted small"><?php echo e(substr($item['published_at'] ?? '', 0, 10)); ?></div>
-                </li>
-              <?php endforeach; ?>
-            </ul>
-          <?php else: ?>
-            <div class="small-muted">No notices</div>
-          <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-primary btn-compact" href="../reception/notices_publish.php">Manage</a></div>
+  <section class="dc-section">
+    <h2 class="dc-section-title">Other pages</h2>
+    <div class="row g-2">
+      <?php
+      $quick = [
+          [$stuUrl, 'bi-people', 'Students'],
+          [$alertUrl, 'bi-bell', 'Alerts'],
+          [$todoUrl, 'bi-check2-square', 'To-do'],
+          [$noticeUrl, 'bi-megaphone', 'Notices' . ($noticesLive > 0 ? ' (' . $noticesLive . ')' : '')],
+          [$newsUrl, 'bi-newspaper', 'News & Events'],
+      ];
+      foreach ($quick as $q): ?>
+        <div class="col-6 col-md-4 col-lg">
+          <a href="<?php echo e($q[0]); ?>" class="btn btn-outline-primary w-100 py-3 d-flex flex-column align-items-center gap-1">
+            <i class="bi <?php echo e($q[1]); ?> fs-4"></i>
+            <span class="small fw-semibold"><?php echo e($q[2]); ?></span>
+          </a>
         </div>
-      </div>
+      <?php endforeach; ?>
     </div>
-
-    <div class="col-12 col-md-4">
-      <div class="card shadow-sm">
-        <div class="card-body">
-          <h6 class="mb-2">Recent News & Events</h6>
-          <?php if (!empty($recent['news_events'])): ?>
-            <ul class="list-group list-group-flush">
-              <?php foreach ($recent['news_events'] as $item): ?>
-                <li class="list-group-item d-flex justify-content-between">
-                  <div>
-                    <div class="fw-semibold"><?php echo e(mb_strimwidth($item['title'] ?? '(no title)', 0, 60, '...')); ?></div>
-                    <div class="small-muted"><?php echo e(!empty($item['type']) ? ucfirst($item['type']) : ''); ?> <?php if(!empty($item['start_date'])) echo '• '.e($item['start_date']); ?></div>
-                  </div>
-                  <div class="text-muted small"><?php echo e(substr($item['created_at'] ?? '', 0, 16)); ?></div>
-                </li>
-              <?php endforeach; ?>
-            </ul>
-          <?php else: ?>
-            <div class="small-muted">No news or events</div>
-          <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-primary btn-compact" href="../reception/news_events.php">Open</a></div>
-        </div>
-      </div>
-    </div>
-
-  </div>
+  </section>
+</div>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
