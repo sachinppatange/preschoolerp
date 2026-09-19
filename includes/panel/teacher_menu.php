@@ -20,7 +20,7 @@ function teacher_panel_menu(): array
         ]],
         ['section' => 'Schedule', 'items' => [
             ['url' => $base . '/timetable.php', 'icon' => 'bi-calendar-week', 'label' => 'Timetable', 'match' => 'timetable'],
-            ['url' => $base . '/tasks.php', 'icon' => 'bi-list-check', 'label' => 'Tasks', 'match' => 'tasks'],
+            ['url' => $base . '/tasks.php', 'icon' => 'bi-check2-square', 'label' => 'To-do', 'match' => 'tasks'],
             ['url' => $base . '/notices.php', 'icon' => 'bi-megaphone', 'label' => 'Notices', 'match' => 'notices'],
         ]],
         ['section' => 'Account', 'items' => [

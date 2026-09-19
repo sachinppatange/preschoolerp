@@ -8,8 +8,8 @@ $cfg = $GLOBALS['FEATURE_CONFIG'] ?? [];
 $panel = (string) ($cfg['panel'] ?? 'owner');
 $page_title = (string) ($cfg['page_title'] ?? 'To-do');
 $mineOnly = !empty($cfg['enforce_ownership']) || (($cfg['task_scope'] ?? '') === 'assigned_to_me');
-$canAssign = !$mineOnly;
-$canDelete = !$mineOnly;
+$canAssign = !$mineOnly && ($cfg['allow_assign_action'] ?? true) && ($cfg['show_assign_ui'] ?? true);
+$canDelete = array_key_exists('allow_delete_ui', $cfg) ? !empty($cfg['allow_delete_ui']) : !$mineOnly;
 $userId = (int) (auth_user_id() ?? 0);
 $userName = function_exists('auth_user_name') ? auth_user_name('Staff') : 'Staff';
 $schoolId = function_exists('auth_school_id') ? auth_school_id() : 1;
@@ -261,7 +261,9 @@ if (function_exists('secure_delete_blocked_get') && secure_delete_blocked_get($a
 }
 $deleteId = ($canDelete && function_exists('secure_delete_id')) ? secure_delete_id() : 0;
 if ($deleteId > 0) {
-    if (safe_db_run('DELETE FROM tasks WHERE id = :id', [':id' => $deleteId])) {
+    if ($mineOnly && !$owns($deleteId)) {
+        $errors[] = 'You can only delete your own tasks.';
+    } elseif (safe_db_run('DELETE FROM tasks WHERE id = :id', [':id' => $deleteId])) {
         if ($notesOk) {
             safe_db_run('DELETE FROM task_notes WHERE task_id = :id', [':id' => $deleteId]);
         }

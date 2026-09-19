@@ -58,7 +58,6 @@ function owner_panel_menu(): array
                 ['url' => $teacher . '/student_remarks.php', 'icon' => 'bi-chat-square-text', 'label' => 'Student Remarks', 'match' => 'student_remarks'],
                 ['url' => $teacher . '/class_photo_upload.php', 'icon' => 'bi-camera', 'label' => 'Class Photos', 'match' => 'class_photo'],
                 ['url' => $teacher . '/timetable.php', 'icon' => 'bi-calendar-week', 'label' => 'Timetable', 'match' => 'timetable'],
-                ['url' => $teacher . '/tasks.php', 'icon' => 'bi-kanban', 'label' => 'Teacher Tasks', 'match' => 'tasks'],
                 ['url' => $teacher . '/notices.php', 'icon' => 'bi-megaphone', 'label' => 'Teacher Notices', 'match' => 'notices'],
             ],
         ],

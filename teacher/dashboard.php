@@ -201,7 +201,7 @@ require_once __DIR__ . '/../includes/header.php';
           ['../teacher/homeworks.php','bi-pencil-square','Homeworks'],
           ['../teacher/notices.php','bi-megaphone','Notices'],
           ['../teacher/timetable.php','bi-calendar3','Timetable'],
-          ['../teacher/tasks.php','bi-list-task','Tasks']
+          ['../teacher/tasks.php','bi-list-task','To-do']
         ];
         foreach ($actions as $act): ?>
           <div class="col-12 col-md-4 col-lg-3">
@@ -302,10 +302,10 @@ require_once __DIR__ . '/../includes/header.php';
       <div class="col-6 col-md-3">
         <div class="card metric-card shadow-sm h-100">
           <div class="card-body">
-            <div class="small-muted">My Tasks</div>
+            <div class="small-muted">My To-do</div>
             <div class="h5 mb-1"><?php echo number_format($metrics['myTasks']); ?></div>
-            <div class="small-muted">Open tasks</div>
-            <div class="mt-2"><a href="../teacher/tasks.php" class="btn btn-sm btn-outline-warning w-100 btn-compact">Tasks</a></div>
+            <div class="small-muted">Open items</div>
+            <div class="mt-2"><a href="../teacher/tasks.php" class="btn btn-sm btn-outline-warning w-100 btn-compact">To-do</a></div>
           </div>
         </div>
       </div>
