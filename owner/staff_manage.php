@@ -65,10 +65,10 @@ $csrf = function_exists('get_csrf_token') ? get_csrf_token() : '';
 $action = $_REQUEST['action'] ?? 'list';
 $messages = []; $errors = [];
 if (!empty($_GET['added'])) {
-    $messages[] = 'Staff user added after OTP verification.';
+    $messages[] = 'Staff user added.';
 }
 if (!empty($_GET['updated'])) {
-    $messages[] = 'User updated after OTP verification.';
+    $messages[] = 'User updated.';
 }
 
 /* OTP send / verify (AJAX) */
@@ -107,6 +107,7 @@ if ($action === 'add' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $email = strtolower(trim((string) ($_POST['email'] ?? '')));
     $is_active = isset($_POST['is_active']) && ($_POST['is_active'] == '1' || $_POST['is_active'] === 'on') ? 1 : 0;
+    $skipOtp = isset($_POST['skip_otp']) && ($_POST['skip_otp'] === '1' || $_POST['skip_otp'] === 'on');
 
     if ($name === '') {
         $errors[] = 'Name is required.';
@@ -117,14 +118,17 @@ if ($action === 'add' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (strlen($whatsapp10) !== 10) {
         $errors[] = 'Enter a valid 10-digit WhatsApp number.';
     }
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = 'Enter a valid email address.';
+    }
+    if (!$skipOtp && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $errors[] = 'Email is required unless you skip OTP.';
     }
     if ($role === '' || !isset($addRoles[$role])) {
         $errors[] = 'Choose Owner, Accounts, Teacher, Reception, or Staff. Parents are added from New Admission.';
     }
-    if ($errors === [] && !staff_add_otp_matches($phone10, $whatsapp10, $email, 0)) {
-        $errors[] = 'Verify mobile, WhatsApp, and email OTPs before adding this user.';
+    if ($errors === [] && !$skipOtp && !staff_add_otp_matches($phone10, $whatsapp10, $email, 0)) {
+        $errors[] = 'Verify mobile, WhatsApp, and email OTPs before adding this user, or tick Skip OTP.';
     }
     $dup = $errors === [] ? staff_find_by_phone10($phone10, 0) : null;
     if ($dup) {
@@ -227,13 +231,15 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $email = strtolower(trim((string)($_POST['email'] ?? '')));
     $is_active = isset($_POST['is_active']) && ($_POST['is_active'] == '1' || $_POST['is_active'] === 'on') ? 1 : 0;
+    $skipOtp = isset($_POST['skip_otp']) && ($_POST['skip_otp'] === '1' || $_POST['skip_otp'] === 'on');
 
     if ($id <= 0) $errors[] = 'Invalid user id.';
     if ($name === '') $errors[] = 'Name is required.';
     if (strlen($phone10) !== 10) $errors[] = 'Enter a valid 10-digit mobile number.';
     if (strlen($whatsapp10) !== 10) $errors[] = 'Enter a valid 10-digit WhatsApp number.';
     if ($role === '' || !isset($addRoles[$role])) $errors[] = 'Choose Owner, Accounts, Teacher, Reception, or Staff.';
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Enter a valid email address.';
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Enter a valid email address.';
+    if (!$skipOtp && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Email is required unless you skip OTP.';
 
     $existing = $id > 0 ? safe_db_get_one('SELECT meta, role, is_active FROM users WHERE id = :id LIMIT 1', [':id' => $id]) : null;
     if ($existing && strtolower((string) ($existing['role'] ?? '')) === 'parent') {
@@ -252,8 +258,8 @@ if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($existing && strtolower((string) ($existing['role'] ?? '')) === 'owner' && $is_active === 0 && staff_count_owners(true) <= 1) {
         $errors[] = 'Cannot deactivate the last owner.';
     }
-    if ($errors === [] && !staff_add_otp_matches($phone10, $whatsapp10, $email, $id)) {
-        $errors[] = 'Verify mobile, WhatsApp, and email OTPs before saving.';
+    if ($errors === [] && !$skipOtp && !staff_add_otp_matches($phone10, $whatsapp10, $email, $id)) {
+        $errors[] = 'Verify OTPs before saving, or tick Skip OTP.';
     }
     $dup = ($errors === [] && $id > 0) ? staff_find_by_phone10($phone10, $id) : null;
     if ($dup) {
@@ -545,7 +551,7 @@ require_once __DIR__ . '/../includes/header.php';
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <p class="small text-muted mb-3">Add Owner, Accounts, Teacher, Reception, or Staff. Mobile, WhatsApp, and email must be verified by OTP. Parent logins are on the Parents page.</p>
+          <p class="small text-muted mb-3">Add Owner, Accounts, Teacher, Reception, or Staff with name, role, and mobile. Parent logins are on the Parents page.</p>
           <div class="row g-2">
             <div class="col-md-6"><label class="form-label">Name *</label><input name="name" id="add_name" class="form-control" required></div>
             <div class="col-md-6">
@@ -555,9 +561,9 @@ require_once __DIR__ . '/../includes/header.php';
               </select>
             </div>
             <div class="col-md-6"><label class="form-label">Mobile number *</label><input name="phone" id="add_phone" class="form-control" required inputmode="numeric" maxlength="15" placeholder="10-digit mobile"></div>
-            <div class="col-md-6"><label class="form-label">Email ID *</label><input type="email" name="email" id="add_email" class="form-control" required placeholder="name@example.com"></div>
+            <div class="col-md-6"><label class="form-label">Email ID</label><input type="email" name="email" id="add_email" class="form-control" placeholder="optional"></div>
             <div class="col-md-6">
-              <label class="form-label">WhatsApp number *</label>
+              <label class="form-label">WhatsApp number</label>
               <input name="whatsapp_id" id="add_whatsapp" class="form-control" inputmode="numeric" maxlength="15" placeholder="10-digit WhatsApp">
             </div>
             <div class="col-md-6 d-flex align-items-end">
@@ -567,8 +573,15 @@ require_once __DIR__ . '/../includes/header.php';
               </label>
             </div>
             <div class="col-md-6"><label class="form-check-label"><input class="form-check-input me-2" type="checkbox" id="add_active" name="is_active" checked> Active</label></div>
+            <div class="col-12">
+              <label class="form-check-label">
+                <input class="form-check-input me-2" type="checkbox" name="skip_otp" id="add_skip_otp" value="1" checked>
+                Skip OTP verification (add now)
+              </label>
+              <div class="small text-muted">Untick only if you want SMS / WhatsApp / email OTP before saving.</div>
+            </div>
           </div>
-          <div class="border rounded-3 p-3 mt-3 bg-light">
+          <div class="border rounded-3 p-3 mt-3 bg-light" id="addOtpBox">
             <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
               <strong>OTP verification</strong>
               <button type="button" class="btn btn-sm btn-outline-primary" id="btnSendStaffOtp">Send OTPs</button>
@@ -604,7 +617,7 @@ require_once __DIR__ . '/../includes/header.php';
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Cancel</button>
-          <button class="btn btn-success" type="submit" id="btnAddStaff" disabled>Add after OTP verify</button>
+          <button class="btn btn-success" type="submit" id="btnAddStaff">Add staff</button>
         </div>
       </form>
     </div>
@@ -623,7 +636,7 @@ require_once __DIR__ . '/../includes/header.php';
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <p class="small text-muted mb-3">Same as Add: verify mobile, WhatsApp, and email with OTP before saving. Existing users can complete OTP now.</p>
+          <p class="small text-muted mb-3">Change name, role, or mobile. OTP is optional — skip it to save immediately.</p>
           <div class="row g-2">
             <div class="col-md-6"><label class="form-label">Name *</label><input name="name" id="edit_name" class="form-control" required></div>
             <div class="col-md-6">
@@ -633,9 +646,9 @@ require_once __DIR__ . '/../includes/header.php';
               </select>
             </div>
             <div class="col-md-6"><label class="form-label">Mobile number *</label><input name="phone" id="edit_phone" class="form-control" required inputmode="numeric" maxlength="15" placeholder="10-digit mobile"></div>
-            <div class="col-md-6"><label class="form-label">Email ID *</label><input type="email" name="email" id="edit_email" class="form-control" required placeholder="name@example.com"></div>
+            <div class="col-md-6"><label class="form-label">Email ID</label><input type="email" name="email" id="edit_email" class="form-control" placeholder="optional"></div>
             <div class="col-md-6">
-              <label class="form-label">WhatsApp number *</label>
+              <label class="form-label">WhatsApp number</label>
               <input name="whatsapp_id" id="edit_whatsapp" class="form-control" inputmode="numeric" maxlength="15" placeholder="10-digit WhatsApp">
             </div>
             <div class="col-md-6 d-flex align-items-end">
@@ -645,8 +658,14 @@ require_once __DIR__ . '/../includes/header.php';
               </label>
             </div>
             <div class="col-md-6"><label class="form-check-label"><input class="form-check-input me-2" type="checkbox" id="edit_active" name="is_active"> Active</label></div>
+            <div class="col-12">
+              <label class="form-check-label">
+                <input class="form-check-input me-2" type="checkbox" name="skip_otp" id="edit_skip_otp" value="1" checked>
+                Skip OTP verification (save now)
+              </label>
+            </div>
           </div>
-          <div class="border rounded-3 p-3 mt-3 bg-light">
+          <div class="border rounded-3 p-3 mt-3 bg-light" id="editOtpBox">
             <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
               <strong>OTP verification</strong>
               <button type="button" class="btn btn-sm btn-outline-primary" id="btnSendEditOtp">Send OTPs</button>
@@ -682,7 +701,7 @@ require_once __DIR__ . '/../includes/header.php';
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Cancel</button>
-          <button class="btn btn-primary" type="submit" id="btnSaveEdit" disabled>Save after OTP verify</button>
+          <button class="btn btn-primary" type="submit" id="btnSaveEdit">Save</button>
         </div>
       </form>
     </div>
@@ -725,10 +744,23 @@ document.addEventListener('DOMContentLoaded', function(){
       el.textContent = text || '';
       el.className = 'small ' + (ok ? 'text-success' : 'text-danger');
     }
+    function skipOn() {
+      var c = document.getElementById(opt.skipChk);
+      return !!(c && c.checked);
+    }
     function refresh() {
       var all = verified.phone && verified.whatsapp && verified.email;
       var btn = document.getElementById(opt.saveBtn);
-      if (btn) btn.disabled = !all;
+      if (btn) {
+        btn.disabled = skipOn() ? false : !all;
+        if (opt.saveLabelSkip && opt.saveLabelOtp) {
+          btn.textContent = skipOn() ? opt.saveLabelSkip : opt.saveLabelOtp;
+        }
+      }
+      var box = document.getElementById(opt.otpBox);
+      if (box) box.style.display = skipOn() ? 'none' : '';
+      var em = document.getElementById(opt.email);
+      if (em) em.required = !skipOn();
     }
     function waSame() {
       return document.getElementById(opt.sameChk).checked;
@@ -752,6 +784,9 @@ document.addEventListener('DOMContentLoaded', function(){
       if (waSame()) document.getElementById(opt.whatsapp).value = last10(this.value);
     });
     syncWa();
+    var skipEl = document.getElementById(opt.skipChk);
+    if (skipEl) skipEl.addEventListener('change', refresh);
+    refresh();
     document.getElementById(opt.sendBtn).addEventListener('click', function () {
       var msg = document.getElementById(opt.msg);
       msg.className = 'small mb-2 text-muted';
@@ -804,9 +839,9 @@ document.addEventListener('DOMContentLoaded', function(){
         document.getElementById(opt.whatsapp).value = last10(document.getElementById(opt.phone).value);
         document.getElementById(opt.whatsapp).readOnly = false;
       }
-      if (!(verified.phone && verified.whatsapp && verified.email)) {
+      if (!skipOn() && !(verified.phone && verified.whatsapp && verified.email)) {
         ev.preventDefault();
-        alert('Verify mobile, WhatsApp, and email OTPs first.');
+        alert('Verify mobile, WhatsApp, and email OTPs first, or tick Skip OTP.');
       }
     });
     return { reset: function () { verified = { phone: false, whatsapp: false, email: false }; refresh(); syncWa(); } };
@@ -818,6 +853,10 @@ document.addEventListener('DOMContentLoaded', function(){
     whatsapp: 'add_whatsapp',
     email: 'add_email',
     sameChk: 'add_wa_same',
+    skipChk: 'add_skip_otp',
+    otpBox: 'addOtpBox',
+    saveLabelSkip: 'Add staff',
+    saveLabelOtp: 'Add after OTP verify',
     waWrap: 'otpWaWrap',
     sendBtn: 'btnSendStaffOtp',
     msg: 'staffOtpMsg',
@@ -836,6 +875,10 @@ document.addEventListener('DOMContentLoaded', function(){
     whatsapp: 'edit_whatsapp',
     email: 'edit_email',
     sameChk: 'edit_wa_same',
+    skipChk: 'edit_skip_otp',
+    otpBox: 'editOtpBox',
+    saveLabelSkip: 'Save',
+    saveLabelOtp: 'Save after OTP verify',
     waWrap: 'editOtpWaWrap',
     sendBtn: 'btnSendEditOtp',
     msg: 'editOtpMsg',
