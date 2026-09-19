@@ -140,7 +140,7 @@ require_once __DIR__ . '/../includes/header.php';
   <div class="d-flex flex-wrap gap-2">
     <?php if ($studentClassId > 0): ?>
       <a class="btn btn-sm btn-primary" href="<?php echo e($t('attendance_mark.php?class_id=' . $studentClassId . '&student_id=' . $studentId)); ?>">Attendance</a>
-      <a class="btn btn-sm btn-outline-primary" href="<?php echo e($t('student_remarks.php?class_id=' . $studentClassId)); ?>">Remarks</a>
+      <a class="btn btn-sm btn-outline-primary" href="<?php echo e($t('student_remarks.php?class_id=' . $studentClassId . '&student_id=' . $studentId)); ?>">Remarks</a>
     <?php endif; ?>
   </div>
 </div>

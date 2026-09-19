@@ -1,529 +1,389 @@
 <?php
 /**
- * teacher/student_remarks.php
- *
- * Student remarks management for teachers.
- *
- * Features:
- * - Requires teacher login ($_SESSION['teacher_auth_user']).
- * - Shows remarks for students in classes assigned to the teacher.
- * - Supports: list, add (modal), edit (modal via AJAX), view (modal fragment), delete, export CSV.
- * - Filters: class, student, type, date range, search text.
- * - Permissions: teachers can only add/edit/delete remarks for classes assigned to them.
- * - Optional DB table schema (adapt if needed):
- *     CREATE TABLE student_remarks (
- *       id INT AUTO_INCREMENT PRIMARY KEY,
- *       student_id INT NOT NULL,
- *       class_id INT NOT NULL,
- *       teacher_id INT NOT NULL,
- *       remark TEXT NOT NULL,
- *       type VARCHAR(50) DEFAULT 'note',
- *       date DATE DEFAULT NULL,
- *       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
- *       updated_at DATETIME DEFAULT NULL
- *     );
- *
- * Place at: /pioneerplayschool01/teacher/student_remarks.php
+ * teacher/student_remarks.php — short classroom notes about a child.
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('teacher');
 $DEBUG = panel_debug();
 
-/* misc helpers */
-
-/* CSRF fallback */
-
-$teacherId = auth_user_id() ?? 0;
-$teacherSession = auth_user() ?? [];
-
-/* -----------------------------
-   Table check
-   ----------------------------- */
-$remarksTable = 'student_remarks';
-if (!table_exists($remarksTable)) {
-    // If the table doesn't exist show a friendly message (no DB operations will run)
-    $hasRemarksTable = false;
-} else {
-    $hasRemarksTable = true;
-}
-
-/* -----------------------------
-   Find assigned classes (reuse pattern)
-   ----------------------------- */
+$teacherId = (int) (auth_user_id() ?? 0);
+$csrf = function_exists('get_csrf_token') ? get_csrf_token() : '';
 $assignedClasses = panel_teacher_assigned_classes($teacherId);
-$assignedClassIds = array_map(fn($c)=>(int)$c['id'], $assignedClasses);
 
-/* -----------------------------
-   Handle actions: add/edit/delete/export/get/view
-   ----------------------------- */
-$action = $_REQUEST['action'] ?? 'list';
-$messages = []; $errors = [];
-$types = ['note','warning','commendation','behavior']; // example types
+$classRank = static function (array $c): int {
+    $n = strtolower((string) ($c['name'] ?? ''));
+    if (str_starts_with($n, 'play')) {
+        return 1;
+    }
+    if (str_starts_with($n, 'nurs')) {
+        return 2;
+    }
+    if (str_starts_with($n, 'l')) {
+        return 3;
+    }
+    if (str_starts_with($n, 'u')) {
+        return 4;
+    }
+    return 9;
+};
+usort($assignedClasses, static function (array $a, array $b) use ($classRank): int {
+    $d = $classRank($a) <=> $classRank($b);
+    return $d !== 0 ? $d : strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+});
 
-/* Helper: check teacher allowed for class */
-function teacher_allowed_for_class(int $teacherId, int $classId, array $allowedIds): bool {
+$allowedIds = array_values(array_filter(array_map(static fn($c) => (int) ($c['id'] ?? 0), $assignedClasses)));
+$canClass = static function (int $classId) use ($allowedIds): bool {
     if (function_exists('auth_is_owner_super') && auth_is_owner_super()) {
         return true;
     }
     return in_array($classId, $allowedIds, true);
+};
+
+$kinds = [
+    'commendation' => 'Good day',
+    'note' => 'Note',
+    'warning' => 'Needs care',
+];
+
+if (!table_exists('student_remarks')) {
+    try {
+        if (function_exists('db_execute')) {
+            db_execute(
+                'CREATE TABLE IF NOT EXISTS student_remarks (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    student_id INT NOT NULL,
+                    class_id INT NOT NULL,
+                    teacher_id INT NOT NULL,
+                    remark TEXT NOT NULL,
+                    type VARCHAR(50) DEFAULT \'note\',
+                    `date` DATE DEFAULT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT NULL,
+                    INDEX idx_class_date (class_id, `date`),
+                    INDEX idx_student (student_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        }
+    } catch (Throwable $e) {
+        error_log('student_remarks create: ' . $e->getMessage());
+    }
+}
+$tableOk = table_exists('student_remarks');
+$hasUpdated = $tableOk && function_exists('column_exists') && column_exists('student_remarks', 'updated_at');
+
+$messages = [];
+$errors = [];
+
+$selectedClassId = (int) ($_POST['class_id'] ?? $_GET['class_id'] ?? 0);
+if ($selectedClassId <= 0 && $allowedIds !== []) {
+    $selectedClassId = $allowedIds[0];
+}
+if ($selectedClassId > 0 && !$canClass($selectedClassId)) {
+    $selectedClassId = 0;
 }
 
-/* ADD remark */
-if ($action === 'add' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!$hasRemarksTable) { $errors[] = 'Remarks feature not available (no table).'; }
-    elseif (!validate_csrf_token($_POST['csrf'] ?? '')) { $errors[] = 'Invalid CSRF token.'; }
-    else {
-        $class_id = isset($_POST['class_id']) ? (int)$_POST['class_id'] : 0;
-        $student_id = isset($_POST['student_id']) ? (int)$_POST['student_id'] : 0;
-        $remark = trim((string)($_POST['remark'] ?? ''));
-        $type = in_array($_POST['type'] ?? 'note', $types, true) ? $_POST['type'] : 'note';
-        $date = trim((string)($_POST['date'] ?? '')) ?: null;
+$pickStudentId = (int) ($_POST['student_id'] ?? $_GET['student_id'] ?? 0);
+$editId = (int) ($_GET['edit'] ?? 0);
 
-        if ($class_id <= 0) $errors[] = 'Class required.';
-        if ($student_id <= 0) $errors[] = 'Student required.';
-        if ($remark === '') $errors[] = 'Remark required.';
-        if (!teacher_allowed_for_class($teacherId, $class_id, $assignedClassIds)) $errors[] = 'Not allowed for this class.';
+$ayStu = function_exists('ay_sql_student') ? ay_sql_student('s') : '1=1';
+$statusSql = "LOWER(COALESCE(s.status,'active')) IN ('active','pending')";
+$classChildren = static function (int $classId) use ($ayStu, $statusSql): array {
+    if ($classId <= 0 || !table_exists('students')) {
+        return [];
+    }
+    $params = function_exists('ay_params_student') ? ay_params_student([':cid' => $classId]) : [':cid' => $classId];
+    return safe_db_get_all(
+        "SELECT s.id, s.first_name, s.middle_name, s.last_name, s.class_id
+         FROM students s
+         WHERE s.class_id = :cid AND {$statusSql} AND {$ayStu}
+         ORDER BY s.first_name ASC, s.last_name ASC",
+        $params
+    ) ?: [];
+};
 
-        if (empty($errors)) {
-            $ok = safe_db_run("INSERT INTO {$remarksTable} (student_id,class_id,teacher_id,remark,type,date,created_at) VALUES (:sid,:cid,:tid,:remark,:type,:date,NOW())",
-                [':sid'=>$student_id,':cid'=>$class_id,':tid'=>$teacherId,':remark'=>$remark,':type'=>$type,':date'=>$date]);
-            if ($ok) { $messages[] = 'Remark added.'; header('Location: ?'); exit; } else $errors[] = 'Insert failed.';
+$childName = static function (array $r): string {
+    if (function_exists('student_full_name')) {
+        $n = student_full_name($r);
+        if ($n !== '') {
+            return $n;
         }
+    }
+    return trim((string) ($r['first_name'] ?? '') . ' ' . (string) ($r['last_name'] ?? ''));
+};
+
+if (function_exists('secure_delete_blocked_get') && secure_delete_blocked_get((string) ($_REQUEST['action'] ?? ''))) {
+    $errors[] = 'Delete needs confirmation.';
+}
+$deleteId = function_exists('secure_delete_id') ? secure_delete_id() : 0;
+if ($deleteId > 0 && $tableOk) {
+    $row = safe_db_get_one('SELECT id, class_id FROM student_remarks WHERE id = :id LIMIT 1', [':id' => $deleteId]);
+    $cid = (int) ($row['class_id'] ?? 0);
+    if (!$row || !$canClass($cid)) {
+        $errors[] = 'You cannot delete this note.';
+    } elseif (safe_db_run('DELETE FROM student_remarks WHERE id = :id', [':id' => $deleteId])) {
+        header('Location: ?class_id=' . $cid . '&deleted=1');
+        exit;
+    } else {
+        $errors[] = 'Could not delete.';
     }
 }
 
-/* EDIT */
-if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!$hasRemarksTable) { $errors[] = 'Remarks feature not available.'; }
-    elseif (!validate_csrf_token($_POST['csrf'] ?? '')) { $errors[] = 'Invalid CSRF token.'; }
-    else {
-        $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
-        $class_id = isset($_POST['class_id']) ? (int)$_POST['class_id'] : 0;
-        $student_id = isset($_POST['student_id']) ? (int)$_POST['student_id'] : 0;
-        $remark = trim((string)($_POST['remark'] ?? ''));
-        $type = in_array($_POST['type'] ?? 'note', $types, true) ? $_POST['type'] : 'note';
-        $date = trim((string)($_POST['date'] ?? '')) ?: null;
-
-        if ($id <= 0) $errors[] = 'Invalid id.';
-        if ($class_id <= 0) $errors[] = 'Class required.';
-        if ($student_id <= 0) $errors[] = 'Student required.';
-        if ($remark === '') $errors[] = 'Remark required.';
-        if (!teacher_allowed_for_class($teacherId, $class_id, $assignedClassIds)) $errors[] = 'Not allowed for this class.';
-
-        if (empty($errors)) {
-            // ensure remark exists and belongs to class and teacher OR teacher of same class can edit (policy)
-            $row = safe_db_get_one("SELECT * FROM {$remarksTable} WHERE id = :id LIMIT 1", [':id'=>$id]);
-            if (!$row) { $errors[] = 'Remark not found.'; }
-            elseif (!teacher_allowed_for_class($teacherId, (int)$row['class_id'], $assignedClassIds)) { $errors[] = 'Not allowed to edit this remark.'; }
-            else {
-                $ok = safe_db_run("UPDATE {$remarksTable} SET student_id = :sid, class_id = :cid, remark = :remark, type = :type, date = :date, updated_at = NOW() WHERE id = :id",
-                    [':sid'=>$student_id,':cid'=>$class_id,':remark'=>$remark,':type'=>$type,':date'=>$date,':id'=>$id]);
-                if ($ok) { $messages[] = 'Remark updated.'; header('Location: ?'); exit; } else $errors[] = 'Update failed.';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') !== 'delete') {
+    if (!function_exists('validate_csrf_token') || !validate_csrf_token((string) ($_POST['csrf'] ?? ''))) {
+        $errors[] = 'Please reload the page and try again.';
+    } elseif (!$tableOk) {
+        $errors[] = 'Remarks are not set up yet.';
+    } else {
+        $classId = (int) ($_POST['class_id'] ?? 0);
+        $studentId = (int) ($_POST['student_id'] ?? 0);
+        $remark = trim((string) ($_POST['remark'] ?? ''));
+        $type = (string) ($_POST['type'] ?? 'note');
+        if (!isset($kinds[$type])) {
+            $type = 'note';
+        }
+        $date = trim((string) ($_POST['date'] ?? date('Y-m-d')));
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            $date = date('Y-m-d');
+        }
+        $id = (int) ($_POST['id'] ?? 0);
+        $inClass = false;
+        foreach ($classChildren($classId) as $ch) {
+            if ((int) $ch['id'] === $studentId) {
+                $inClass = true;
+                break;
+            }
+        }
+        if (!$canClass($classId) || $classId <= 0) {
+            $errors[] = 'Choose your class.';
+        }
+        if ($studentId <= 0 || !$inClass) {
+            $errors[] = 'Choose a child from this class.';
+        }
+        if ($remark === '') {
+            $errors[] = 'Write a short note.';
+        }
+        if ($errors === []) {
+            try {
+                if ($id > 0) {
+                    $row = safe_db_get_one('SELECT id, class_id FROM student_remarks WHERE id = :id LIMIT 1', [':id' => $id]);
+                    if (!$row || !$canClass((int) ($row['class_id'] ?? 0))) {
+                        $errors[] = 'You cannot edit this note.';
+                    } else {
+                        $sql = 'UPDATE student_remarks SET student_id = :sid, class_id = :cid, remark = :remark, type = :type, `date` = :d';
+                        $params = [
+                            ':sid' => $studentId,
+                            ':cid' => $classId,
+                            ':remark' => $remark,
+                            ':type' => $type,
+                            ':d' => $date,
+                            ':id' => $id,
+                        ];
+                        if ($hasUpdated) {
+                            $sql .= ', updated_at = NOW()';
+                        }
+                        $sql .= ' WHERE id = :id';
+                        if (safe_db_run($sql, $params)) {
+                            header('Location: ?class_id=' . $classId . '&student_id=' . $studentId . '&saved=1');
+                            exit;
+                        }
+                        $errors[] = 'Could not save.';
+                    }
+                } else {
+                    $ok = safe_db_run(
+                        'INSERT INTO student_remarks (student_id, class_id, teacher_id, remark, type, `date`, created_at)
+                         VALUES (:sid, :cid, :tid, :remark, :type, :d, NOW())',
+                        [
+                            ':sid' => $studentId,
+                            ':cid' => $classId,
+                            ':tid' => $teacherId,
+                            ':remark' => $remark,
+                            ':type' => $type,
+                            ':d' => $date,
+                        ]
+                    );
+                    if ($ok) {
+                        header('Location: ?class_id=' . $classId . '&student_id=' . $studentId . '&saved=1');
+                        exit;
+                    }
+                    $errors[] = 'Could not save.';
+                }
+            } catch (Throwable $e) {
+                $errors[] = $DEBUG ? $e->getMessage() : 'Could not save the note.';
             }
         }
     }
 }
 
-/* DELETE */
-if ($action === 'delete' && !empty($_GET['id'])) {
-    if (!$hasRemarksTable) { $errors[] = 'Remarks feature not available.'; }
-    else {
-        $id = (int)$_GET['id'];
-        $row = safe_db_get_one("SELECT * FROM {$remarksTable} WHERE id = :id LIMIT 1", [':id'=>$id]);
-        if (!$row) { $errors[] = 'Not found.'; }
-        elseif (!teacher_allowed_for_class($teacherId, (int)$row['class_id'], $assignedClassIds)) { $errors[] = 'Not allowed to delete.'; }
-        else {
-            $ok = safe_db_run("DELETE FROM {$remarksTable} WHERE id = :id", [':id'=>$id]);
-            if ($ok) { $messages[] = 'Remark deleted.'; header('Location: ?'); exit; } else $errors[] = 'Delete failed.';
-        }
+if (!empty($_GET['saved'])) {
+    $messages[] = 'Note saved.';
+}
+if (!empty($_GET['deleted'])) {
+    $messages[] = 'Note removed.';
+}
+
+$children = $selectedClassId > 0 ? $classChildren($selectedClassId) : [];
+$childIds = array_map(static fn($s) => (int) $s['id'], $children);
+if ($pickStudentId > 0 && !in_array($pickStudentId, $childIds, true)) {
+    $pickStudentId = 0;
+}
+
+$editRow = null;
+if ($editId > 0 && $tableOk) {
+    $editRow = safe_db_get_one('SELECT * FROM student_remarks WHERE id = :id LIMIT 1', [':id' => $editId]);
+    if ($editRow && $canClass((int) ($editRow['class_id'] ?? 0))) {
+        $selectedClassId = (int) $editRow['class_id'];
+        $pickStudentId = (int) $editRow['student_id'];
+        $children = $classChildren($selectedClassId);
+    } else {
+        $editRow = null;
     }
 }
 
-/* VIEW (modal fragment) */
-if ($action === 'view' && !empty($_GET['id'])) {
-    $id = (int)$_GET['id'];
-    if ($id <= 0) { echo '<div class="text-danger p-3">Invalid id</div>'; exit; }
-    $row = safe_db_get_one("SELECT r.*, s.first_name, s.last_name, COALESCE(c.name,'') AS class_name, u.name AS teacher_name
-                            FROM {$remarksTable} r
-                            LEFT JOIN students s ON s.id = r.student_id
-                            LEFT JOIN classes c ON c.id = r.class_id
-                            LEFT JOIN users u ON u.id = r.teacher_id
-                            WHERE r.id = :id LIMIT 1", [':id'=>$id]);
-    if (!$row) { echo '<div class="text-muted p-3">Remark not found</div>'; exit; }
-    echo '<dl class="row p-3">';
-    echo '<dt class="col-sm-3">ID</dt><dd class="col-sm-9">'.(int)$row['id'].'</dd>';
-    echo '<dt class="col-sm-3">Student</dt><dd class="col-sm-9">'.e(trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? ''))).'</dd>';
-    echo '<dt class="col-sm-3">Class</dt><dd class="col-sm-9">'.e($row['class_name'] ?? '').'</dd>';
-    echo '<dt class="col-sm-3">Type</dt><dd class="col-sm-9">'.e($row['type'] ?? '').'</dd>';
-    echo '<dt class="col-sm-3">Date</dt><dd class="col-sm-9">'.e($row['date'] ?? '').'</dd>';
-    echo '<dt class="col-sm-3">Remark</dt><dd class="col-sm-9"><pre style="white-space:pre-wrap;">'.e($row['remark'] ?? '').'</pre></dd>';
-    echo '<dt class="col-sm-3">By</dt><dd class="col-sm-9">'.e($row['teacher_name'] ?? '').' at '.e($row['created_at'] ?? '').'</dd>';
-    echo '</dl>';
-    exit;
+$ayRange = function_exists('ay_range') ? ay_range() : ['start' => date('Y-m-01'), 'end' => date('Y-m-d')];
+$notes = [];
+if ($tableOk && $selectedClassId > 0) {
+    $params = [
+        ':cid' => $selectedClassId,
+        ':a' => $ayRange['start'],
+        ':b' => $ayRange['end'],
+    ];
+    $extra = '';
+    if ($pickStudentId > 0) {
+        $extra = ' AND r.student_id = :sid';
+        $params[':sid'] = $pickStudentId;
+    }
+    $notes = safe_db_get_all(
+        "SELECT r.*, s.first_name, s.middle_name, s.last_name
+         FROM student_remarks r
+         LEFT JOIN students s ON s.id = r.student_id
+         WHERE r.class_id = :cid AND COALESCE(r.date, DATE(r.created_at)) BETWEEN :a AND :b {$extra}
+         ORDER BY COALESCE(r.date, DATE(r.created_at)) DESC, r.id DESC
+         LIMIT 80",
+        $params
+    ) ?: [];
 }
 
-/* GET remark JSON (for edit modal) */
-if ($action === 'get' && !empty($_GET['id'])) {
-    header('Content-Type: application/json; charset=utf-8');
-    $id = (int)$_GET['id'];
-    if ($id <= 0) { echo json_encode(['error'=>'Invalid id']); exit; }
-    $row = safe_db_get_one("SELECT id, student_id, class_id, remark, type, DATE_FORMAT(date,'%Y-%m-%d') AS date FROM {$remarksTable} WHERE id = :id LIMIT 1", [':id'=>$id]);
-    if (!$row) { echo json_encode(['error'=>'Remark not found']); exit; }
-    echo json_encode(['ok'=>true, 'data'=>$row]);
-    exit;
-}
-
-/* EXPORT CSV */
-if ($action === 'export') {
-    if (!$hasRemarksTable) { $errors[] = 'Remarks feature not available.'; }
-    else {
-        $where = []; $params = [];
-        // restrict to teacher's classes
-        if (!empty($assignedClassIds)) {
-            $where[] = 'r.class_id IN (' . implode(',', array_map('intval', $assignedClassIds)) . ')';
-        }
-        if (!empty($_GET['class_id']) && in_array((int)$_GET['class_id'], $assignedClassIds, true)) { $where[] = 'r.class_id = :class_id'; $params[':class_id'] = (int)$_GET['class_id']; }
-        if (!empty($_GET['student_id'])) { $where[] = 'r.student_id = :student_id'; $params[':student_id'] = (int)$_GET['student_id']; }
-        if (!empty($_GET['type'])) { $where[] = 'r.type = :type'; $params[':type'] = $_GET['type']; }
-        if (!empty($_GET['from'])) { $where[] = 'r.date >= :from'; $params[':from'] = $_GET['from']; }
-        if (!empty($_GET['to'])) { $where[] = 'r.date <= :to'; $params[':to'] = $_GET['to']; }
-        if (!empty($_GET['q'])) { $where[] = '(r.remark LIKE :q)'; $params[':q'] = '%' . trim((string)$_GET['q']) . '%'; }
-
-        $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-
-        $rows = safe_db_get_all("SELECT r.*, s.first_name, s.last_name, COALESCE(c.name,'') AS class_name, u.name AS teacher_name
-                                 FROM {$remarksTable} r
-                                 LEFT JOIN students s ON s.id = r.student_id
-                                 LEFT JOIN classes c ON c.id = r.class_id
-                                 LEFT JOIN users u ON u.id = r.teacher_id
-                                 $whereSql
-                                 ORDER BY r.date DESC, r.created_at DESC", $params);
-
-        header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: attachment; filename=remarks_'.date('Ymd_His').'.csv');
-        $out = fopen('php://output','w');
-        fputcsv($out, ['ID','Class','Student','Type','Date','Remark','By','Created At']);
-        foreach ($rows as $r) {
-            fputcsv($out, [
-                $r['id'] ?? '',
-                $r['class_name'] ?? $r['class_id'] ?? '',
-                trim(($r['first_name'] ?? '') . ' ' . ($r['last_name'] ?? '')),
-                $r['type'] ?? '',
-                $r['date'] ?? '',
-                preg_replace("/\r\n|\r|\n/"," ", $r['remark'] ?? ''),
-                $r['teacher_name'] ?? '',
-                $r['created_at'] ?? ''
-            ]);
-        }
-        fclose($out); exit;
+$selectedName = '';
+foreach ($assignedClasses as $c) {
+    if ((int) $c['id'] === $selectedClassId) {
+        $selectedName = (string) ($c['name'] ?? '');
+        break;
     }
 }
 
-/* -----------------------------
-   Filters & pagination for list view
-   ----------------------------- */
-$page = max(1, (int)($_GET['page'] ?? 1));
-$perPage = 25;
-$offset = ($page - 1) * $perPage;
-$where = []; $params = [];
+$fmt = static function (?string $d): string {
+    $d = substr((string) $d, 0, 10);
+    if ($d === '' || $d === '0000-00-00') {
+        return '';
+    }
+    $t = strtotime($d);
+    return $t ? date('d M', $t) : $d;
+};
 
-// restrict to classes teacher can see
-if (!empty($assignedClassIds)) $where[] = 'r.class_id IN (' . implode(',', array_map('intval', $assignedClassIds)) . ')';
-else $where[] = '0=1'; // teacher not assigned anywhere -> no results
-
-$classFilter = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
-if ($classFilter > 0 && in_array($classFilter, $assignedClassIds, true)) { $where[] = 'r.class_id = :class_id'; $params[':class_id'] = $classFilter; }
-
-if (!empty($_GET['student_id'])) { $where[] = 'r.student_id = :student_id'; $params[':student_id'] = (int)$_GET['student_id']; }
-if (!empty($_GET['type']) && in_array($_GET['type'], $types, true)) { $where[] = 'r.type = :type'; $params[':type'] = $_GET['type']; }
-$from = trim((string)($_GET['from'] ?? '')); if ($from !== '') { $where[] = 'r.date >= :from'; $params[':from'] = $from; }
-$to   = trim((string)($_GET['to'] ?? ''));   if ($to   !== '') { $where[] = 'r.date <= :to';   $params[':to']   = $to; }
-$qraw = trim((string)($_GET['q'] ?? '')); if ($qraw !== '') { $where[] = '(r.remark LIKE :q)'; $params[':q'] = '%' . $qraw . '%'; }
-
-$whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
-
-$total = 0;
-try {
-    $cRow = safe_db_get_one("SELECT COUNT(*) AS cnt FROM {$remarksTable} r $whereSql", $params);
-    $total = intval($cRow['cnt'] ?? 0);
-} catch (Throwable $e) {
-    $total = 0; $errors[] = 'Count failed.';
-}
-
-$remarks = [];
-if ($total > 0) {
-    try {
-        $sql = "SELECT r.*, s.first_name, s.last_name, COALESCE(c.name,'') AS class_name, u.name AS teacher_name
-                FROM {$remarksTable} r
-                LEFT JOIN students s ON s.id = r.student_id
-                LEFT JOIN classes c ON c.id = r.class_id
-                LEFT JOIN users u ON u.id = r.teacher_id
-                $whereSql
-                ORDER BY r.date DESC, r.created_at DESC
-                LIMIT :limit OFFSET :offset";
-        $pdo = pdo_connect();
-        if ($pdo instanceof PDO) {
-            $stmt = $pdo->prepare($sql);
-            foreach ($params as $k=>$v) $stmt->bindValue($k, $v);
-            $stmt->bindValue(':limit', (int)$perPage, PDO::PARAM_INT);
-            $stmt->bindValue(':offset', (int)$offset, PDO::PARAM_INT);
-            $stmt->execute();
-            $remarks = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        } else {
-            $remarks = safe_db_get_all($sql, array_merge($params, [':limit'=>$perPage, ':offset'=>$offset]));
-        }
-    } catch (Throwable $e) { $errors[] = 'List fetch failed.'; }
-}
-
-/* Data for add/edit forms */
-$studentsList = table_exists('students') ? safe_db_get_all("SELECT id, first_name, middle_name, last_name, class_id FROM students WHERE class_id IN (" . (empty($assignedClassIds) ? "0" : implode(',', $assignedClassIds)) . ") ORDER BY first_name ASC") : [];
-$classesForFilter = $assignedClasses;
-
-/* small helpers */
-function fullname(array $r): string { return trim((($r['first_name'] ?? '') . ' ' . ($r['middle_name'] ?? '') . ' ' . ($r['last_name'] ?? ''))); }
-
-function build_qs(array $over = []): string {
-    $qs = $_GET;
-    foreach ($over as $k=>$v) { if ($v === null) unset($qs[$k]); else $qs[$k] = $v; }
-    return http_build_query($qs);
-}
-
-/* render header if present */
-$pageTitle = 'Student Remarks';
+$page_title = 'Remarks';
+$pageTitle = $page_title;
 require_once __DIR__ . '/../includes/header.php';
 ?>
+<style>
+.rm-chip { display:inline-flex; border:1px solid #dbe7fb; background:#fff; border-radius:999px; padding:.35rem .85rem; text-decoration:none; color:#1e3a5f; font-weight:600; font-size:.9rem; margin:0 .4rem .5rem 0; }
+.rm-chip.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+.rm-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:14px 16px; margin-bottom:10px; }
+.rm-title { font-weight:800; color:#1e3a5f; }
+.rm-meta { font-size:.85rem; color:#64748b; }
+.rm-kind { font-size:.75rem; font-weight:700; border-radius:999px; padding:.15rem .55rem; }
+.rm-kind.good { background:#dcfce7; color:#166534; }
+.rm-kind.note { background:#e2e8f0; color:#334155; }
+.rm-kind.care { background:#ffedd5; color:#9a3412; }
+</style>
 
-    <div>
-      <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addRemarkModal">Add Remark</button>
-      <a class="btn btn-outline-secondary" href="?<?php echo build_qs(); ?>">Refresh</a>
-      <a class="btn btn-sm btn-success" href="?action=export&<?php echo build_qs(); ?>">Export CSV</a>
-    </div>
+<?php foreach ($messages as $m): ?><div class="alert alert-success py-2"><?php echo e($m); ?></div><?php endforeach; ?>
+<?php foreach ($errors as $er): ?><div class="alert alert-danger py-2"><?php echo e($er); ?></div><?php endforeach; ?>
+
+<?php if ($assignedClasses === []): ?>
+  <div class="alert alert-info mb-0">No class is assigned yet. Ask the owner to assign you a class.</div>
+<?php elseif (!$tableOk): ?>
+  <div class="alert alert-warning mb-0">Remarks are not set up yet.</div>
+<?php else: ?>
+
+  <p class="text-muted mb-2">A short note for a child — good day, or something parents should know.</p>
+
+  <div class="mb-3">
+    <?php foreach ($assignedClasses as $c):
+        $cid = (int) $c['id'];
+        ?>
+      <a class="rm-chip<?php echo $cid === $selectedClassId ? ' active' : ''; ?>" href="?class_id=<?php echo $cid; ?>"><?php echo e((string) ($c['name'] ?? 'Class')); ?></a>
+    <?php endforeach; ?>
   </div>
 
-  <?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo e($m); ?></div><?php endforeach; ?>
-  <?php foreach ($errors as $er): ?><div class="alert alert-danger"><?php echo e($er); ?></div><?php endforeach; ?>
+  <form method="post" class="rm-card">
+    <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+    <input type="hidden" name="class_id" value="<?php echo (int) $selectedClassId; ?>">
+    <?php if ($editRow): ?><input type="hidden" name="id" value="<?php echo (int) $editRow['id']; ?>"><?php endif; ?>
+    <div class="fw-bold mb-2"><?php echo $editRow ? 'Edit note' : 'Add a note for ' . e($selectedName !== '' ? $selectedName : 'this class'); ?></div>
+    <div class="d-flex flex-wrap gap-2 mb-2">
+      <select name="student_id" class="form-select" required style="max-width:240px">
+        <option value="">Choose child</option>
+        <?php foreach ($children as $s): ?>
+          <option value="<?php echo (int) $s['id']; ?>" <?php echo $pickStudentId === (int) $s['id'] ? 'selected' : ''; ?>><?php echo e($childName($s)); ?></option>
+        <?php endforeach; ?>
+      </select>
+      <select name="type" class="form-select" style="max-width:150px">
+        <?php $curType = (string) ($editRow['type'] ?? 'note'); foreach ($kinds as $k => $lab): ?>
+          <option value="<?php echo e($k); ?>" <?php echo $curType === $k ? 'selected' : ''; ?>><?php echo e($lab); ?></option>
+        <?php endforeach; ?>
+      </select>
+      <input type="date" name="date" class="form-control" style="max-width:160px" value="<?php echo e(substr((string) ($editRow['date'] ?? date('Y-m-d')), 0, 10)); ?>">
+    </div>
+    <textarea class="form-control mb-2" name="remark" rows="3" required placeholder="e.g. Settled well today / Please send an extra set of clothes"><?php echo e((string) ($editRow['remark'] ?? '')); ?></textarea>
+    <div class="d-flex gap-2">
+      <button class="btn btn-success" type="submit"><?php echo $editRow ? 'Save' : 'Add note'; ?></button>
+      <?php if ($editRow): ?><a class="btn btn-outline-secondary" href="?class_id=<?php echo (int) $selectedClassId; ?>">Cancel</a><?php endif; ?>
+    </div>
+  </form>
 
-  <!-- Filters -->
-  <div class="card mb-3 p-3">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-md-3"><label class="form-label">Class</label>
-        <select name="class_id" class="form-select">
-          <option value="">All</option>
-          <?php foreach ($classesForFilter as $c): ?>
-            <option value="<?php echo (int)$c['id']; ?>" <?php if((int)($classFilter ?? 0)===(int)$c['id']) echo 'selected'; ?>><?php echo e(trim((($c['short_name'] ?? '') . ' ' . ($c['name'] ?? '')))); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <div class="col-md-3"><label class="form-label">Student</label>
-        <select name="student_id" class="form-select">
-          <option value="">Any</option>
-          <?php foreach ($studentsList as $s): ?>
-            <option value="<?php echo (int)$s['id']; ?>" <?php if(($_GET['student_id'] ?? '')===(string)$s['id']) echo 'selected'; ?>><?php echo e(fullname($s)); ?> (<?php echo (int)$s['id']; ?>)</option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <div class="col-md-2"><label class="form-label">Type</label>
-        <select name="type" class="form-select"><option value="">Any</option><?php foreach ($types as $t): ?><option value="<?php echo e($t); ?>" <?php if(($_GET['type'] ?? '')===$t) echo 'selected'; ?>><?php echo e(ucfirst($t)); ?></option><?php endforeach; ?></select>
-      </div>
-      <div class="col-md-2"><label class="form-label">From</label><input name="from" type="date" class="form-control" value="<?php echo e($_GET['from'] ?? ''); ?>"></div>
-      <div class="col-md-2"><label class="form-label">To</label><input name="to" type="date" class="form-control" value="<?php echo e($_GET['to'] ?? ''); ?>"></div>
-      <div class="col-12 col-md-6 mt-2"><label class="form-label">Search</label><input name="q" class="form-control" value="<?php echo e($qraw ?? ''); ?>" placeholder="Search remark text"></div>
-      <div class="col-md-6 text-end mt-2"><button class="btn btn-primary">Filter</button> <a class="btn btn-sm btn-outline-secondary" href="?">Reset</a></div>
+  <?php if ($children !== []): ?>
+    <form method="get" class="mb-3 d-flex flex-wrap gap-2 align-items-center">
+      <input type="hidden" name="class_id" value="<?php echo (int) $selectedClassId; ?>">
+      <label class="small text-muted mb-0">Show</label>
+      <select name="student_id" class="form-select form-select-sm" style="max-width:240px" onchange="this.form.submit()">
+        <option value="0">All children</option>
+        <?php foreach ($children as $s): ?>
+          <option value="<?php echo (int) $s['id']; ?>" <?php echo $pickStudentId === (int) $s['id'] ? 'selected' : ''; ?>><?php echo e($childName($s)); ?></option>
+        <?php endforeach; ?>
+      </select>
     </form>
-  </div>
+  <?php endif; ?>
 
-  <!-- Remarks table -->
-  <div class="card">
-    <div class="table-responsive">
-      <table class="table table-striped mb-0">
-        <thead>
-          <tr>
-            <th style="width:60px">ID</th>
-            <th>Student</th>
-            <th>Class</th>
-            <th>Type / Date</th>
-            <th>Remark</th>
-            <th style="width:240px">By / Created</th>
-            <th style="width:180px">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php if (!empty($remarks)): foreach ($remarks as $r): ?>
-            <tr>
-              <td><?php echo (int)$r['id']; ?></td>
-              <td><?php echo e(trim((($r['first_name'] ?? '') . ' ' . ($r['last_name'] ?? '')))); ?><br><small class="small-muted">#<?php echo (int)($r['student_id'] ?? 0); ?></small></td>
-              <td><?php echo e($r['class_name'] ?? ($r['class_id'] ?? '')); ?></td>
-              <td><?php echo e(ucfirst($r['type'] ?? '')); ?><br><small class="small-muted"><?php echo e($r['date'] ?? '—'); ?></small></td>
-              <td class="mrk-pre"><?php echo e(mb_strimwidth($r['remark'] ?? '', 0, 200, '...')); ?></td>
-              <td><?php echo e($r['teacher_name'] ?? ''); ?><br><small class="small-muted"><?php echo e(substr($r['created_at'] ?? '',0,16)); ?></small></td>
-              <td>
-                <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#viewModal" data-id="<?php echo (int)$r['id']; ?>">View</button>
-                <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#editRemarkModal" data-id="<?php echo (int)$r['id']; ?>">Edit</button>
-                <?php if (teacher_allowed_for_class($teacherId, (int)$r['class_id'], $assignedClassIds)): ?>
-                  <?php echo render_secure_delete_button((int)$r['id'], 'Delete', 'Delete remark?'); ?>
-                <?php endif; ?>
-              </td>
-            </tr>
-          <?php endforeach; else: ?>
-            <tr><td colspan="7" class="text-center small-muted">No remarks found.</td></tr>
-          <?php endif; ?>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="p-3 d-flex justify-content-between align-items-center">
-      <div>Showing <?php echo $total ? ($offset+1) : 0; ?> - <?php echo min($total, $offset + count($remarks)); ?> of <?php echo $total; ?></div>
-      <nav>
-        <ul class="pagination mb-0">
-          <?php $totalPages = max(1, (int)ceil($total / $perPage)); for ($p=1;$p<=$totalPages;$p++): ?>
-            <li class="page-item <?php if ($p === $page) echo 'active'; ?>"><a class="page-link" href="?<?php echo build_qs(['page'=>$p]); ?>"><?php echo $p; ?></a></li>
-          <?php endfor; ?>
-        </ul>
-      </nav>
-    </div>
-  </div>
-</div>
-
-<!-- Add Remark Modal -->
-<div class="modal fade" id="addRemarkModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <form method="post" action="?action=add">
-        <input type="hidden" name="csrf" value="<?php echo e(get_csrf_token()); ?>">
-        <div class="modal-header"><h5 class="modal-title">Add Remark</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-          <div class="row g-2">
-            <div class="col-md-4">
-              <label class="form-label">Class *</label>
-              <select name="class_id" class="form-select" required>
-                <option value="">Select class</option>
-                <?php foreach ($assignedClasses as $c): ?>
-                  <option value="<?php echo (int)$c['id']; ?>"><?php echo e(trim((($c['short_name'] ?? '') . ' ' . ($c['name'] ?? '')))); ?></option>
-                <?php endforeach; ?>
-              </select>
+  <?php if ($notes === []): ?>
+    <div class="text-muted">No notes yet this year<?php echo $pickStudentId > 0 ? ' for this child' : ''; ?>.</div>
+  <?php else: ?>
+    <?php foreach ($notes as $r):
+        $rid = (int) ($r['id'] ?? 0);
+        $kind = (string) ($r['type'] ?? 'note');
+        $kindClass = $kind === 'commendation' ? 'good' : ($kind === 'warning' ? 'care' : 'note');
+        $when = $fmt((string) ($r['date'] ?? $r['created_at'] ?? ''));
+        ?>
+      <div class="rm-card">
+        <div class="d-flex justify-content-between gap-2 flex-wrap">
+          <div>
+            <div class="rm-title"><?php echo e($childName($r)); ?></div>
+            <div class="rm-meta mb-1">
+              <span class="rm-kind <?php echo $kindClass; ?>"><?php echo e($kinds[$kind] ?? 'Note'); ?></span>
+              <?php echo $when !== '' ? ' · ' . e($when) : ''; ?>
             </div>
-            <div class="col-md-4">
-              <label class="form-label">Student *</label>
-              <select name="student_id" class="form-select" required>
-                <option value="">Select student</option>
-                <?php foreach ($studentsList as $s): if (in_array((int)$s['class_id'], $assignedClassIds, true)): ?>
-                  <option value="<?php echo (int)$s['id']; ?>"><?php echo e(fullname($s)); ?> (<?php echo (int)$s['id']; ?>)</option>
-                <?php endif; endforeach; ?>
-              </select>
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Type</label>
-              <select name="type" class="form-select">
-                <?php foreach ($types as $t): ?><option value="<?php echo e($t); ?>"><?php echo e(ucfirst($t)); ?></option><?php endforeach; ?>
-              </select>
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Date</label>
-              <input type="date" name="date" class="form-control">
-            </div>
-            <div class="col-12">
-              <label class="form-label">Remark *</label>
-              <textarea name="remark" rows="5" class="form-control" required></textarea>
-            </div>
+            <div style="white-space:pre-wrap"><?php echo e((string) ($r['remark'] ?? '')); ?></div>
+          </div>
+          <div class="text-nowrap">
+            <a class="btn btn-sm btn-outline-primary" href="?class_id=<?php echo (int) $selectedClassId; ?>&amp;edit=<?php echo $rid; ?>">Edit</a>
+            <?php echo render_secure_delete_button($rid, 'Delete', 'Remove this note?', 'btn btn-sm btn-outline-danger', ['class_id' => $selectedClassId]); ?>
           </div>
         </div>
-        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-success" type="submit">Add</button></div>
-      </form>
-    </div>
-  </div>
-</div>
+      </div>
+    <?php endforeach; ?>
+  <?php endif; ?>
 
-<!-- Edit Remark Modal -->
-<div class="modal fade" id="editRemarkModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <form method="post" action="?action=edit" id="editRemarkForm">
-        <input type="hidden" name="csrf" value="<?php echo e(get_csrf_token()); ?>">
-        <input type="hidden" name="id" id="edit_id">
-        <div class="modal-header"><h5 class="modal-title">Edit Remark</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body" id="editRemarkBody"><div class="text-center text-muted">Loading…</div></div>
-        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" type="submit">Save</button></div>
-      </form>
-    </div>
-  </div>
-</div>
+<?php endif; ?>
 
-<!-- View Modal -->
-<div class="modal fade" id="viewModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Remark details</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body" id="viewModalBody"><div class="text-center text-muted">Loading…</div></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
-    </div>
-  </div>
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  // View modal: load fragment via fetch
-  var viewModal = document.getElementById('viewModal');
-  if (viewModal) {
-    viewModal.addEventListener('show.bs.modal', function (event) {
-      var id = event.relatedTarget.getAttribute('data-id');
-      var body = document.getElementById('viewModalBody');
-      body.innerHTML = '<div class="text-center text-muted">Loading…</div>';
-      fetch('?action=view&id=' + encodeURIComponent(id), { credentials: 'same-origin' })
-        .then(function(resp){ return resp.ok ? resp.text() : Promise.reject(); })
-        .then(function(html){ body.innerHTML = html; })
-        .catch(function(){ body.innerHTML = '<div class="text-danger">Failed to load details.</div>'; });
-    });
-  }
-
-  // Edit modal: fetch JSON data to populate form
-  var editModal = document.getElementById('editRemarkModal');
-  if (editModal) {
-    editModal.addEventListener('show.bs.modal', function (event) {
-      var id = event.relatedTarget.getAttribute('data-id');
-      var body = document.getElementById('editRemarkBody');
-      body.innerHTML = '<div class="text-center text-muted">Loading…</div>';
-      fetch('?action=get&id=' + encodeURIComponent(id), { credentials: 'same-origin' })
-        .then(function(resp){ return resp.ok ? resp.json() : Promise.reject(); })
-        .then(function(json){
-          if (!json || !json.ok || !json.data) { body.innerHTML = '<div class="text-danger p-3">Failed to load remark.</div>'; return; }
-          var d = json.data;
-          document.getElementById('edit_id').value = d.id || '';
-          var html = '';
-          html += '<div class="row g-2">';
-          html += '<div class="col-md-4"><label class="form-label">Class</label><select id="edit_class_id" name="class_id" class="form-select">';
-          html += '<option value="">Select class</option>';
-          // classes options from server - we embed a small JSON
-          var classes = <?php echo json_encode($assignedClasses, JSON_UNESCAPED_UNICODE); ?>;
-          classes.forEach(function(c){ html += '<option value="'+c.id+'">'+(c.short_name ? c.short_name+' ' : '')+c.name+'</option>'; });
-          html += '</select></div>';
-          html += '<div class="col-md-4"><label class="form-label">Student</label><select id="edit_student_id" name="student_id" class="form-select"><option value="">Select student</option>';
-          // embed students list
-          var students = <?php echo json_encode($studentsList, JSON_UNESCAPED_UNICODE); ?>;
-          students.forEach(function(s){ html += '<option value="'+s.id+'">'+(s.first_name+' '+(s.last_name||''))+' ('+s.id+')</option>'; });
-          html += '</select></div>';
-          html += '<div class="col-md-4"><label class="form-label">Type</label><select id="edit_type" name="type" class="form-select">';
-          var types = <?php echo json_encode($types, JSON_UNESCAPED_UNICODE); ?>;
-          types.forEach(function(t){ html += '<option value="'+t+'">'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>'; });
-          html += '</select></div>';
-          html += '<div class="col-md-4"><label class="form-label">Date</label><input id="edit_date" name="date" type="date" class="form-control"></div>';
-          html += '<div class="col-12"><label class="form-label">Remark</label><textarea id="edit_remark" name="remark" rows="6" class="form-control"></textarea></div>';
-          html += '</div>';
-          body.innerHTML = html;
-          document.getElementById('edit_class_id').value = d.class_id || '';
-          document.getElementById('edit_student_id').value = d.student_id || '';
-          document.getElementById('edit_type').value = d.type || '';
-          document.getElementById('edit_date').value = d.date || '';
-          document.getElementById('edit_remark').value = d.remark || '';
-        })
-        .catch(function(){ body.innerHTML = '<div class="text-danger p-3">Failed to load.</div>'; });
-    });
-  }
-});
-</script>
-
-<?php
-require_once __DIR__ . '/../includes/footer.php';
-?>
+<?php require_once __DIR__ . '/../includes/footer.php'; ?>
