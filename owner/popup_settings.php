@@ -1,310 +1,222 @@
 <?php
 /**
- * owner/popup_settings.php
- *
- * Admin page to edit site popup (image + title + text + show_once).
- * - Provides image upload (stores in /assets/uploads).
- * - Saves popup config inside schools.settings JSON (school id = 1) under key "popup".
- * - Mirrors upload behavior and helpers used in owner/notices_publish.php.
- *
- * Place at: /path/to/your/project/owner/popup_settings.php
+ * owner/popup_settings.php — welcome notice on the public website.
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('owner');
-$DEBUG = panel_debug();
+require_once __DIR__ . '/../includes/cms/helpers.php';
 
-session_start();
+$pageTitle = 'Website welcome notice';
+$page_title = $pageTitle;
+$csrf = function_exists('get_csrf_token') ? get_csrf_token() : '';
 
-if (!function_exists('app_base')) {
-    function app_base(): string {
-        return defined('BASE_URL') ? rtrim((string) BASE_URL, '/') : '';
-    }
-}
-
-if (!function_exists('db_get_one')) {
-    function db_get_one(string $sql, array $params = []) {
-        if (is_callable('db_fetch_one')) return call_user_func('db_fetch_one', $sql, $params);
-        $pdo = ensure_pdo();
-        if ($pdo instanceof \PDO) {
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute($params);
-            $row = $stmt->fetch();
-            return $row === false ? null : $row;
-        }
-        return null;
-    }
-}
-if (!function_exists('db_run')) {
-    function db_run(string $sql, array $params = []): bool {
-        if (is_callable('db_execute')) return (bool) call_user_func('db_execute', $sql, $params);
-        $pdo = ensure_pdo();
-        if ($pdo instanceof \PDO) {
-            $stmt = $pdo->prepare($sql);
-            return (bool)$stmt->execute($params);
-        }
-        return false;
-    }
-}
-
-if (!function_exists('decode_json_field')) {
-    function decode_json_field($val) {
-        if ($val === null || $val === '') return [];
-        if (is_array($val)) return $val;
-        $decoded = json_decode((string)$val, true);
-        return (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) ? $decoded : [];
-    }
-}
-
-function ensure_upload_dir(): string|false {
-    $appRoot = realpath(__DIR__ . '/..') ?: (__DIR__ . '/..');
-    $dir = $appRoot . '/assets/uploads';
-    if (is_dir($dir) && is_writable($dir)) return $dir;
-    if (!is_dir($dir)) {
-        if (@mkdir($dir, 0775, true)) { @chmod($dir, 0775); return $dir; }
-        return false;
-    }
-    return is_writable($dir) ? $dir : false;
-}
-function is_valid_image(string $tmp): bool {
-    $info = @getimagesize($tmp);
-    if ($info === false) return false;
-    $allowed = [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_GIF, IMAGETYPE_WEBP];
-    return in_array($info[2], $allowed, true);
-}
-function web_path_for_upload(string $filename): string {
-    return '/assets/uploads/' . ltrim($filename, '/');
-}
-
-/* -------------------------
-   Load current popup settings from schools.settings (school id = 1)
-   ------------------------- */
 $schoolId = 1;
-$errors = [];
-$success = '';
-
-$currentSettings = [];
-try {
-    $row = db_get_one("SELECT settings FROM schools WHERE id = :id LIMIT 1", [':id' => $schoolId]);
-    $currentSettings = decode_json_field($row['settings'] ?? null);
-} catch (Throwable $t) {
-    $currentSettings = [];
-}
-
-/* default popup structure */
-$popup = $currentSettings['popup'] ?? [
+$school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => $schoolId]) ?: [];
+$settings = cms_decode_json_field($school['settings'] ?? null);
+$popup = is_array($settings['popup'] ?? null) ? $settings['popup'] : [];
+$popup = array_merge([
     'enabled' => false,
     'image' => '',
     'title' => '',
     'text' => '',
-    'show_once' => true
-];
+    'show_once' => true,
+], $popup);
 
-/* -------------------------
-   Handle POST save (upload or use existing image)
-   ------------------------- */
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $enabled = isset($_POST['enabled']) ? true : false;
-    $title = trim((string)($_POST['title'] ?? ''));
-    $text = trim((string)($_POST['text'] ?? ''));
-    $show_once = isset($_POST['show_once']) ? true : false;
+$errors = [];
+$success = '';
 
-    // Validate length
-    if (strlen($title) > 250) $title = mb_substr($title, 0, 250);
-    if (strlen($text) > 10000) $text = mb_substr($text, 0, 10000);
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'save_popup') {
+    if (function_exists('validate_csrf_token') && !validate_csrf_token((string) ($_POST['csrf'] ?? ''))) {
+        $errors[] = 'Please reload the page and try again.';
+    } else {
+        $enabled = !empty($_POST['enabled']);
+        $title = mb_substr(trim((string) ($_POST['title'] ?? '')), 0, 250);
+        $text = mb_substr(trim((string) ($_POST['text'] ?? '')), 0, 2000);
+        $showOnce = (string) ($_POST['show_once'] ?? '1') === '1';
+        $removeImage = !empty($_POST['remove_image']);
 
-    // Handle upload
-    $new_image_path = null;
-    if (!empty($_FILES['image']) && $_FILES['image']['error'] !== UPLOAD_ERR_NO_FILE) {
-        if ($_FILES['image']['error'] !== UPLOAD_ERR_OK) {
-            $errors[] = 'Image upload error code: ' . intval($_FILES['image']['error']);
-        } else {
-            $tmp = $_FILES['image']['tmp_name'];
-            if (!is_valid_image($tmp)) {
-                $errors[] = 'Uploaded file is not a valid image (jpg, png, gif, webp allowed).';
+        $image = trim((string) ($popup['image'] ?? ''));
+        if ($removeImage && $image !== '') {
+            $fs = cms_fs_path_from_url($image);
+            if (is_file($fs) && str_contains($fs, '/assets/uploads/')) {
+                @unlink($fs);
+            }
+            $image = '';
+        }
+
+        if (!empty($_FILES['image']) && (int) ($_FILES['image']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+            if ((int) $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
+                $errors[] = 'Could not upload the photo. Try a smaller JPG or PNG.';
             } else {
-                $dir = ensure_upload_dir();
-                if ($dir === false) {
-                    $errors[] = 'Upload directory not writable / could not be created.';
+                $tmp = (string) $_FILES['image']['tmp_name'];
+                $info = @getimagesize($tmp);
+                $okType = $info !== false && in_array((int) ($info[2] ?? 0), [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_GIF, IMAGETYPE_WEBP], true);
+                if (!$okType) {
+                    $errors[] = 'Use a JPG, PNG, GIF or WEBP photo.';
                 } else {
-                    $orig = basename((string)($_FILES['image']['name'] ?? 'upload'));
-                    $safe = preg_replace('/[^A-Za-z0-9._-]/', '_', $orig);
-                    try {
-                        $uniq = time() . '_' . bin2hex(random_bytes(6)) . '_' . $safe;
-                    } catch (Exception $e) {
-                        $uniq = time() . '_' . bin2hex(substr(md5(uniqid('', true)),0,6)) . '_' . $safe;
-                    }
-                    $dest = $dir . '/' . $uniq;
-                    if (@move_uploaded_file($tmp, $dest)) {
-                        // optional: set file permissions
-                        @chmod($dest, 0644);
-                        $new_image_path = web_path_for_upload($uniq);
+                    $dir = cms_upload_dir();
+                    if ($dir === false) {
+                        $errors[] = 'Photo folder is not writable.';
                     } else {
-                        $errors[] = 'Failed to move uploaded file.';
+                        $orig = basename((string) ($_FILES['image']['name'] ?? 'photo.jpg'));
+                        $safe = preg_replace('/[^A-Za-z0-9._-]/', '_', $orig) ?: 'photo.jpg';
+                        $uniq = time() . '_' . bin2hex(random_bytes(4)) . '_' . $safe;
+                        if (@move_uploaded_file($tmp, $dir . '/' . $uniq)) {
+                            if ($image !== '') {
+                                $fs = cms_fs_path_from_url($image);
+                                if (is_file($fs) && str_contains($fs, '/assets/uploads/')) {
+                                    @unlink($fs);
+                                }
+                            }
+                            $image = cms_public_upload_url($uniq);
+                        } else {
+                            $errors[] = 'Could not save the photo.';
+                        }
                     }
                 }
             }
         }
-    } elseif (!empty($_POST['image_url'])) {
-        // allow manual URL input as alternative to upload
-        $maybe = trim((string)$_POST['image_url']);
-        if ($maybe !== '') {
-            // simple validation: accept if starts with http(s) or with /
-            if (preg_match('#^https?://#i', $maybe) || strpos($maybe, '/') === 0) {
-                $new_image_path = $maybe;
-            } else {
-                $errors[] = 'Image URL must be absolute (https://) or an absolute path starting with /.';
-            }
+
+        if ($enabled && $title === '' && $text === '' && $image === '') {
+            $errors[] = 'Add a title, a short message or a photo — or turn the notice off.';
         }
-    }
 
-    // If no new image provided, keep existing
-    $final_image = $new_image_path ?? ($popup['image'] ?? '');
-
-    if (empty($errors)) {
-        $currentSettings['popup'] = [
-            'enabled' => (bool)$enabled,
-            'image' => $final_image,
-            'title' => $title,
-            'text' => $text,
-            'show_once' => (bool)$show_once
-        ];
-        $json = json_encode($currentSettings, JSON_UNESCAPED_UNICODE);
-        try {
-            $ok = db_run("UPDATE schools SET settings = :s WHERE id = :id", [':s' => $json, ':id' => $schoolId]);
+        if ($errors === []) {
+            $settings['popup'] = [
+                'enabled' => $enabled,
+                'image' => $image,
+                'title' => $title,
+                'text' => $text,
+                'show_once' => $showOnce,
+            ];
+            $json = json_encode($settings, JSON_UNESCAPED_UNICODE);
+            $ok = false;
+            if ($school !== []) {
+                $ok = (bool) safe_db_run(
+                    'UPDATE schools SET settings = :s, updated_at = NOW() WHERE id = :id',
+                    [':s' => $json, ':id' => $schoolId]
+                );
+            } else {
+                $defaultName = defined('APP_NAME') ? (string) APP_NAME : 'Preschool';
+                $ok = (bool) safe_db_run(
+                    'INSERT INTO schools (id, name, settings, created_at, updated_at) VALUES (1, :name, :s, NOW(), NOW())',
+                    [':name' => $defaultName, ':s' => $json]
+                );
+            }
             if ($ok) {
-                $success = 'Popup settings saved.';
-                // If replacing an uploaded image, optionally delete the old uploaded file (if it was in uploads)
-                if (!empty($new_image_path) && !empty($popup['image']) && $popup['image'] !== $new_image_path) {
-                    // try to delete only if old image is inside /assets/uploads
-                    $old = $popup['image'];
-                    if (strpos($old, '/assets/uploads/') !== false) {
-                        $rel = $old;
-                        // convert to filesystem path
-                        $fs = realpath(__DIR__ . '/..') . '/' . ltrim(preg_replace('#^' . preg_quote(app_base(), '#') . '#', '', $rel), '/');
-                        if ($fs && is_file($fs)) @unlink($fs);
-                    }
-                }
-                // reload popup var
-                $popup = $currentSettings['popup'];
-                // redirect to avoid double-post
-                header('Location: ' . site_url('/owner/popup_settings.php'));
-                exit;
+                $success = $enabled ? 'Saved. Visitors will see this when they open the website.' : 'Saved. The notice is off.';
+                $school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => $schoolId]) ?: $school;
+                $settings = cms_decode_json_field($school['settings'] ?? null);
+                $popup = is_array($settings['popup'] ?? null) ? array_merge($popup, $settings['popup']) : $settings['popup'];
             } else {
-                $errors[] = 'Database update failed.';
+                $errors[] = 'Could not save. Try again.';
             }
-        } catch (Throwable $t) {
-            $errors[] = 'Database error: ' . $t->getMessage();
         }
     }
 }
 
-/* If settings exist, refresh $popup from DB (safe)
-   (in case the page was loaded without POST) */
-try {
-    $row2 = db_get_one("SELECT settings FROM schools WHERE id = :id LIMIT 1", [':id' => $schoolId]);
-    $cs = decode_json_field($row2['settings'] ?? null);
-    if (!empty($cs['popup']) && is_array($cs['popup'])) $popup = $cs['popup'];
-} catch (Throwable $t) {
-    // ignore
+$imgUrl = trim((string) ($popup['image'] ?? ''));
+if ($imgUrl !== '' && function_exists('resolve_image_url')) {
+    $imgUrl = resolve_image_url($imgUrl);
 }
+$enabled = !empty($popup['enabled']);
+$showOnce = !empty($popup['show_once']);
+$publicHome = function_exists('site_url') ? site_url('/') : '/';
 
-/* -------------------------
-   Render page (owner style similar to notices_publish)
-   ------------------------- */
-?><!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Owner — Popup settings</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+require_once __DIR__ . '/../includes/header.php';
+?>
 <style>
-  .preview { max-width:360px; border-radius:8px; overflow:hidden; border:1px solid #eee; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
-  .preview img{ width:100%; display:block; height:auto; }
-  .helper { font-size:0.9rem; color:#666; }
+.pp-hero { background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:16px 18px; margin-bottom:14px; }
+.pp-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:16px 18px; margin-bottom:12px; }
+.pp-sec { font-size:.75rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:#94a3b8; margin-bottom:10px; }
+.pp-on { display:flex; align-items:center; gap:10px; background:#f0fdf4; border:1px solid #86efac; border-radius:14px; padding:12px 14px; }
+.pp-off { display:flex; align-items:center; gap:10px; background:#f8fafc; border:1px solid #dbe7fb; border-radius:14px; padding:12px 14px; }
+.pp-photo { width:100%; max-width:280px; height:160px; object-fit:cover; border-radius:14px; background:#e2e8f0; border:1px solid #dbe7fb; }
+.pp-mock { max-width:360px; background:#fff; border:1px solid #dbe7fb; border-radius:16px; overflow:hidden; box-shadow:0 8px 24px rgba(20,58,122,.1); }
+.pp-mock img { width:100%; height:160px; object-fit:cover; display:block; background:#e2e8f0; }
+.pp-mock .bd { padding:14px; }
+.pp-opt { display:flex; flex-wrap:wrap; gap:8px; }
+.pp-opt label { border:1px solid #dbe7fb; background:#f8fafc; border-radius:999px; padding:.35rem .85rem; cursor:pointer; font-weight:600; }
+.pp-bar { position:sticky; bottom:0; background:#fff; border-top:1px solid #dbe7fb; padding:10px 0; z-index:2; }
 </style>
-</head>
-<body class="bg-light">
-<div class="container py-4">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2>Popup settings</h2>
-    <div>
-      <a class="btn btn-outline-secondary" href="<?php echo e(site_url('/owner/dashboard.php')); ?>">Dashboard</a>
-      <a class="btn btn-outline-primary" href="<?php echo e(site_url('/owner/notices_publish.php')); ?>">Manage Notices</a>
+
+<div class="pp-hero d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <div>
+    <div class="fw-bold" style="font-size:1.15rem">Website welcome notice</div>
+    <div class="text-muted">A photo and a few words when someone first opens the school website (admission, holiday, event).</div>
+  </div>
+  <a class="btn btn-outline-primary" href="<?php echo e($publicHome); ?>" target="_blank" rel="noopener">See website</a>
+</div>
+
+<?php if ($success !== ''): ?><div class="alert alert-success py-2"><?php echo e($success); ?></div><?php endif; ?>
+<?php foreach ($errors as $er): ?><div class="alert alert-danger py-2"><?php echo e($er); ?></div><?php endforeach; ?>
+
+<form method="post" enctype="multipart/form-data">
+  <input type="hidden" name="action" value="save_popup">
+  <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+
+  <div class="pp-card">
+    <label class="<?php echo $enabled ? 'pp-on' : 'pp-off'; ?>">
+      <input type="checkbox" name="enabled" value="1" class="form-check-input m-0" <?php echo $enabled ? 'checked' : ''; ?>>
+      <span><strong>Show this notice on the website</strong><br><span class="small text-muted">Turn off after the event or admission drive is over.</span></span>
+    </label>
+  </div>
+
+  <div class="pp-card">
+    <div class="pp-sec">Photo</div>
+    <div class="d-flex flex-wrap gap-3 align-items-start">
+      <?php if ($imgUrl !== ''): ?>
+        <img class="pp-photo" src="<?php echo e($imgUrl); ?>" alt="">
+      <?php else: ?>
+        <div class="pp-photo d-flex align-items-center justify-content-center text-muted">No photo</div>
+      <?php endif; ?>
+      <div class="flex-grow-1">
+        <input type="file" name="image" accept="image/jpeg,image/png,image/gif,image/webp" class="form-control">
+        <div class="form-text">A wide photo of children or a poster works well. Optional.</div>
+        <?php if ($imgUrl !== ''): ?>
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" value="1" id="remove_image" name="remove_image">
+            <label class="form-check-label" for="remove_image">Remove this photo</label>
+          </div>
+        <?php endif; ?>
+      </div>
     </div>
   </div>
 
-  <?php if ($success): ?><div class="alert alert-success"><?php echo e($success); ?></div><?php endif; ?>
-  <?php if (!empty($errors)): ?><div class="alert alert-danger"><ul><?php foreach ($errors as $er) echo '<li>' . e($er) . '</li>'; ?></ul></div><?php endif; ?>
-
-  <div class="card p-3 mb-4">
-    <form method="post" enctype="multipart/form-data" class="row g-3">
-      <div class="col-12">
-        <label class="form-check-label">
-          <input type="checkbox" name="enabled" class="form-check-input me-2" <?php echo !empty($popup['enabled']) ? 'checked' : ''; ?>>
-          Enable popup on site load
-        </label>
-      </div>
-
-      <div class="col-md-8">
-        <label class="form-label">Upload image (recommended)</label>
-        <input type="file" name="image" accept="image/*" class="form-control">
-        <div class="helper">Allowed types: jpg, png, gif, webp. If you upload, it will be stored in /assets/uploads and used for the popup.</div>
-        <div class="mt-2">
-          <label class="form-label">Or specify image URL (absolute or site-relative)</label>
-          <input type="text" name="image_url" class="form-control" value="<?php echo e($popup['image'] ?? ''); ?>" placeholder="https://... or /assets/uploads/your.jpg">
-        </div>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">Preview</label>
-        <div class="preview">
-          <?php if (!empty($popup['image'])): ?>
-            <img src="<?php echo e($popup['image']); ?>" alt="popup preview" onerror="this.onerror=null;this.src='<?php echo e(site_url('/assets/images/default-logo.png')); ?>'">
-          <?php else: ?>
-            <div style="padding:28px;text-align:center;color:#666">No image set</div>
-          <?php endif; ?>
-        </div>
-      </div>
-
-      <div class="col-12">
-        <label class="form-label">Title</label>
-        <input type="text" name="title" class="form-control" value="<?php echo e($popup['title'] ?? ''); ?>">
-      </div>
-
-      <div class="col-12">
-        <label class="form-label">Text / HTML (small)</label>
-        <textarea name="text" rows="6" class="form-control"><?php echo e($popup['text'] ?? ''); ?></textarea>
-        <div class="helper">Keep it short. Avoid &lt;script&gt; tags — frontend will sanitize embeds/JS if implemented.</div>
-      </div>
-
-      <div class="col-12">
-        <label class="form-check-label">
-          <input type="checkbox" name="show_once" class="form-check-input me-2" <?php echo !empty($popup['show_once']) ? 'checked' : ''; ?>>
-          Only show once per browser (client localStorage)
-        </label>
-      </div>
-
-      <div class="col-12 d-flex gap-2">
-        <button type="submit" class="btn btn-primary">Save popup settings</button>
-        <a class="btn btn-secondary" href="<?php echo e(site_url('/owner')); ?>">Back</a>
-      </div>
-    </form>
+  <div class="pp-card">
+    <div class="pp-sec">Words</div>
+    <label class="form-label">Heading</label>
+    <input name="title" class="form-control mb-3" maxlength="250" value="<?php echo e((string) ($popup['title'] ?? '')); ?>" placeholder="Admissions open">
+    <label class="form-label">Short message</label>
+    <textarea name="text" class="form-control" rows="4" maxlength="2000" placeholder="Visit the school this week, or send an enquiry."><?php echo e((string) ($popup['text'] ?? '')); ?></textarea>
+    <div class="form-text">Keep it to a few lines. Parents can close it with the ×.</div>
   </div>
 
-  <div class="card p-3">
-    <h6>Notes</h6>
-    <ul class="small text-muted">
-      <li>Settings are stored inside <code>schools.settings</code> JSON under key <code>popup</code> for school id = 1.</li>
-      <li>Uploaded images are stored in <code>/assets/uploads</code>. Old uploaded images are automatically removed when replaced.</li>
-      <li>Public site must render the popup using these settings (footer or index). If you need, I can provide the frontend modal snippet too.</li>
-    </ul>
+  <div class="pp-card">
+    <div class="pp-sec">How often</div>
+    <div class="pp-opt">
+      <label><input type="radio" name="show_once" value="1" <?php echo $showOnce ? 'checked' : ''; ?>> Once, until they close it</label>
+      <label><input type="radio" name="show_once" value="0" <?php echo $showOnce ? '' : 'checked'; ?>> Every visit</label>
+    </div>
+    <div class="form-text mt-2">“Once” is gentler. Use every visit only for an urgent notice.</div>
   </div>
-</div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+  <div class="pp-card">
+    <div class="pp-sec">How it looks</div>
+    <div class="pp-mock">
+      <?php if ($imgUrl !== ''): ?><img src="<?php echo e($imgUrl); ?>" alt=""><?php endif; ?>
+      <div class="bd">
+        <div class="fw-bold"><?php echo e(trim((string) ($popup['title'] ?? '')) !== '' ? (string) $popup['title'] : 'Heading'); ?></div>
+        <div class="small text-muted mt-1" style="white-space:pre-line"><?php echo e(trim((string) ($popup['text'] ?? '')) !== '' ? (string) $popup['text'] : 'Your short message will show here.'); ?></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pp-bar">
+    <button class="btn btn-success" type="submit">Save</button>
+  </div>
+</form>
+<?php
+require_once __DIR__ . '/../includes/footer.php';
