@@ -1,340 +1,259 @@
 <?php
 /**
- * parent/homeworks.php
- *
- * Parent-facing Homework list and viewer.
- *
- * Features:
- * - Requires parent login ($_SESSION['parent_auth_user'])
- * - Finds classes for parent's linked children (parents_children.child_student_id -> students.class_id)
- * - Lists homeworks from homeworks table for those classes
- * - Filtering by class and date range
- * - Pagination
- * - View homework details in modal (AJAX fragment)
- * - Export visible homework list to CSV
- *
- * Expected homeworks table schema (you provided):
- * id, school_id, class_id, title, description, assigned_date, due_date, created_by, created_at, updated_at
- *
- * Save to: /pioneerplayschool01/parent/homeworks.php
+ * parent/homeworks.php — what to do at home for this child.
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('parent');
-$DEBUG = panel_debug();
 
-/* ---------- Require parent login ---------- */
-/* ---------- Table existence helper ---------- */
-
-/* ---------- Page state ---------- */
-$messages = [];
-$errors = [];
-
-/* ---------- Parent identity ---------- */
-$parent = auth_user() ?? [];
 $parentId = panel_parent_context_id();
+$today = date('Y-m-d');
+$tableOk = table_exists('homeworks');
 
-/* ---------- Determine classes linked to parent via parents_children -> students.class_id ---------- */
-$classIds = []; // unique list of class ids parent is interested in
 $childIds = [];
-
-if (table_exists('parents_children')) {
-    $maps = safe_db_get_all("SELECT child_student_id FROM parents_children WHERE parent_user_id = :pid", [':pid'=>$parentId]);
+if ($parentId > 0 && table_exists('parents_children')) {
+    $maps = safe_db_get_all(
+        'SELECT child_student_id FROM parents_children WHERE parent_user_id = :pid ORDER BY id DESC',
+        [':pid' => $parentId]
+    ) ?: [];
     foreach ($maps as $m) {
-        $childIds[] = (int)($m['child_student_id'] ?? 0);
+        $id = (int) ($m['child_student_id'] ?? 0);
+        if ($id > 0) {
+            $childIds[] = $id;
+        }
     }
 }
-
-if (!empty($childIds) && table_exists('students')) {
-    // fetch class_id for these student ids
-    $ph = implode(',', array_fill(0, count($childIds), '?'));
-    $rows = safe_db_get_all("SELECT DISTINCT class_id FROM students WHERE id IN ($ph) AND class_id IS NOT NULL", $childIds);
+if ($childIds === [] && $parentId > 0 && table_exists('students')) {
+    $or = ['parent_id = :pid'];
+    $params = [':pid' => $parentId];
+    if (function_exists('column_exists') && column_exists('students', 'father_id')) {
+        $or[] = 'father_id = :pid';
+    }
+    if (function_exists('column_exists') && column_exists('students', 'mother_id')) {
+        $or[] = 'mother_id = :pid';
+    }
+    $rows = safe_db_get_all('SELECT id FROM students WHERE ' . implode(' OR ', $or), $params) ?: [];
     foreach ($rows as $r) {
-        $cid = $r['class_id'] ?? null;
-        if ($cid !== null) $classIds[] = (int)$cid;
+        $id = (int) ($r['id'] ?? 0);
+        if ($id > 0) {
+            $childIds[] = $id;
+        }
     }
 }
+$childIds = array_values(array_unique($childIds));
 
-/* fallback: if no parents_children mapping, try students.parent_id */
-if (empty($classIds) && table_exists('students')) {
-    $rows = safe_db_get_all("SELECT DISTINCT class_id FROM students WHERE parent_id = :pid AND class_id IS NOT NULL", [':pid'=>$parentId]);
+$children = [];
+if ($childIds !== [] && table_exists('students')) {
+    $in = implode(',', array_map('intval', $childIds));
+    $join = table_exists('classes') ? 'LEFT JOIN classes c ON c.id = s.class_id' : '';
+    $classSel = table_exists('classes') ? ', c.name AS class_name' : '';
+    $rows = safe_db_get_all(
+        "SELECT s.id, s.first_name, s.middle_name, s.last_name, s.class_id, s.photo_path{$classSel}
+         FROM students s {$join}
+         WHERE s.id IN ({$in})"
+    ) ?: [];
+    $byId = [];
     foreach ($rows as $r) {
-        $cid = $r['class_id'] ?? null;
-        if ($cid !== null) $classIds[] = (int)$cid;
+        $byId[(int) $r['id']] = $r;
+    }
+    foreach ($childIds as $id) {
+        if (isset($byId[$id])) {
+            $children[] = $byId[$id];
+        }
     }
 }
 
-$classOptions = []; // map class_id => display name
-if (!empty($classIds) && table_exists('classes')) {
-    $ph = implode(',', array_fill(0, count($classIds), '?'));
-    $rows = safe_db_get_all("SELECT id, name, short_name, section FROM classes WHERE id IN ($ph)", $classIds);
-    foreach ($rows as $r) {
-        $id = (int)$r['id'];
-        $display = trim((($r['short_name'] ?? '') . ' ' . ($r['name'] ?? '')));
-        if (!empty($r['section'])) $display .= ' • Sec: ' . $r['section'];
-        $classOptions[$id] = $display;
-    }
-    // ensure any classIds not returned still appear as numeric labels
-    foreach ($classIds as $cid) {
-        if (!isset($classOptions[$cid])) $classOptions[$cid] = 'Class #' . $cid;
+$selectedId = (int) ($_GET['student_id'] ?? 0);
+if ($selectedId <= 0 && $childIds !== []) {
+    $selectedId = $childIds[0];
+}
+if ($selectedId > 0 && !in_array($selectedId, $childIds, true)) {
+    $selectedId = $childIds[0] ?? 0;
+}
+
+$selected = null;
+foreach ($children as $c) {
+    if ((int) $c['id'] === $selectedId) {
+        $selected = $c;
+        break;
     }
 }
 
-/* ---------- Actions: view (modal) and export ---------- */
-$action = $_REQUEST['action'] ?? 'list';
-
-/* VIEW modal fragment - show full homework details */
-if ($action === 'view' && !empty($_GET['id'])) {
-    $hwId = (int)$_GET['id'];
-    if ($hwId <= 0) { echo '<div class="p-3 text-danger">Invalid homework id.</div>'; exit; }
-    if (!table_exists('homeworks')) { echo '<div class="p-3 text-muted">homeworks table not found.</div>'; exit; }
-
-    // fetch the homework row
-    $hw = safe_db_get_one("SELECT id, school_id, class_id, title, description, assigned_date, due_date, created_by, created_at, updated_at FROM homeworks WHERE id = :id LIMIT 1", [':id'=>$hwId]);
-    if (!$hw) { echo '<div class="p-3 text-muted">Homework not found.</div>'; exit; }
-
-    // authorize: ensure homework.class_id is in parent's classIds
-    $hwClass = isset($hw['class_id']) ? (int)$hw['class_id'] : 0;
-    if (!empty($classIds) && $hwClass !== 0 && !in_array($hwClass, $classIds, true)) {
-        echo '<div class="p-3 text-muted">You are not authorized to view this homework.</div>'; exit;
+$nameOf = static function (array $s): string {
+    if (function_exists('student_full_name')) {
+        $n = trim(student_full_name($s));
+        if ($n !== '') {
+            return $n;
+        }
     }
+    return trim((string) ($s['first_name'] ?? '') . ' ' . (string) ($s['middle_name'] ?? '') . ' ' . (string) ($s['last_name'] ?? ''));
+};
 
-    // optionally fetch class name
-    $className = '';
-    if (table_exists('classes') && !empty($hwClass)) {
-        $c = safe_db_get_one("SELECT name, short_name, section FROM classes WHERE id = :id LIMIT 1", [':id'=>$hwClass]);
-        if ($c) $className = trim((($c['short_name'] ?? '') . ' ' . ($c['name'] ?? ''))) . (!empty($c['section']) ? ' • Sec: ' . $c['section'] : '');
+$fmtDay = static function (string $raw): string {
+    $d = substr($raw, 0, 10);
+    if ($d === '' || $d === '0000-00-00') {
+        return '';
     }
+    $ts = strtotime($d);
+    if ($ts === false) {
+        return $d;
+    }
+    if ($d === date('Y-m-d')) {
+        return 'Today';
+    }
+    if ($d === date('Y-m-d', strtotime('-1 day'))) {
+        return 'Yesterday';
+    }
+    if ($d === date('Y-m-d', strtotime('+1 day'))) {
+        return 'Tomorrow';
+    }
+    return date('D, d M', $ts);
+};
 
-    echo '<div class="p-3">';
-    echo '<h5>' . e($hw['title'] ?? '—') . '</h5>';
-    echo '<div class="small-muted mb-2">Class: ' . e($className ?: ($hwClass ?: '—')) . ' • Assigned: ' . e(substr((string)($hw['assigned_date'] ?? ''),0,10) ?: '—') . ' • Due: ' . e(substr((string)($hw['due_date'] ?? ''),0,10) ?: '—') . '</div>';
-    echo '<div>' . nl2br(e((string)$hw['description'] ?? '')) . '</div>';
-    echo '<hr>';
-    echo '<div class="small-muted">Created by: ' . e($hw['created_by'] ?? '—') . ' • Created at: ' . e($hw['created_at'] ?? '—') . '</div>';
-    echo '</div>';
-    exit;
+$classId = $selected ? (int) ($selected['class_id'] ?? 0) : 0;
+$className = $selected ? trim((string) ($selected['class_name'] ?? '')) : '';
+$childName = $selected ? $nameOf($selected) : 'Your child';
+$photo = $selected && function_exists('student_photo_url')
+    ? student_photo_url((string) ($selected['photo_path'] ?? ''))
+    : '';
+
+$ayFrom = $ayTo = $today;
+if (function_exists('ay_limit_dates')) {
+    [$ayFrom, $ayTo] = ay_limit_dates('2000-01-01', '2099-12-31');
 }
 
-/* EXPORT CSV for current filters */
-if ($action === 'export') {
-    if (!table_exists('homeworks')) { http_response_code(404); echo 'homeworks table not found'; exit; }
-    // determine filters from GET
-    $filterClass = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
-    $from = isset($_GET['from']) ? substr((string)$_GET['from'],0,10) : '';
-    $to = isset($_GET['to']) ? substr((string)$_GET['to'],0,10) : '';
-
-    // Build WHERE based on available classIds (security) and requested filters
-    if (empty($classIds)) {
-        // parent has no classes -> export empty
-        header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: attachment; filename=homeworks_empty.csv');
-        echo "No homeworks\n";
-        exit;
-    }
-
-    $whereClauses = [];
-    $params = [];
-
-    // restrict to parent's classes
-    $ph = implode(',', array_fill(0, count($classIds), '?'));
-    $whereClauses[] = "class_id IN ($ph)";
-    foreach ($classIds as $v) $params[] = $v;
-
-    if ($filterClass > 0 && in_array($filterClass, $classIds, true)) {
-        $whereClauses[] = "class_id = ?";
-        $params[] = $filterClass;
-    }
-
-    if ($from !== '') { $whereClauses[] = "DATE(assigned_date) >= ?"; $params[] = $from; }
-    if ($to !== '') { $whereClauses[] = "DATE(assigned_date) <= ?"; $params[] = $to; }
-
-    $whereSql = count($whereClauses) ? ('WHERE ' . implode(' AND ', $whereClauses)) : '';
-
-    $rows = safe_db_get_all("SELECT id, school_id, class_id, title, description, assigned_date, due_date, created_by, created_at, updated_at FROM homeworks $whereSql ORDER BY assigned_date DESC", $params);
-
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=homeworks_' . date('Ymd_His') . '.csv');
-    $out = fopen('php://output','w');
-    fputcsv($out, ['id','school_id','class_id','title','description','assigned_date','due_date','created_by','created_at','updated_at']);
-    foreach ($rows as $r) {
-        fputcsv($out, [
-            $r['id'] ?? '',
-            $r['school_id'] ?? '',
-            $r['class_id'] ?? '',
-            $r['title'] ?? '',
-            $r['description'] ?? '',
-            $r['assigned_date'] ?? '',
-            $r['due_date'] ?? '',
-            $r['created_by'] ?? '',
-            $r['created_at'] ?? '',
-            $r['updated_at'] ?? '',
-        ]);
-    }
-    fclose($out);
-    exit;
-}
-
-/* ---------- List homeworks with pagination and filters ---------- */
-$perPage = 20;
-$page = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
-$offset = ($page - 1) * $perPage;
-
-$filterClass = isset($_GET['class_id']) ? (int)$_GET['class_id'] : 0;
-$from = isset($_GET['from']) ? substr((string)$_GET['from'],0,10) : '';
-$to = isset($_GET['to']) ? substr((string)$_GET['to'],0,10) : '';
-
-// If parent has no classes, results will be empty
 $homeworks = [];
-$total = 0;
-if (table_exists('homeworks') && !empty($classIds)) {
-    $whereClauses = [];
-    $params = [];
+if ($tableOk && $classId > 0) {
+    $sql = 'SELECT id, class_id, title, description, assigned_date, due_date
+            FROM homeworks
+            WHERE class_id = :cid
+              AND assigned_date BETWEEN :a AND :b
+            ORDER BY assigned_date DESC, id DESC
+            LIMIT 40';
+    $homeworks = safe_db_get_all($sql, [':cid' => $classId, ':a' => $ayFrom, ':b' => $ayTo]) ?: [];
+}
 
-    // restrict to parent's classes
-    $ph = implode(',', array_fill(0, count($classIds), '?'));
-    $whereClauses[] = "class_id IN ($ph)";
-    foreach ($classIds as $v) $params[] = $v;
-
-    if ($filterClass > 0 && in_array($filterClass, $classIds, true)) {
-        $whereClauses[] = "class_id = ?";
-        $params[] = $filterClass;
-    }
-
-    if ($from !== '') { $whereClauses[] = "DATE(assigned_date) >= ?"; $params[] = $from; }
-    if ($to !== '') { $whereClauses[] = "DATE(assigned_date) <= ?"; $params[] = $to; }
-
-    $whereSql = count($whereClauses) ? ('WHERE ' . implode(' AND ', $whereClauses)) : '';
-
-    // total count
-    $countRow = safe_db_get_one("SELECT COUNT(*) AS cnt FROM homeworks $whereSql", $params);
-    $total = intval($countRow['cnt'] ?? 0);
-
-    if ($total > 0) {
-        // append limit params
-        $paramsWithLimit = $params;
-        $paramsWithLimit[] = $perPage;
-        $paramsWithLimit[] = $offset;
-        // Use positional LIMIT ? OFFSET ? - safe_db_get_all will pass array_values
-        $sql = "SELECT id, school_id, class_id, title, description, assigned_date, due_date, created_by, created_at, updated_at
-                FROM homeworks $whereSql
-                ORDER BY assigned_date DESC
-                LIMIT ? OFFSET ?";
-        $homeworks = safe_db_get_all($sql, $paramsWithLimit);
+$todayHw = [];
+$weekHw = [];
+$earlierHw = [];
+$weekStart = date('Y-m-d', strtotime('monday this week') ?: time());
+foreach ($homeworks as $hw) {
+    $assigned = substr((string) ($hw['assigned_date'] ?? ''), 0, 10);
+    if ($assigned === $today) {
+        $todayHw[] = $hw;
+    } elseif ($assigned >= $weekStart) {
+        $weekHw[] = $hw;
+    } else {
+        $earlierHw[] = $hw;
     }
 }
 
-/* ---------- Render page ---------- */
-$pageTitle = 'Homeworks';
+$heroText = 'No homework today';
+$heroClass = 'none';
+if ($todayHw !== []) {
+    $n = count($todayHw);
+    $heroText = $n === 1 ? '1 homework today' : ($n . ' homeworks today');
+    $heroClass = 'has';
+}
+
+$page_title = 'Homework';
+$pageTitle = $page_title;
 require_once __DIR__ . '/../includes/header.php';
 echo panel_owner_parent_gate_html();
 ?>
+<style>
+.hw-chip { display:inline-flex; align-items:center; gap:.4rem; border:1px solid #dbe7fb; background:#fff; border-radius:999px; padding:.3rem .8rem; text-decoration:none; color:#1e3a5f; font-weight:600; margin:0 .35rem .5rem 0; }
+.hw-chip.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+.hw-chip img, .hw-chip .ph { width:28px; height:28px; border-radius:50%; object-fit:cover; background:#e2e8f0; }
+.hw-hero { background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:18px; margin-bottom:14px; display:flex; gap:14px; align-items:center; }
+.hw-hero.has { border-color:#86efac; background:#f0fdf4; }
+.hw-photo { width:64px; height:64px; border-radius:16px; object-fit:cover; background:#e2e8f0; flex-shrink:0; }
+.hw-big { font-weight:800; font-size:1.25rem; color:#1e3a5f; }
+.hw-card { background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:14px 16px; margin-bottom:10px; }
+.hw-card.today { border-color:#86efac; background:#f0fdf4; }
+.hw-title { font-weight:800; color:#1e3a5f; }
+.hw-meta { font-size:.88rem; color:#64748b; }
+.hw-sec { font-size:.75rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:#94a3b8; margin:14px 0 8px; }
+.hw-due { display:inline-block; background:#ffedd5; color:#9a3412; border-radius:999px; padding:.12rem .55rem; font-size:.75rem; font-weight:700; }
+</style>
 
-<div class="d-flex gap-2">
-    <a class="btn btn-outline-secondary btn-sm" href="../parent/profile.php">Profile</a>
-    <?php if (!empty($classIds)): ?>
-      <a class="btn btn-sm btn-success" href="?action=export&class_id=<?php echo e($filterClass); ?>&from=<?php echo e($from); ?>&to=<?php echo e($to); ?>">Export CSV</a>
-    <?php endif; ?>
-  </div>
-</div>
+<p class="text-muted mb-2">What the teacher asked your child to do at home.</p>
 
-<div class="card mb-3 p-3">
-  <form method="get" class="row g-2 align-items-end">
-    <div class="col-md-3">
-      <label class="form-label">Class</label>
-      <select name="class_id" class="form-select">
-        <option value="0">All classes</option>
-        <?php foreach ($classOptions as $cid => $label): ?>
-          <option value="<?php echo (int)$cid; ?>" <?php if ($cid === $filterClass) echo 'selected'; ?>><?php echo e($label); ?></option>
-        <?php endforeach; ?>
-      </select>
-    </div>
-    <div class="col-md-3">
-      <label class="form-label">Assigned from</label>
-      <input type="date" name="from" class="form-control" value="<?php echo e($from); ?>">
-    </div>
-    <div class="col-md-3">
-      <label class="form-label">Assigned to</label>
-      <input type="date" name="to" class="form-control" value="<?php echo e($to); ?>">
-    </div>
-    <div class="col-md-3 text-end">
-      <button class="btn btn-primary">Filter</button>
-    </div>
-  </form>
-</div>
+<?php if ($parentId <= 0): ?>
+<?php elseif ($children === []): ?>
+  <div class="alert alert-info mb-0">No child is linked to this login. Ask the school office.</div>
+<?php elseif (!$tableOk): ?>
+  <div class="alert alert-warning mb-0">Homework is not set up yet.</div>
+<?php else: ?>
 
-<div class="card mb-3">
-  <div class="card-body">
-    <?php if (empty($classIds)): ?>
-      <div class="small-muted">No classes linked to your account. Contact the school if this seems incorrect.</div>
-    <?php elseif (empty($homeworks)): ?>
-      <div class="small-muted">No homeworks found for the selected filters.</div>
+  <?php if (count($children) > 1): ?>
+    <div class="mb-3">
+      <?php foreach ($children as $ch):
+          $cid = (int) $ch['id'];
+          $p = function_exists('student_photo_url') ? student_photo_url((string) ($ch['photo_path'] ?? '')) : '';
+          ?>
+        <a class="hw-chip<?php echo $cid === $selectedId ? ' active' : ''; ?>" href="?student_id=<?php echo $cid; ?>">
+          <?php if ($p !== ''): ?><img src="<?php echo e($p); ?>" alt=""><?php else: ?><span class="ph"></span><?php endif; ?>
+          <?php echo e($nameOf($ch)); ?>
+        </a>
+      <?php endforeach; ?>
+    </div>
+  <?php endif; ?>
+
+  <div class="hw-hero <?php echo e($heroClass); ?>">
+    <?php if ($photo !== ''): ?>
+      <img class="hw-photo" src="<?php echo e($photo); ?>" alt="">
     <?php else: ?>
-      <div class="list-group">
-        <?php foreach ($homeworks as $hw): $hid = (int)$hw['id']; ?>
-          <div class="list-group-item d-flex justify-content-between align-items-start">
-            <div>
-              <div class="hw-title"><?php echo e($hw['title'] ?? '—'); ?></div>
-              <div class="small-muted"><?php echo e(substr((string)($hw['description'] ?? ''), 0, 180)); ?><?php if (strlen((string)($hw['description'] ?? '')) > 180) echo '...'; ?></div>
-              <div class="small-muted mt-1">Assigned: <?php echo e(substr((string)($hw['assigned_date'] ?? ''),0,10) ?: '—'); ?> • Due: <?php echo e(substr((string)($hw['due_date'] ?? ''),0,10) ?: '—'); ?></div>
-            </div>
-            <div class="text-end">
-              <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#hwViewModal" data-id="<?php echo $hid; ?>">View</button>
-            </div>
-          </div>
-        <?php endforeach; ?>
-      </div>
-
-      <?php
-        $totalPages = $perPage > 0 ? (int) ceil($total / $perPage) : 1;
-      ?>
-      <div class="mt-3 d-flex justify-content-between align-items-center">
-        <div class="small-muted">Showing <?php echo min($offset+1, $total); ?> - <?php echo min($offset + count($homeworks), $total); ?> of <?php echo $total; ?> homeworks</div>
-        <nav>
-          <ul class="pagination pagination-sm mb-0">
-            <li class="page-item <?php if ($page <= 1) echo 'disabled'; ?>"><a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['p'=>max(1,$page-1)])); ?>">Prev</a></li>
-            <li class="page-item disabled"><span class="page-link">Page <?php echo $page; ?> / <?php echo max(1,$totalPages); ?></span></li>
-            <li class="page-item <?php if ($page >= $totalPages) echo 'disabled'; ?>"><a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['p'=>min($totalPages,$page+1)])); ?>">Next</a></li>
-          </ul>
-        </nav>
-      </div>
+      <div class="hw-photo"></div>
     <?php endif; ?>
-  </div>
-</div>
-
-<!-- Homework view modal -->
-<div class="modal fade" id="hwViewModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Homework</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body" id="hwViewBody"><div class="text-center small-muted py-3">Loading…</div></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+    <div>
+      <div class="hw-big"><?php echo e($heroText); ?></div>
+      <div class="text-muted"><?php echo e($childName); ?><?php echo $className !== '' ? ' · ' . e($className) : ''; ?></div>
     </div>
   </div>
-</div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  var hwModal = document.getElementById('hwViewModal');
-  if (hwModal) {
-    hwModal.addEventListener('show.bs.modal', function(event){
-      var id = event.relatedTarget.getAttribute('data-id');
-      var body = document.getElementById('hwViewBody');
-      body.innerHTML = '<div class="text-center small-muted py-3">Loading…</div>';
-      fetch('?action=view&id=' + encodeURIComponent(id), { credentials: 'same-origin' })
-        .then(function(resp){ if (!resp.ok) throw new Error('Network'); return resp.text(); })
-        .then(function(html){ body.innerHTML = html; })
-        .catch(function(){ body.innerHTML = '<div class="text-danger p-3">Failed to load homework details.</div>'; });
-    });
-  }
-});
-</script>
+  <?php if ($classId <= 0): ?>
+    <div class="alert alert-info mb-0">Class is not set for this child. Ask the school office.</div>
+  <?php elseif ($homeworks === []): ?>
+    <div class="hw-card text-muted mb-0">No homework for this class yet this year.</div>
+  <?php else: ?>
+    <?php
+    $sections = [
+        ['Today', $todayHw, true],
+        ['This week', $weekHw, false],
+        ['Earlier', $earlierHw, false],
+    ];
+    foreach ($sections as [$secLabel, $list, $markToday]):
+        if ($list === []) {
+            continue;
+        }
+        ?>
+      <div class="hw-sec"><?php echo e($secLabel); ?></div>
+      <?php foreach ($list as $hw):
+          $assigned = substr((string) ($hw['assigned_date'] ?? ''), 0, 10);
+          $due = substr((string) ($hw['due_date'] ?? ''), 0, 10);
+          $desc = trim((string) ($hw['description'] ?? ''));
+          $dueLabel = '';
+          if ($due !== '' && $due !== '0000-00-00' && $due !== $assigned) {
+              $dueLabel = 'Do by ' . $fmtDay($due);
+          }
+          ?>
+        <div class="hw-card<?php echo $markToday ? ' today' : ''; ?>">
+          <div class="hw-title"><?php echo e((string) ($hw['title'] ?? '')); ?></div>
+          <div class="hw-meta"><?php echo e($fmtDay($assigned)); ?>
+            <?php if ($dueLabel !== ''): ?>
+              · <span class="hw-due"><?php echo e($dueLabel); ?></span>
+            <?php endif; ?>
+          </div>
+          <?php if ($desc !== ''): ?>
+            <div class="mt-2" style="white-space:pre-wrap"><?php echo e($desc); ?></div>
+          <?php endif; ?>
+        </div>
+      <?php endforeach; ?>
+    <?php endforeach; ?>
+  <?php endif; ?>
 
-<?php
-require_once __DIR__ . '/../includes/footer.php';
-?>
+<?php endif; ?>
+
+<?php require_once __DIR__ . '/../includes/footer.php'; ?>
