@@ -180,6 +180,18 @@ $feesUrl = static function (int $sid = 0, int $receiptId = 0): string {
     return function_exists('site_url') ? site_url($path) : $path;
 };
 
+$plainSchool = static function (string $raw): string {
+    $t = html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $t = preg_replace('/<\s*br\s*\/?\s*>/i', "\n", $t) ?? $t;
+    $t = preg_replace('/<\/\s*(p|div|li|h[1-6])\s*>/i', "\n", $t) ?? $t;
+    $t = strip_tags($t);
+    $t = preg_replace('/^\s*Address\s*:\s*/im', '', $t) ?? $t;
+    $t = str_replace(["\r\n", "\r"], "\n", $t);
+    $t = preg_replace("/[ \t]+/", ' ', $t) ?? $t;
+    $t = preg_replace("/\n{2,}/", "\n", $t) ?? $t;
+    return trim($t);
+};
+
 $receiptId = (int) ($_GET['receipt'] ?? $_GET['payment_id'] ?? 0);
 if ($receiptId > 0 && $tableOk) {
     $pay = safe_db_get_one(
@@ -198,8 +210,8 @@ if ($receiptId > 0 && $tableOk) {
     if ($schoolName === '') {
         $schoolName = defined('APP_NAME') ? (string) APP_NAME : 'School';
     }
-    $schoolAddr = trim((string) ($school['address'] ?? ''));
-    $schoolPhone = trim((string) ($school['contact_phone'] ?? ''));
+    $schoolAddr = $plainSchool((string) ($school['address'] ?? ''));
+    $schoolPhone = trim((string) ($school['contact_phone'] ?? $school['phone'] ?? ''));
     $logo = '';
     if (!empty($school['logo_path']) && function_exists('resolve_image_url')) {
         $logo = (string) resolve_image_url((string) $school['logo_path'], '');
@@ -215,53 +227,88 @@ if ($receiptId > 0 && $tableOk) {
         }
     }
     $amt = (float) ($pay['paid_amount'] ?? $pay['amount'] ?? 0);
-    $when = $okPay ? $fmtDay((string) ($pay['collected_at'] ?? $pay['created_at'] ?? '')) : '';
+    $rawWhen = substr((string) ($pay['collected_at'] ?? $pay['created_at'] ?? ''), 0, 10);
+    $when = ($rawWhen !== '' && $rawWhen !== '0000-00-00' && strtotime($rawWhen) !== false)
+        ? date('d M Y', strtotime($rawWhen))
+        : '';
     [$rno, $method] = $okPay ? $receiptBits((string) ($pay['receipt_no'] ?? '')) : ['', ''];
+    $back = $feesUrl($okPay ? $paySid : $selectedId);
 
-    $page_title = 'Receipt';
-    $pageTitle = $page_title;
-    require_once __DIR__ . '/../includes/header.php';
-    echo panel_owner_parent_gate_html();
+    header('Content-Type: text/html; charset=UTF-8');
     ?>
-<style>
-@media print { .no-print { display:none !important; } .fe-slip { border:none !important; box-shadow:none !important; } }
-.fe-slip { max-width:420px; margin:0 auto 16px; background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:22px; text-align:center; }
-.fe-slip .logo { max-height:56px; margin-bottom:8px; }
-.fe-slip h1 { font-size:1.15rem; font-weight:800; color:#1e3a5f; margin:0 0 4px; }
-.fe-slip .amt { font-size:1.8rem; font-weight:800; color:#166534; margin:12px 0; }
-.fe-slip .rowl { display:flex; justify-content:space-between; text-align:left; font-size:.92rem; padding:6px 0; border-bottom:1px dashed #e2e8f0; }
-.fe-slip .muted { color:#64748b; font-size:.85rem; }
-</style>
-    <p class="no-print text-muted mb-3">Fee receipt from school. Save or print if you need a copy.</p>
-    <?php if (!$okPay): ?>
-      <div class="alert alert-info">This receipt was not found. <a href="<?php echo e($feesUrl($selectedId)); ?>">Back to fees</a></div>
-    <?php else: ?>
-      <div class="fe-slip" id="feSlip">
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Fee receipt<?php echo $rno !== '' ? ' — ' . e($rno) : ''; ?></title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #eef3fb; color: #0f2744;
+      font-family: "Segoe UI", Arial, sans-serif; }
+    .bar { display: flex; gap: 8px; align-items: center; justify-content: center;
+      padding: 12px; background: #fff; border-bottom: 1px solid #dbe7fb; }
+    .bar button, .bar a { background: #16a34a; color: #fff; border: 0; padding: 10px 18px;
+      border-radius: 10px; font: 700 15px/1 "Segoe UI", Arial, sans-serif; text-decoration: none; cursor: pointer; }
+    .bar a.alt { background: #fff; color: #1e3a5f; border: 1px solid #dbe7fb; }
+    .sheet { padding: 18px 12px 40px; }
+    .slip { width: 148mm; max-width: 100%; margin: 0 auto; background: #fff; border: 1px solid #c5d4ea;
+      border-radius: 4px; padding: 18mm 14mm; }
+    .logo { max-height: 52px; max-width: 120px; display: block; margin: 0 auto 8px; }
+    h1 { font-size: 18px; font-weight: 800; margin: 0 0 6px; text-align: center; }
+    .addr { color: #475569; font-size: 12px; line-height: 1.45; text-align: center; white-space: pre-line; margin: 0 0 4px; }
+    .phone { color: #475569; font-size: 12px; text-align: center; margin: 0 0 10px; }
+    .tag { text-align: center; font-size: 11px; font-weight: 800; letter-spacing: .12em;
+      text-transform: uppercase; color: #1d4ed8; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;
+      padding: 8px 0; margin: 8px 0 4px; }
+    .amt { text-align: center; font-size: 28px; font-weight: 800; color: #166534; margin: 12px 0 16px; }
+    .rowl { display: flex; justify-content: space-between; gap: 16px; font-size: 14px;
+      padding: 8px 0; border-bottom: 1px dashed #dbe3ee; }
+    .rowl span:first-child { color: #64748b; }
+    .rowl span:last-child { font-weight: 600; text-align: right; }
+    .foot { text-align: center; color: #94a3b8; font-size: 11px; margin-top: 18px; }
+    .err { max-width: 420px; margin: 40px auto; background: #fff; padding: 24px; border-radius: 12px; text-align: center; }
+    @page { size: A4 portrait; margin: 12mm; }
+    @media print {
+      html, body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .bar { display: none !important; }
+      .sheet { padding: 0; }
+      .slip { width: 170mm; max-width: 100%; border: 1px solid #cbd5e1; border-radius: 0; padding: 12mm 14mm; margin: 0 auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <?php if ($okPay): ?><button type="button" onclick="window.print()">Print / Save PDF</button><?php endif; ?>
+    <a class="alt" href="<?php echo e($back); ?>">Back to fees</a>
+  </div>
+  <?php if (!$okPay): ?>
+    <div class="err">This receipt was not found. <a href="<?php echo e($back); ?>">Back to fees</a></div>
+  <?php else: ?>
+    <div class="sheet">
+      <article class="slip">
         <?php if ($logo !== ''): ?><img class="logo" src="<?php echo e($logo); ?>" alt=""><?php endif; ?>
         <h1><?php echo e($schoolName); ?></h1>
-        <?php if ($schoolAddr !== '' || $schoolPhone !== ''): ?>
-          <div class="muted mb-2"><?php echo e(trim($schoolAddr . ($schoolPhone !== '' ? ' · ' . $schoolPhone : ''))); ?></div>
-        <?php endif; ?>
-        <div class="fw-bold" style="color:#1d4ed8">Fee receipt</div>
+        <?php if ($schoolAddr !== ''): ?><p class="addr"><?php echo e($schoolAddr); ?></p><?php endif; ?>
+        <?php if ($schoolPhone !== ''): ?><p class="phone"><?php echo e($schoolPhone); ?></p><?php endif; ?>
+        <div class="tag">Fee receipt</div>
         <div class="amt"><?php echo e($inr($amt)); ?></div>
-        <div class="rowl"><span class="muted">Child</span><span><?php echo e($payChild); ?></span></div>
+        <div class="rowl"><span>Child</span><span><?php echo e($payChild); ?></span></div>
         <?php if ($payClass !== ''): ?>
-          <div class="rowl"><span class="muted">Class</span><span><?php echo e($payClass); ?></span></div>
+          <div class="rowl"><span>Class</span><span><?php echo e($payClass); ?></span></div>
         <?php endif; ?>
-        <div class="rowl"><span class="muted">Date</span><span><?php echo e($when !== '' ? $when : '—'); ?></span></div>
+        <div class="rowl"><span>Date</span><span><?php echo e($when !== '' ? $when : '—'); ?></span></div>
         <?php if ($method !== ''): ?>
-          <div class="rowl"><span class="muted">Paid by</span><span><?php echo e($method); ?></span></div>
+          <div class="rowl"><span>Paid by</span><span><?php echo e($method); ?></span></div>
         <?php endif; ?>
-        <div class="rowl"><span class="muted">Receipt no.</span><span><?php echo e($rno !== '' ? $rno : ('#' . $receiptId)); ?></span></div>
-        <div class="muted mt-3">Paid at school office</div>
-      </div>
-      <div class="no-print text-center d-flex justify-content-center gap-2 flex-wrap">
-        <button type="button" class="btn btn-success" onclick="window.print()">Print</button>
-        <a class="btn btn-outline-secondary" href="<?php echo e($feesUrl($paySid)); ?>">Back to fees</a>
-      </div>
-    <?php endif; ?>
+        <div class="rowl"><span>Receipt no.</span><span><?php echo e($rno !== '' ? $rno : ('#' . $receiptId)); ?></span></div>
+        <div class="foot">Paid at school office</div>
+      </article>
+    </div>
+  <?php endif; ?>
+</body>
+</html>
     <?php
-    require_once __DIR__ . '/../includes/footer.php';
     exit;
 }
 
