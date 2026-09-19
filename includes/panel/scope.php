@@ -33,66 +33,86 @@ function panel_parent_context_id(): int
 }
 
 /**
- * Classes visible to a teacher; owner sees all classes.
+ * All school classes (columns that actually exist).
+ *
+ * @return list<array<string, mixed>>
+ */
+function panel_classes_all(): array
+{
+    if (!function_exists('table_exists') || !table_exists('classes')) {
+        return [];
+    }
+    $cols = ['id', 'name'];
+    foreach (['section', 'short_name', 'age_group', 'teacher_id'] as $c) {
+        if (function_exists('column_exists') && column_exists('classes', $c)) {
+            $cols[] = $c;
+        }
+    }
+    $sql = 'SELECT ' . implode(', ', array_map(static fn(string $c): string => '`' . $c . '`', $cols)) . ' FROM classes';
+    $params = [];
+    if (function_exists('column_exists') && column_exists('classes', 'school_id') && function_exists('auth_school_id')) {
+        $sid = (int) auth_school_id();
+        if ($sid > 0) {
+            $sql .= ' WHERE school_id = :sid';
+            $params[':sid'] = $sid;
+        }
+    }
+    $sql .= ' ORDER BY name ASC';
+    return safe_db_get_all($sql, $params) ?: [];
+}
+
+/**
+ * Classes visible to a teacher. Owner (small school) sees every class and can pick one.
  *
  * @return array<int, array<string, mixed>>
  */
 function panel_teacher_assigned_classes(int $teacherId): array
 {
-    if (auth_is_owner_super() && function_exists('table_exists') && table_exists('classes')) {
-        $rows = safe_db_get_all(
-            "SELECT id, name, COALESCE(section, '') AS section, COALESCE(short_name, '') AS short_name
-             FROM classes ORDER BY name ASC"
-        );
-        return $rows ?: [];
+    if (auth_is_owner_super()) {
+        return panel_classes_all();
     }
 
     $assignedClasses = [];
+    $all = panel_classes_all();
+    $byId = [];
+    foreach ($all as $row) {
+        $byId[(int) ($row['id'] ?? 0)] = $row;
+    }
 
-    if (function_exists('table_exists') && table_exists('classes')) {
-        $col = safe_db_get_one(
-            "SELECT COLUMN_NAME FROM information_schema.columns
-             WHERE table_schema = DATABASE() AND table_name = 'classes' AND COLUMN_NAME = 'teacher_id' LIMIT 1"
-        );
-        if (!empty($col['COLUMN_NAME'])) {
-            $assignedClasses = safe_db_get_all(
-                "SELECT id, name, section, short_name FROM classes WHERE teacher_id = :tid ORDER BY name ASC",
-                [':tid' => $teacherId]
-            ) ?: [];
+    if ($teacherId > 0 && function_exists('column_exists') && column_exists('classes', 'teacher_id')) {
+        foreach ($all as $row) {
+            if ((int) ($row['teacher_id'] ?? 0) === $teacherId) {
+                $assignedClasses[] = $row;
+            }
         }
     }
 
-    if (empty($assignedClasses) && function_exists('table_exists') && table_exists('teacher_classes')) {
+    if ($assignedClasses === [] && $teacherId > 0 && function_exists('table_exists') && table_exists('teacher_classes')) {
         $maps = safe_db_get_all(
-            "SELECT class_id FROM teacher_classes WHERE teacher_id = :tid ORDER BY created_at DESC",
+            'SELECT class_id FROM teacher_classes WHERE teacher_id = :tid',
             [':tid' => $teacherId]
         ) ?: [];
-        $classIds = array_values(array_unique(array_filter(array_map(
-            static fn(array $m): int => (int) ($m['class_id'] ?? 0),
-            $maps
-        ))));
-
-        if (!empty($classIds) && table_exists('classes')) {
-            $placeholders = implode(',', array_fill(0, count($classIds), '?'));
-            $rows = safe_db_get_all(
-                "SELECT id, name, section, short_name FROM classes WHERE id IN ($placeholders) ORDER BY name ASC",
-                $classIds
-            ) ?: [];
-            $byId = [];
-            foreach ($rows as $r) {
-                $byId[(int) $r['id']] = $r;
+        $seen = [];
+        foreach ($maps as $m) {
+            $cid = (int) ($m['class_id'] ?? 0);
+            if ($cid <= 0 || isset($seen[$cid])) {
+                continue;
             }
-            foreach ($classIds as $cid) {
-                $assignedClasses[] = $byId[$cid] ?? ['id' => $cid, 'name' => 'Class #' . $cid, 'section' => '', 'short_name' => ''];
-            }
-        } else {
-            foreach ($classIds as $cid) {
-                $assignedClasses[] = ['id' => $cid, 'name' => 'Class #' . $cid, 'section' => '', 'short_name' => ''];
-            }
+            $seen[$cid] = true;
+            $assignedClasses[] = $byId[$cid] ?? ['id' => $cid, 'name' => 'Class #' . $cid, 'section' => '', 'short_name' => ''];
         }
     }
 
     return $assignedClasses;
+}
+
+function panel_teacher_empty_classes_html(): string
+{
+    if (auth_is_owner_super()) {
+        $url = function_exists('site_url') ? site_url('/owner/class_setup.php') : '../owner/class_setup.php';
+        return '<div class="alert alert-info mb-0">No classes yet. Add Playgroup / Nursery in <a href="' . e($url) . '">Class Setup</a>.</div>';
+    }
+    return '<div class="alert alert-info mb-0">No class is assigned yet. Ask the owner to assign you a class.</div>';
 }
 
 function panel_teacher_can_access_class(int $classId, array $allowedIds): bool

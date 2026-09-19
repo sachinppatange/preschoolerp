@@ -339,7 +339,7 @@ require_once __DIR__ . '/../includes/header.php';
 <?php foreach ($errors as $er): ?><div class="alert alert-danger py-2"><?php echo e($er); ?></div><?php endforeach; ?>
 
 <?php if ($assignedClasses === []): ?>
-  <div class="alert alert-info mb-0">No class is assigned yet. Ask the owner to assign you a class.</div>
+  <?php echo panel_teacher_empty_classes_html(); ?>
 <?php elseif (!$ttExists): ?>
   <div class="alert alert-warning mb-0">Class routine is not set up yet.</div>
 <?php else: ?>

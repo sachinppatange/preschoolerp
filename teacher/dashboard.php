@@ -246,7 +246,7 @@ require_once __DIR__ . '/../includes/header.php';
   <p class="text-muted small mb-3">Your day with the children: who came, a short homework, a photo, a note for parents. Fees stay with the office.</p>
 
   <?php if ($assignedClasses === []): ?>
-    <div class="alert alert-info">No class is assigned yet. Ask the owner to assign you a class.</div>
+    <?php echo panel_teacher_empty_classes_html(); ?>
   <?php else: ?>
 
   <section class="dc-section">

@@ -132,11 +132,11 @@ require_once __DIR__ . '/../includes/header.php';
 </style>
 
 <?php if (function_exists('auth_is_owner_super') && auth_is_owner_super()): ?>
-  <p class="small text-muted mb-2">Owner view — all classes. Assign teachers on <a href="<?php echo e($assignUrl); ?>">Assign Teachers</a>.</p>
+  <p class="small text-muted mb-2">You are owner — every class is here. Tap a class to open it.</p>
 <?php endif; ?>
 
 <?php if ($assignedClasses === []): ?>
-  <div class="alert alert-info mb-0">No class is assigned yet. Ask the owner to assign you a class<?php echo function_exists('auth_is_owner_super') && auth_is_owner_super() ? ' on Assign Teachers' : ''; ?>.</div>
+  <?php echo function_exists('panel_teacher_empty_classes_html') ? panel_teacher_empty_classes_html() : '<div class="alert alert-info mb-0">No class is assigned yet.</div>'; ?>
 <?php else: ?>
 
   <div class="mb-3">
