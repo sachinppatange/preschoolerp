@@ -255,11 +255,14 @@ body.public-form #bottom-social-bar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 46px;
+  min-width: 52px;
   height: 46px;
+  padding: 0 10px;
   border-radius: var(--ps-radius-sm);
   color: #fff;
   text-decoration: none;
+  font-weight: 800;
+  font-size: 0.8rem;
 }
 
 .public-footer {
@@ -314,9 +317,31 @@ body.public-form #bottom-social-bar {
   object-fit: contain;
 }
 
+.public-nav-spacer { height: 72px; }
+.pub-about p { margin-bottom: 0.75rem; }
+.public-site .accordion-item {
+  border: 1px solid var(--ps-border);
+  border-radius: var(--ps-radius-sm) !important;
+  overflow: hidden;
+  margin-bottom: 0.65rem;
+}
+.public-site .accordion-button {
+  font-weight: 700;
+  font-family: var(--ps-font-body);
+}
+.public-site .accordion-button:not(.collapsed) {
+  background: #fff0f3;
+  color: var(--ps-coral-dark);
+  box-shadow: none;
+}
+
+@media (min-width: 577px) {
+  #bottom-social-bar { display: none; }
+}
 @media (max-width: 576px) {
   .public-hero h1 { font-size: 1.65rem; }
   .public-nav .logo-img { height: 44px; }
-  #bottom-social-bar { display: none; }
+  #bottom-social-bar { display: flex; }
   .social-box { min-width: 46%; justify-content: center; }
+  .public-footer { padding-bottom: 5rem !important; }
 }
