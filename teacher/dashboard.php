@@ -1,404 +1,420 @@
 <?php
 /**
- * teacher/dashboard.php
- *
- * Teacher Dashboard for Pioneer Play School.
- * - Built by studying reception/dashboard.php and using the same safe DB helpers and patterns.
- * - Shows teacher-focused metrics and quick actions:
- *     - Today's attendance (teacher's classes)
- *     - My classes & students count
- *     - Pending homeworks / assignments to review
- *     - Notices / announcements relevant to teachers
- *     - Pending leave requests (if table exists)
- *     - Pending tasks assigned to teacher
- * - Provides recent lists for quick access.
- *
- * Place at: /pioneerplayschool01/teacher/dashboard.php
+ * teacher/dashboard.php — preschool class teacher home for today.
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('teacher');
 $DEBUG = panel_debug();
 
-/* ---------- Detect useful tables ---------- */
-function table_exists(string $name): bool {
-    try {
-        $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :t", [':t'=>$name]);
-        return !empty($r) && intval($r['cnt']) > 0;
-    } catch (Throwable $e) { return false; }
+$page_title = 'My class today';
+$pageTitle = $page_title;
+$skip_panel_ay_banner = true;
+$lastUpdated = date('d M Y, h:i A');
+$todayLabel = date('d M Y');
+$today = date('Y-m-d');
+$todayName = date('l');
+$teacherId = (int) (auth_user_id() ?? 0);
+$ay = function_exists('ay_selected') ? ay_selected() : '';
+$ayLabel = function_exists('ay_display_short') ? ay_display_short() : '';
+$ayLong = function_exists('ay_display_long') ? ay_display_long() : $ayLabel;
+
+$u = static function (string $path): string {
+    return function_exists('site_url') ? site_url($path) : $path;
+};
+
+$attUrl = $u('/teacher/attendance_mark.php');
+$hwUrl = $u('/teacher/homeworks.php');
+$photoUrl = $u('/teacher/class_photo_upload.php');
+$remarkUrl = $u('/teacher/student_remarks.php');
+$noticeUrl = $u('/teacher/notices.php');
+$ttUrl = $u('/teacher/timetable.php');
+$todoUrl = $u('/teacher/tasks.php');
+$classesUrl = $u('/teacher/my_classes.php');
+
+$classRank = static function (array $c): int {
+    $n = strtolower((string) ($c['name'] ?? ''));
+    if (str_starts_with($n, 'play')) {
+        return 1;
+    }
+    if (str_starts_with($n, 'nurs')) {
+        return 2;
+    }
+    if (str_starts_with($n, 'l')) {
+        return 3;
+    }
+    if (str_starts_with($n, 'u')) {
+        return 4;
+    }
+    return 9;
+};
+
+$assignedClasses = panel_teacher_assigned_classes($teacherId);
+usort($assignedClasses, static function (array $a, array $b) use ($classRank): int {
+    $d = $classRank($a) <=> $classRank($b);
+    return $d !== 0 ? $d : strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+});
+$classIds = array_values(array_filter(array_map(static fn($c) => (int) ($c['id'] ?? 0), $assignedClasses)));
+$classNames = [];
+foreach ($assignedClasses as $c) {
+    $classNames[(int) $c['id']] = (string) ($c['name'] ?? 'Class');
 }
 
-$hasStudents = table_exists('students');
-$hasClasses = table_exists('classes');
-$hasAttendance = table_exists('attendance');
-$hasHomeworks = table_exists('homeworks') || table_exists('assignments') || table_exists('student_homeworks');
-$hasNotices = table_exists('notices');
-$hasTimetable = table_exists('timetable') || table_exists('class_timetable');
-$hasLeaves = table_exists('leave_requests') || table_exists('leaves');
-$hasTasks = table_exists('tasks');
-$hasExams = table_exists('exams') || table_exists('assessments');
+$ayStu = function_exists('ay_sql_student') ? ay_sql_student('s') : '1=1';
+$ayP = static function (array $extra = []): array {
+    return function_exists('ay_params_student') ? ay_params_student($extra) : $extra;
+};
+$statusSql = "LOWER(COALESCE(s.status,'active')) IN ('active','pending')";
 
-/* ---------- Metrics for teacher ---------- */
-$teacher = auth_user() ?? [];
-$teacherId = auth_user_id() ?? 0;
-
-$metrics = [
-    'myClasses' => 0,
-    'myStudents' => 0,
-    'todayAttendanceMarked' => 0,
-    'attendancePending' => 0,
-    'pendingHomeworks' => 0,
-    'activeNotices' => 0,
-    'pendingLeaves' => 0,
-    'myTasks' => 0,
-    'upcomingExams' => 0,
-];
-
-/* My classes & students:
-   We try to infer classes assigned to this teacher via classes.teacher_id or a teacher_classes mapping.
-*/
-$myClassIds = [];
-try {
-    if ($hasClasses) {
-        foreach (panel_teacher_assigned_classes($teacherId) as $row) {
-            $myClassIds[] = (int) ($row['id'] ?? 0);
-        }
-        $myClassIds = array_values(array_filter($myClassIds, static fn(int $v): bool => $v > 0));
-    }
-} catch (Throwable $e) { /* ignore */ }
-
-$metrics['myClasses'] = count($myClassIds);
-
-if ($hasStudents) {
-    if (!empty($myClassIds)) {
-        $placeholders = implode(',', array_fill(0, count($myClassIds), '?'));
-        $sql = "SELECT COUNT(*) AS cnt FROM students WHERE class_id IN ($placeholders) AND status='active'";
-        $stuParams = $myClassIds;
-        if (function_exists('ay_students_have_column') && ay_students_have_column()) {
-            $sql .= ' AND academic_year = ?';
-            $stuParams[] = ay_selected();
-        }
-        $r = safe_db_get_one($sql, $stuParams);
-        $metrics['myStudents'] = intval($r['cnt'] ?? 0);
-    } else {
-        // fallback: count of students where primary_teacher_id = teacherId
-        $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM students WHERE primary_teacher_id = :tid AND status='active'", [':tid'=>$teacherId]);
-        $metrics['myStudents'] = intval($r['cnt'] ?? 0);
+$childCount = 0;
+$perClassKids = [];
+if ($classIds !== [] && table_exists('students')) {
+    $in = implode(',', $classIds);
+    $rows = safe_db_get_all(
+        "SELECT s.class_id, COUNT(*) AS c
+         FROM students s
+         WHERE {$statusSql} AND {$ayStu} AND s.class_id IN ({$in})
+         GROUP BY s.class_id",
+        $ayP()
+    ) ?: [];
+    foreach ($rows as $r) {
+        $cid = (int) ($r['class_id'] ?? 0);
+        $n = (int) ($r['c'] ?? 0);
+        $perClassKids[$cid] = $n;
+        $childCount += $n;
     }
 }
 
-/* Attendance: count today's attendance marked for my classes and students pending */
-if ($hasAttendance) {
-    try {
-        if (!empty($myClassIds)) {
-            $placeholders = implode(',', array_fill(0, count($myClassIds), '?'));
-            // attendance table may have columns: class_id, date, marked_by, student_id
-            $r = safe_db_get_one("SELECT COUNT(DISTINCT class_id) AS c FROM attendance WHERE DATE(date) = CURDATE() AND class_id IN ($placeholders)", $myClassIds);
-            $metrics['todayAttendanceMarked'] = intval($r['c'] ?? 0);
-            // total classes expected today = my classes count (approx)
-            $metrics['attendancePending'] = max(0, $metrics['myClasses'] - $metrics['todayAttendanceMarked']);
+$attByClass = [];
+$present = 0;
+$absent = 0;
+$leave = 0;
+$markedClasses = 0;
+if ($classIds !== [] && table_exists('attendance')) {
+    $in = implode(',', $classIds);
+    $rows = safe_db_get_all(
+        "SELECT class_id, LOWER(status) AS st, COUNT(*) AS c
+         FROM attendance
+         WHERE `date` = :d AND class_id IN ({$in})
+         GROUP BY class_id, LOWER(status)",
+        [':d' => $today]
+    ) ?: [];
+    foreach ($rows as $r) {
+        $cid = (int) ($r['class_id'] ?? 0);
+        $st = (string) ($r['st'] ?? '');
+        $n = (int) ($r['c'] ?? 0);
+        if (!isset($attByClass[$cid])) {
+            $attByClass[$cid] = ['present' => 0, 'absent' => 0, 'leave' => 0, 'marked' => 0];
+        }
+        if (in_array($st, ['present', 'late'], true)) {
+            $attByClass[$cid]['present'] += $n;
+            $present += $n;
+        } elseif ($st === 'absent') {
+            $attByClass[$cid]['absent'] += $n;
+            $absent += $n;
         } else {
-            // fallback: attendance rows marked_by = teacherId
-            $r = safe_db_get_one("SELECT COUNT(DISTINCT class_id) AS c FROM attendance WHERE DATE(date) = CURDATE() AND marked_by = :tid", [':tid'=>$teacherId]);
-            $metrics['todayAttendanceMarked'] = intval($r['c'] ?? 0);
-            $metrics['attendancePending'] = 0;
+            $attByClass[$cid]['leave'] += $n;
+            $leave += $n;
         }
-    } catch (Throwable $e) { /* ignore */ }
+        $attByClass[$cid]['marked'] += $n;
+    }
+    foreach ($attByClass as $block) {
+        if (($block['marked'] ?? 0) > 0) {
+            $markedClasses++;
+        }
+    }
 }
+$attPending = max(0, count($classIds) - $markedClasses);
 
-/* Homeworks / assignments pending review:
-   - Look for homeworks assigned by this teacher with status pending_review
-   - fallbacks for different table names
-*/
-if ($hasHomeworks) {
+$todoOpen = 0;
+$todoHelp = 0;
+if (table_exists('tasks') && $teacherId > 0) {
     try {
-        if (table_exists('homeworks')) {
-            $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM homeworks WHERE (assigned_by = :tid OR teacher_id = :tid) AND status IN ('submitted','pending_review')", [':tid'=>$teacherId]);
-            $metrics['pendingHomeworks'] = intval($r['cnt'] ?? 0);
-        } elseif (table_exists('assignments')) {
-            $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM assignments WHERE assigned_by = :tid AND status IN ('submitted','pending_review')", [':tid'=>$teacherId]);
-            $metrics['pendingHomeworks'] = intval($r['cnt'] ?? 0);
-        } elseif (table_exists('student_homeworks')) {
-            $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM student_homeworks WHERE teacher_id = :tid AND status IN ('submitted','pending')", [':tid'=>$teacherId]);
-            $metrics['pendingHomeworks'] = intval($r['cnt'] ?? 0);
+        $todoOpen = (int) (safe_db_get_one(
+            "SELECT COUNT(*) AS c FROM tasks WHERE assigned_to = :u AND status = 'pending'",
+            [':u' => $teacherId]
+        )['c'] ?? 0);
+        $todoHelp = (int) (safe_db_get_one(
+            "SELECT COUNT(*) AS c FROM tasks WHERE assigned_to = :u AND status IN ('blocked','in_progress')",
+            [':u' => $teacherId]
+        )['c'] ?? 0);
+    } catch (Throwable $e) {
+        $todoOpen = 0;
+        $todoHelp = 0;
+    }
+}
+
+$birthdays = ['students' => [], 'count' => 0];
+if ($classIds !== [] && table_exists('students') && function_exists('column_exists') && column_exists('students', 'dob')) {
+    $in = implode(',', $classIds);
+    $bRows = safe_db_get_all(
+        "SELECT s.id, s.first_name, s.middle_name, s.last_name, s.class_id, COALESCE(c.name,'') AS class_name
+         FROM students s
+         LEFT JOIN classes c ON c.id = s.class_id
+         WHERE {$statusSql} AND {$ayStu} AND s.class_id IN ({$in})
+           AND s.dob IS NOT NULL
+           AND MONTH(s.dob) = MONTH(CURDATE()) AND DAY(s.dob) = DAY(CURDATE())
+         ORDER BY s.first_name ASC
+         LIMIT 8",
+        $ayP()
+    ) ?: [];
+    $birthdays = ['students' => $bRows, 'count' => count($bRows)];
+}
+
+$routine = [];
+if ($classIds !== [] && table_exists('timetable')) {
+    $in = implode(',', $classIds);
+    $routine = safe_db_get_all(
+        "SELECT * FROM timetable
+         WHERE class_id IN ({$in}) AND day_of_week = :day
+         ORDER BY start_time ASC, id ASC
+         LIMIT 12",
+        [':day' => $todayName]
+    ) ?: [];
+}
+
+$recentHw = [];
+if ($classIds !== [] && table_exists('homeworks')) {
+    $in = implode(',', $classIds);
+    $recentHw = safe_db_get_all(
+        "SELECT id, title, class_id, assigned_date
+         FROM homeworks
+         WHERE class_id IN ({$in})
+         ORDER BY assigned_date DESC, id DESC
+         LIMIT 6"
+    ) ?: [];
+}
+
+$fmtTime = static function (?string $t): string {
+    $t = trim((string) $t);
+    if ($t === '' || $t === '00:00:00') {
+        return '';
+    }
+    $ts = strtotime('1970-01-01 ' . $t);
+    return $ts ? date('g:i a', $ts) : substr($t, 0, 5);
+};
+$slotName = static function (array $r): string {
+    foreach (['subject_name', 'subject', 'title', 'period'] as $k) {
+        if (!empty($r[$k]) && !is_numeric((string) $r[$k])) {
+            return (string) $r[$k];
         }
-    } catch (Throwable $e) { /* ignore */ }
-}
-
-/* Notices relevant to teachers */
-if ($hasNotices) {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM notices WHERE published_at IS NOT NULL AND published_at <= NOW() AND (expires_at IS NULL OR expires_at > NOW())");
-    $metrics['activeNotices'] = intval($r['cnt'] ?? 0);
-}
-
-/* Pending leaves (leave_requests table) */
-if ($hasLeaves) {
-    // teacher usually sees leave requests from students/parents or staff depending on implementation.
-    // We'll count leave_requests where status = 'pending' and assigned_to = teacherId OR role = 'teacher'
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM leave_requests WHERE status = 'pending' AND (assigned_to = :tid OR target_role = 'teacher')", [':tid'=>$teacherId]);
-    $metrics['pendingLeaves'] = intval($r['cnt'] ?? 0);
-}
-
-/* Tasks assigned to this teacher */
-if ($hasTasks) {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM tasks WHERE (assigned_to = :tid OR FIND_IN_SET(:tid,assigned_to_list)) AND status IN ('pending','open')", [':tid'=>$teacherId]);
-    if ($r === null) {
-        // fallback simpler query
-        $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM tasks WHERE assigned_to = :tid AND status IN ('pending','open')", [':tid'=>$teacherId]);
     }
-    $metrics['myTasks'] = intval($r['cnt'] ?? 0);
-}
-
-/* Upcoming exams/assessments (if table exists) */
-if ($hasExams) {
-    $r = safe_db_get_one("SELECT COUNT(*) AS cnt FROM exams WHERE start_date >= CURDATE() AND start_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)");
-    $metrics['upcomingExams'] = intval($r['cnt'] ?? 0);
-}
-
-/* ---------- Recent lists for dashboard cards ---------- */
-$recent = [
-    'homeworks' => [],
-    'notices' => [],
-    'attendance' => [],
-    'leaves' => [],
-    'tasks' => []
-];
-
-if ($hasHomeworks) {
-    if (table_exists('homeworks')) {
-        $recent['homeworks'] = safe_db_get_all("SELECT id, title, assigned_to, status, due_date, assigned_at FROM homeworks WHERE (assigned_by = :tid OR teacher_id = :tid) ORDER BY assigned_at DESC LIMIT 8", [':tid'=>$teacherId]);
-    } elseif (table_exists('assignments')) {
-        $recent['homeworks'] = safe_db_get_all("SELECT id, title, class_id, status, due_date, created_at FROM assignments WHERE assigned_by = :tid ORDER BY created_at DESC LIMIT 8", [':tid'=>$teacherId]);
-    } elseif (table_exists('student_homeworks')) {
-        $recent['homeworks'] = safe_db_get_all("SELECT id, student_id, status, submitted_at FROM student_homeworks WHERE teacher_id = :tid ORDER BY submitted_at DESC LIMIT 8", [':tid'=>$teacherId]);
+    return 'Activity';
+};
+$stuName = static function (array $s): string {
+    if (function_exists('student_full_name')) {
+        $n = trim(student_full_name($s));
+        if ($n !== '') {
+            return $n;
+        }
     }
-}
-if ($hasNotices) $recent['notices'] = safe_db_get_all("SELECT id, title, published_at FROM notices WHERE published_at IS NOT NULL ORDER BY published_at DESC LIMIT 8");
-if ($hasAttendance) $recent['attendance'] = safe_db_get_all("SELECT id, class_id, student_id, status, date FROM attendance WHERE DATE(date) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) AND (marked_by = :tid OR class_id IN (" . (empty($myClassIds) ? "0" : implode(',', $myClassIds)) . ")) ORDER BY date DESC LIMIT 8", $teacherId ? [':tid'=>$teacherId] : []);
-if ($hasLeaves) $recent['leaves'] = safe_db_get_all("SELECT id, title, user_id, status, created_at FROM leave_requests WHERE status IN ('pending','new') ORDER BY created_at DESC LIMIT 8");
-if ($hasTasks) $recent['tasks'] = safe_db_get_all("SELECT id, title, status, created_at FROM tasks WHERE (assigned_to = :tid OR FIND_IN_SET(:tid,assigned_to_list)) ORDER BY created_at DESC LIMIT 8", [':tid'=>$teacherId]);
+    return trim((string) ($s['first_name'] ?? '') . ' ' . (string) ($s['last_name'] ?? ''));
+};
+$fmtDay = static function (?string $d): string {
+    $d = substr((string) $d, 0, 10);
+    if ($d === '' || $d === '0000-00-00') {
+        return '';
+    }
+    $t = strtotime($d);
+    return $t ? date('d M', $t) : $d;
+};
 
-/* ---------- Page header (reuse common header if present) ---------- */
-$page_title = 'Teacher Dashboard';
 require_once __DIR__ . '/../includes/header.php';
 ?>
+<link href="<?php echo htmlspecialchars(rtrim(defined('BASE_URL') ? BASE_URL : '/', '/')); ?>/assets/css/dashboard-cards.css" rel="stylesheet">
+<style>
+.rx-action { display:flex; flex-direction:column; align-items:flex-start; gap:.35rem; min-height:108px; }
+.rx-action i { font-size:1.45rem; }
+.rx-action strong { font-size:1.02rem; }
+.rx-action span { font-size:.8rem; color:#64748b; font-weight:600; }
+.td-class { display:flex; justify-content:space-between; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9; }
+.td-class:last-child { border-bottom:0; }
+</style>
 
-  <!-- Quick actions -->
-  <div class="card mb-3 shadow-sm">
-    <div class="card-body">
-      <div class="d-flex justify-content-between align-items-start mb-2">
-        <div><h6 class="mb-0">Quick Actions</h6><div class="small-muted">Teacher shortcuts</div></div>
-        <div class="d-none d-md-block"><a class="btn btn-sm btn-outline-primary" href="#metrics">Jump</a></div>
-      </div>
-
-      <div class="row gy-2">
-        <?php
-        $actions = [
-          ['../teacher/my_classes.php','bi-journal','My Classes'],
-          ['../teacher/attendance_mark.php','bi-person-check','Mark Attendance'],
-          ['../teacher/homeworks.php','bi-pencil-square','Homeworks'],
-          ['../teacher/notices.php','bi-megaphone','Notices'],
-          ['../teacher/timetable.php','bi-calendar3','Timetable'],
-          ['../teacher/tasks.php','bi-list-task','To-do']
-        ];
-        foreach ($actions as $act): ?>
-          <div class="col-12 col-md-4 col-lg-3">
-            <a class="btn btn-outline-primary quick-btn d-flex align-items-center" href="<?php echo e($act[0]); ?>">
-              <span class="d-flex align-items-center"><i class="bi <?php echo e($act[1]); ?> fs-5 me-2"></i><span><?php echo e($act[2]); ?></span></span>
-              <i class="bi bi-chevron-right"></i>
-            </a>
-          </div>
-        <?php endforeach; ?>
-      </div>
+<div class="dc-page">
+  <div class="dc-ay-bar">
+    <div class="dc-ay-chip d-none d-md-inline-flex"><i class="bi bi-journal-bookmark"></i> Class teacher · <?php echo e($ayLong); ?> · Updated <?php echo e($lastUpdated); ?></div>
+    <div class="dc-ay-mobile d-md-none">
+      <?php if (function_exists('render_dashboard_academic_year_dropdown')) {
+          render_dashboard_academic_year_dropdown();
+      } ?>
+      <span class="dc-ay-mobile-meta">Updated <?php echo e($lastUpdated); ?></span>
     </div>
   </div>
 
-  <!-- Metrics -->
-  <section id="metrics" class="mb-4">
-    <div class="row g-3">
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">My Classes</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['myClasses']); ?></div>
-            <div class="small-muted">Active classes</div>
-            <div class="mt-2"><a href="../teacher/my_classes.php" class="btn btn-sm btn-outline-secondary w-100 btn-compact">Open</a></div>
-          </div>
-        </div>
-      </div>
+  <p class="text-muted small mb-3">Your day with the children: who came, a short homework, a photo, a note for parents. Fees stay with the office.</p>
 
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">My Students</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['myStudents']); ?></div>
-            <div class="small-muted">Active students</div>
-            <div class="mt-2"><a href="../teacher/my_students.php" class="btn btn-sm btn-outline-secondary w-100 btn-compact">List</a></div>
-          </div>
-        </div>
-      </div>
+  <?php if ($assignedClasses === []): ?>
+    <div class="alert alert-info">No class is assigned yet. Ask the owner to assign you a class.</div>
+  <?php else: ?>
 
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Attendance Marked</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['todayAttendanceMarked']); ?></div>
-            <div class="small-muted">Classes done today</div>
-            <div class="mt-2"><a href="../teacher/attendance_mark.php" class="btn btn-sm btn-outline-primary w-100 btn-compact">Mark</a></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Attendance Pending</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['attendancePending']); ?></div>
-            <div class="small-muted">Classes remaining</div>
-            <div class="mt-2"><a href="../teacher/attendance_mark.php" class="btn btn-sm btn-outline-warning w-100 btn-compact">Open</a></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Homeworks -->
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Pending Homeworks</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['pendingHomeworks']); ?></div>
-            <div class="small-muted">To review / grade</div>
-            <div class="mt-2"><a href="../teacher/homeworks.php" class="btn btn-sm btn-outline-success w-100 btn-compact">Open</a></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Notices -->
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Active Notices</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['activeNotices']); ?></div>
-            <div class="small-muted">Published</div>
-            <div class="mt-2"><a href="../teacher/notices.php" class="btn btn-sm btn-outline-info w-100 btn-compact">Notices</a></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Leaves -->
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Pending Leave Requests</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['pendingLeaves']); ?></div>
-            <div class="small-muted">Requires action</div>
-            <div class="mt-2"><a href="../teacher/leave_requests.php" class="btn btn-sm btn-outline-danger w-100 btn-compact">Open</a></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Tasks -->
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">My To-do</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['myTasks']); ?></div>
-            <div class="small-muted">Open items</div>
-            <div class="mt-2"><a href="../teacher/tasks.php" class="btn btn-sm btn-outline-warning w-100 btn-compact">To-do</a></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Upcoming exams -->
-      <div class="col-6 col-md-3">
-        <div class="card metric-card shadow-sm h-100">
-          <div class="card-body">
-            <div class="small-muted">Upcoming Exams (30d)</div>
-            <div class="h5 mb-1"><?php echo number_format($metrics['upcomingExams']); ?></div>
-            <div class="small-muted">Assessments</div>
-            <div class="mt-2"><a href="../teacher/exams.php" class="btn btn-sm btn-outline-primary w-100 btn-compact">Open</a></div>
-          </div>
-        </div>
-      </div>
-
+  <section class="dc-section">
+    <h2 class="dc-section-title">Do this now</h2>
+    <div class="dc-grid dc-grid-3">
+      <a href="<?php echo e($attUrl); ?>" class="dc-card dc-card--link rx-action">
+        <i class="bi bi-person-check-fill text-success"></i>
+        <strong>Who came today</strong>
+        <span><?php echo $attPending > 0 ? ($attPending . ' class' . ($attPending === 1 ? '' : 'es') . ' not marked') : 'Attendance done'; ?></span>
+      </a>
+      <a href="<?php echo e($hwUrl); ?>" class="dc-card dc-card--link rx-action">
+        <i class="bi bi-journal-text" style="color:#3aa8f0"></i>
+        <strong>Homework</strong>
+        <span>One short thing for home</span>
+      </a>
+      <a href="<?php echo e($photoUrl); ?>" class="dc-card dc-card--link rx-action">
+        <i class="bi bi-camera-fill" style="color:#d97706"></i>
+        <strong>Class photos</strong>
+        <span>For the parent gallery</span>
+      </a>
     </div>
   </section>
 
-  <!-- Recent panels -->
-  <div class="row g-3">
-    <div class="col-12 col-md-4">
-      <div class="card shadow-sm">
-        <div class="card-body">
-          <h6 class="mb-2">Recent Homeworks / Submissions</h6>
-          <?php if (!empty($recent['homeworks'])): ?>
-            <ul class="list-group list-group-flush">
-              <?php foreach ($recent['homeworks'] as $it): ?>
-                <li class="list-group-item d-flex justify-content-between">
-                  <div>
-                    <div class="fw-semibold"><?php echo e($it['title'] ?? ($it['id'] ? 'HW #'.(int)$it['id'] : '(no title)')); ?></div>
-                    <div class="small-muted"><?php echo e($it['status'] ?? ''); ?> <?php if(!empty($it['due_date'])) echo '• Due '.e($it['due_date']); ?></div>
-                  </div>
-                  <div class="text-muted small"><?php echo e(substr($it['assigned_at'] ?? $it['created_at'] ?? '', 0, 16)); ?></div>
-                </li>
-              <?php endforeach; ?>
-            </ul>
-          <?php else: ?>
-            <div class="small-muted">No recent homeworks</div>
-          <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-primary btn-compact" href="../teacher/homeworks.php">Open</a></div>
+  <section class="dc-section">
+    <h2 class="dc-section-title">Today · <?php echo e($todayLabel); ?></h2>
+    <div class="dc-grid dc-grid-3">
+      <div class="dc-card">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--green"><i class="bi bi-clipboard-check"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">In class</span>
+            <span class="dc-card-value"><?php echo (int) $present; ?></span>
+            <span class="dc-card-meta"><?php echo (int) $absent; ?> absent · <?php echo (int) $leave; ?> leave</span>
+          </div>
         </div>
       </div>
-    </div>
-
-    <div class="col-12 col-md-4">
-      <div class="card shadow-sm">
-        <div class="card-body">
-          <h6 class="mb-2">Recent Notices</h6>
-          <?php if (!empty($recent['notices'])): ?>
-            <ul class="list-group list-group-flush">
-              <?php foreach ($recent['notices'] as $it): ?>
-                <li class="list-group-item d-flex justify-content-between">
-                  <div class="fw-semibold"><?php echo e(mb_strimwidth($it['title'] ?? '(no title)', 0, 60, '...')); ?></div>
-                  <div class="text-muted small"><?php echo e(substr($it['published_at'] ?? '', 0, 10)); ?></div>
-                </li>
-              <?php endforeach; ?>
-            </ul>
-          <?php else: ?>
-            <div class="small-muted">No notices</div>
-          <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-primary btn-compact" href="../teacher/notices.php">Notices</a></div>
+      <div class="dc-card">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--amber"><i class="bi bi-cake2-fill"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">Birthdays</span>
+            <span class="dc-card-value"><?php echo (int) ($birthdays['count'] ?? 0); ?></span>
+            <span class="dc-card-meta">Wish them in circle time</span>
+          </div>
         </div>
+        <?php if (!empty($birthdays['students'])): ?>
+          <ul class="dc-birthday-list">
+            <?php foreach (array_slice($birthdays['students'], 0, 5) as $b): ?>
+              <li>
+                <span class="name"><?php echo e($stuName($b)); ?></span>
+                <span class="meta"><?php echo e((string) ($b['class_name'] ?? '')); ?></span>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
+      </div>
+      <a href="<?php echo e($todoUrl . ($todoHelp > 0 ? '?tab=help' : '')); ?>" class="dc-card dc-card--link">
+        <div class="dc-card-top">
+          <div class="dc-card-icon dc-card-icon--<?php echo $todoHelp > 0 ? 'rose' : 'sky'; ?>"><i class="bi bi-check2-square"></i></div>
+          <div class="dc-card-info">
+            <span class="dc-card-label">To-do</span>
+            <span class="dc-card-value"><?php echo (int) $todoOpen; ?></span>
+            <span class="dc-card-meta"><?php echo $todoHelp > 0 ? ((int) $todoHelp . ' need help') : 'Office jobs for you'; ?></span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <section class="dc-section">
+    <h2 class="dc-section-title">Your classes · <?php echo (int) $childCount; ?> children</h2>
+    <div class="dc-card">
+      <?php foreach ($assignedClasses as $c):
+          $cid = (int) $c['id'];
+          $kids = (int) ($perClassKids[$cid] ?? 0);
+          $att = $attByClass[$cid] ?? null;
+          $done = $att && (int) ($att['marked'] ?? 0) > 0;
+          ?>
+        <div class="td-class">
+          <div>
+            <div class="fw-bold"><?php echo e((string) ($c['name'] ?? 'Class')); ?></div>
+            <div class="small text-muted">
+              <?php echo $kids; ?> children
+              <?php if ($done): ?>
+                · <?php echo (int) $att['present']; ?> present · <?php echo (int) $att['absent']; ?> absent
+              <?php else: ?>
+                · attendance not marked
+              <?php endif; ?>
+            </div>
+          </div>
+          <a class="btn btn-sm <?php echo $done ? 'btn-outline-secondary' : 'btn-success'; ?>" href="<?php echo e($attUrl . '?class_id=' . $cid); ?>"><?php echo $done ? 'Check' : 'Mark'; ?></a>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  </section>
+
+  <section class="dc-section">
+    <div class="dc-grid dc-grid-2">
+      <div class="dc-card dc-card--panel">
+        <div class="dc-card-header">
+          <span class="dc-card-label">Today’s routine · <?php echo e($todayName); ?></span>
+          <a href="<?php echo e($ttUrl); ?>" class="dc-section-link">Edit</a>
+        </div>
+        <?php if ($routine === []): ?>
+          <p class="dc-card-meta mb-0">No routine slots for today. Add Circle time, Snack, Outdoor on the routine page.</p>
+        <?php else: ?>
+          <ul class="list-unstyled mb-0">
+            <?php foreach ($routine as $slot):
+                $st = $fmtTime((string) ($slot['start_time'] ?? ''));
+                $en = $fmtTime((string) ($slot['end_time'] ?? ''));
+                $when = $st !== '' ? ($en !== '' ? $st . ' – ' . $en : $st) : '';
+                $cid = (int) ($slot['class_id'] ?? 0);
+                ?>
+              <li class="py-2 border-bottom">
+                <div class="fw-semibold"><?php echo e($slotName($slot)); ?></div>
+                <div class="small text-muted"><?php echo e($classNames[$cid] ?? ''); ?><?php echo $when !== '' ? ' · ' . e($when) : ''; ?></div>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
+      </div>
+
+      <div class="dc-card dc-card--panel">
+        <div class="dc-card-header">
+          <span class="dc-card-label">Recent homework</span>
+          <a href="<?php echo e($hwUrl); ?>" class="dc-section-link">Add</a>
+        </div>
+        <?php if ($recentHw === []): ?>
+          <p class="dc-card-meta mb-0">None yet. Add one short thing parents can do at home.</p>
+        <?php else: ?>
+          <ul class="list-unstyled mb-0">
+            <?php foreach ($recentHw as $hw):
+                $cid = (int) ($hw['class_id'] ?? 0);
+                ?>
+              <li class="py-2 border-bottom">
+                <div class="fw-semibold"><?php echo e((string) ($hw['title'] ?? '')); ?></div>
+                <div class="small text-muted"><?php echo e($classNames[$cid] ?? ''); ?> · <?php echo e($fmtDay((string) ($hw['assigned_date'] ?? ''))); ?></div>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
       </div>
     </div>
+  </section>
 
-    <div class="col-12 col-md-4">
-      <div class="card shadow-sm">
-        <div class="card-body">
-          <h6 class="mb-2">Recent Tasks / Leaves</h6>
-          <?php if (!empty($recent['tasks']) || !empty($recent['leaves'])): ?>
-            <ul class="list-group list-group-flush">
-              <?php foreach ($recent['tasks'] as $t): ?>
-                <li class="list-group-item d-flex justify-content-between">
-                  <div class="fw-semibold"><?php echo e(mb_strimwidth($t['title'] ?? '(no title)', 0, 60, '...')); ?></div>
-                  <div class="text-muted small"><?php echo e(substr($t['created_at'] ?? '', 0, 16)); ?></div>
-                </li>
-              <?php endforeach; ?>
-              <?php foreach ($recent['leaves'] as $l): ?>
-                <li class="list-group-item d-flex justify-content-between">
-                  <div class="fw-semibold"><?php echo e(mb_strimwidth($l['title'] ?? '(no title)', 0, 60, '...')); ?></div>
-                  <div class="text-muted small"><?php echo e(substr($l['created_at'] ?? '', 0, 16)); ?></div>
-                </li>
-              <?php endforeach; ?>
-            </ul>
-          <?php else: ?>
-            <div class="small-muted">No recent tasks or leave requests</div>
-          <?php endif; ?>
-          <div class="mt-2 text-end"><a class="btn btn-sm btn-outline-primary btn-compact" href="../teacher/tasks.php">Manage</a></div>
+  <section class="dc-section">
+    <h2 class="dc-section-title">Also</h2>
+    <div class="row g-2">
+      <?php
+      $quick = [
+          [$remarkUrl, 'bi-chat-square-text', 'Child note'],
+          [$noticeUrl, 'bi-megaphone', 'Parent notice'],
+          [$ttUrl, 'bi-calendar-week', 'Class routine'],
+          [$classesUrl, 'bi-people', 'My children'],
+          [$todoUrl, 'bi-check2-square', 'To-do'],
+      ];
+      foreach ($quick as $q): ?>
+        <div class="col-6 col-md">
+          <a href="<?php echo e($q[0]); ?>" class="btn btn-outline-primary w-100 py-3 d-flex flex-column align-items-center gap-1">
+            <i class="bi <?php echo e($q[1]); ?> fs-4"></i>
+            <span class="small fw-semibold"><?php echo e($q[2]); ?></span>
+          </a>
         </div>
-      </div>
+      <?php endforeach; ?>
     </div>
+  </section>
 
-  </div>
+  <?php endif; ?>
+</div>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
