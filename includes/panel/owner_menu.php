@@ -51,7 +51,6 @@ function owner_panel_menu(): array
             'items' => [
                 ['url' => $owner . '/class_setup.php', 'icon' => 'bi-book', 'label' => 'Class Setup', 'match' => 'class_setup'],
                 ['url' => $owner . '/teacher_assign.php', 'icon' => 'bi-person-workspace', 'label' => 'Assign Teachers', 'match' => 'teacher_assign'],
-                ['url' => $owner . '/teacher_hub.php', 'icon' => 'bi-grid-3x3-gap', 'label' => 'Teacher Hub', 'match' => 'teacher_hub'],
                 ['url' => $teacher . '/my_classes.php', 'icon' => 'bi-journal-bookmark', 'label' => 'My Classes', 'match' => 'my_classes'],
                 ['url' => $teacher . '/attendance_mark.php', 'icon' => 'bi-person-check', 'label' => 'Mark Attendance', 'match' => 'attendance_mark'],
                 ['url' => $owner . '/attendance.php', 'icon' => 'bi-clipboard-data', 'label' => 'Attendance Records', 'match' => 'attendance'],

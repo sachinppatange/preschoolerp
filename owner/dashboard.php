@@ -359,7 +359,7 @@ require_once __DIR__ . '/../includes/header.php';
         [$ownerBase . '/year_end_report.php', 'bi-file-earmark-pdf', 'Year-end PDF'],
         ['../reception/admission.php', 'bi-person-plus', 'New Admission'],
         ['../accounts/fees_collection.php', 'bi-cash-coin', 'Collect Fees'],
-        [$ownerBase . '/teacher_hub.php', 'bi-grid', 'Teacher Hub'],
+        [$ownerBase . '/teacher_assign.php', 'bi-person-workspace', 'Assign Teachers'],
         [$ownerBase . '/parent_portal.php', 'bi-eye', 'Parent Hub'],
         [$ownerBase . '/class_setup.php', 'bi-book', 'Class Setup'],
         [$ownerBase . '/staff_manage.php', 'bi-person-badge', 'Staff'],
