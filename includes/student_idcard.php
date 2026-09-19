@@ -33,9 +33,56 @@ function student_idcard_scan_url(int $id): string
     return '/card.php?' . $q;
 }
 
-function student_idcard_qr_src(string $data): string
+function student_idcard_qr_src(string $data, int $size = 200): string
 {
-    return 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&ecc=M&margin=1&data=' . rawurlencode($data);
+    $size = max(80, min(800, $size));
+    return 'https://api.qrserver.com/v1/create-qr-code/?size=' . $size . 'x' . $size . '&ecc=M&margin=1&data=' . rawurlencode($data);
+}
+
+/**
+ * Stream a PNG QR for download. Returns false if fetch failed.
+ */
+function student_idcard_qr_download(int $studentId, string $filename = ''): bool
+{
+    if ($studentId <= 0) {
+        return false;
+    }
+    $scan = student_idcard_scan_url($studentId);
+    $src = student_idcard_qr_src($scan, 480);
+    $bin = '';
+    if (function_exists('curl_init')) {
+        $ch = curl_init($src);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 20,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_SSL_VERIFYPEER => true,
+        ]);
+        $out = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if (is_string($out) && $out !== '' && $code >= 200 && $code < 300) {
+            $bin = $out;
+        }
+    }
+    if ($bin === '' && ini_get('allow_url_fopen')) {
+        $got = @file_get_contents($src);
+        if (is_string($got) && $got !== '') {
+            $bin = $got;
+        }
+    }
+    if ($bin === '') {
+        return false;
+    }
+    if ($filename === '') {
+        $filename = 'student-' . $studentId . '-qr.png';
+    }
+    $filename = preg_replace('/[^A-Za-z0-9._-]/', '_', $filename) ?: ('student-' . $studentId . '-qr.png');
+    header('Content-Type: image/png');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Content-Length: ' . strlen($bin));
+    echo $bin;
+    return true;
 }
 
 function student_idcard_print_url(int $id, string $panel = 'owner'): string
@@ -262,6 +309,51 @@ function student_idcard_print_document(array $students, string $backUrl = ''): v
     echo '</div><div class="idc-sheet">';
     foreach ($students as $s) {
         echo student_idcard_markup($s);
+    }
+    echo '</div></body></html>';
+}
+
+/**
+ * A4 sheet of visit QRs (desk / parent meeting).
+ *
+ * @param list<array<string, mixed>> $students
+ */
+function student_idcard_qr_sheet(array $students, string $backUrl = '', string $heading = 'Visit QR'): void
+{
+    header('Content-Type: text/html; charset=UTF-8');
+    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>' . htmlspecialchars($heading, ENT_QUOTES, 'UTF-8') . '</title>';
+    echo '<style>
+      @page { size: A4; margin: 12mm; }
+      body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; color: #0f2744; }
+      .bar { padding: 10px 14px; display:flex; gap:8px; align-items:center; border-bottom:1px solid #dbe7fb; }
+      .bar button, .bar a { background:#1d4ed8; color:#fff; border:0; padding:8px 14px; border-radius:8px; text-decoration:none; font:inherit; cursor:pointer; }
+      .bar a.alt { background:#fff; color:#1e3a5f; border:1px solid #dbe7fb; }
+      .hint { color:#64748b; font-size:.85rem; }
+      .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; padding:14px; }
+      .cell { border:1px solid #dbe7fb; border-radius:12px; padding:10px; text-align:center; break-inside:avoid; }
+      .cell img { width:120px; height:120px; }
+      .nm { font-weight:800; margin-top:6px; font-size:.95rem; }
+      .cl { color:#64748b; font-size:.8rem; }
+      @media print { .bar { display:none !important; } .grid { padding:0; } }
+    </style></head><body>';
+    echo '<div class="bar"><button type="button" onclick="window.print()">Print QRs</button>';
+    if ($backUrl !== '') {
+        echo '<a class="alt" href="' . htmlspecialchars($backUrl, ENT_QUOTES, 'UTF-8') . '">Back</a>';
+    }
+    echo '<span class="hint">Scan opens the child visit page (attendance, fees, homework).</span></div>';
+    echo '<div class="grid">';
+    $e = static fn(string $v): string => htmlspecialchars($v, ENT_QUOTES, 'UTF-8');
+    foreach ($students as $s) {
+        $id = (int) ($s['id'] ?? 0);
+        $name = function_exists('student_full_name') ? student_full_name($s) : trim((string) ($s['first_name'] ?? ''));
+        $class = trim((string) ($s['class_name'] ?? ''));
+        $scan = student_idcard_scan_url($id);
+        $qr = student_idcard_qr_src($scan, 240);
+        echo '<div class="cell"><img src="' . $e($qr) . '" alt="QR"><div class="nm">' . $e($name !== '' ? $name : ('#' . $id)) . '</div>';
+        if ($class !== '') {
+            echo '<div class="cl">' . $e($class) . '</div>';
+        }
+        echo '</div>';
     }
     echo '</div></body></html>';
 }
