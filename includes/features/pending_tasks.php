@@ -262,6 +262,9 @@ require_once __DIR__ . '/../header.php';
 .todo-urgent { color:#b42318; font-weight:700; }
 </style>
 
+<?php if ($canAssign): ?>
+  <p class="text-muted small mb-2">One list for the office. Add a to-do and pick who it is for (you, reception, or a teacher).</p>
+<?php endif; ?>
 <?php foreach ($messages as $m): ?><div class="alert alert-success py-2"><?php echo $esc($m); ?></div><?php endforeach; ?>
 <?php foreach ($errors as $er): ?><div class="alert alert-danger py-2"><?php echo $esc($er); ?></div><?php endforeach; ?>
 
