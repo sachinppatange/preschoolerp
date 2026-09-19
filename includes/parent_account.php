@@ -491,6 +491,32 @@ function parent_has_child_in_year(int $parentId, ?string $ay = null): bool
     }
 }
 
+function parent_linked_student_count(int $parentId): int
+{
+    if ($parentId <= 0 || !function_exists('table_exists') || !table_exists('students')) {
+        return 0;
+    }
+    try {
+        $row = safe_db_get_one('SELECT COUNT(*) AS c FROM students WHERE parent_id = :id', [':id' => $parentId]);
+        return (int) ($row['c'] ?? 0);
+    } catch (Throwable $e) {
+        return 0;
+    }
+}
+
+function parent_delete_block_reason(int $id): ?string
+{
+    $row = $id > 0 ? safe_db_get_one("SELECT id, role FROM users WHERE id = :id LIMIT 1", [':id' => $id]) : null;
+    if (!$row || strtolower((string) ($row['role'] ?? '')) !== 'parent') {
+        return 'Parent not found.';
+    }
+    $n = parent_linked_student_count($id);
+    if ($n > 0) {
+        return 'This parent has ' . $n . ' linked child' . ($n === 1 ? '' : 'ren') . '. Disable login instead of deleting.';
+    }
+    return null;
+}
+
 function parent_merge_meta(?string $json, array $patch): string
 {
     $meta = [];
