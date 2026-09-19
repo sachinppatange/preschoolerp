@@ -60,7 +60,6 @@ function owner_panel_menu(): array
                 ['url' => $teacher . '/timetable.php', 'icon' => 'bi-calendar-week', 'label' => 'Timetable', 'match' => 'timetable'],
                 ['url' => $teacher . '/tasks.php', 'icon' => 'bi-kanban', 'label' => 'Teacher Tasks', 'match' => 'tasks'],
                 ['url' => $teacher . '/notices.php', 'icon' => 'bi-megaphone', 'label' => 'Teacher Notices', 'match' => 'notices'],
-                ['url' => $owner . '/sessions.php', 'icon' => 'bi-journal-bookmark-fill', 'label' => 'Sessions', 'match' => 'sessions'],
             ],
         ],
         [

@@ -394,7 +394,6 @@ require_once __DIR__ . '/../header.php';
             <a class="btn btn-outline-primary btn-sm text-start" href="<?php echo e($owner . '/staff_manage.php'); ?>"><i class="bi bi-person-badge me-1"></i> Staff</a>
             <a class="btn btn-outline-primary btn-sm text-start" href="<?php echo e($owner . '/parents.php'); ?>"><i class="bi bi-people me-1"></i> Parents</a>
             <a class="btn btn-outline-primary btn-sm text-start" href="<?php echo e($owner . '/popup_settings.php'); ?>"><i class="bi bi-window-stack me-1"></i> Popup settings</a>
-            <a class="btn btn-outline-primary btn-sm text-start" href="<?php echo e($owner . '/sessions.php'); ?>"><i class="bi bi-journal-bookmark me-1"></i> Academic sessions</a>
           </div>
         </div>
       </div>
