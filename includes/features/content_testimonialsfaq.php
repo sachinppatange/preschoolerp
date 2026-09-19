@@ -1,410 +1,377 @@
 <?php
 /**
- * Shared feature: content_testimonialsfaq
- * Loaded via feature_run() after panel_bootstrap().
+ * Parent reviews and FAQs for the public website.
  */
 declare(strict_types=1);
 
 require_once __DIR__ . '/../cms/helpers.php';
 
 $cfg = $GLOBALS['FEATURE_CONFIG'] ?? [];
-$panel = (string)($cfg['panel'] ?? 'owner');
-$pageTitle = (string)($cfg['page_title'] ?? 'Testimonials & FAQ');
+$pageTitle = (string) ($cfg['page_title'] ?? 'Parents’ words & FAQs');
+$page_title = $pageTitle;
+$csrf = function_exists('get_csrf_token') ? get_csrf_token() : '';
 
-function save_uploaded_photo(string $field, array &$errors = null): ?string {
-    if (empty($_FILES[$field]) || $_FILES[$field]['error'] === UPLOAD_ERR_NO_FILE) return null;
-    if ($_FILES[$field]['error'] !== UPLOAD_ERR_OK) { $errors[] = "Upload error ({$_FILES[$field]['error']})"; return null; }
-    $tmp = $_FILES[$field]['tmp_name'];
-    $info = @getimagesize($tmp);
-    if ($info === false) { $errors[] = 'File is not a valid image.'; return null; }
-    $allowed = [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_GIF, IMAGETYPE_WEBP];
-    if (!in_array($info[2], $allowed, true)) { $errors[] = 'Unsupported image type.'; return null; }
-    $dir = cms_upload_dir();
-    if ($dir === false) { $errors[] = 'Upload folder not writable.'; return null; }
-    $orig = basename((string)($_FILES[$field]['name'] ?? 'photo'));
-    $safe = preg_replace('/[^A-Za-z0-9._-]/', '_', $orig);
-    $uniq = time() . '_' . bin2hex(random_bytes(5)) . '_' . $safe;
-    $dest = $dir . '/' . $uniq;
-    if (!move_uploaded_file($tmp, $dest)) { $errors[] = 'Failed to move uploaded file.'; return null; }
-    // Return path under site base
-    return cms_public_upload_url($uniq);
+if (!function_exists('content_tf_photo')) {
+    /**
+     * @param list<string> $errors
+     */
+    function content_tf_photo(string $field, array &$errors): ?string
+    {
+        if (empty($_FILES[$field]) || (int) ($_FILES[$field]['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            return null;
+        }
+        if ((int) $_FILES[$field]['error'] !== UPLOAD_ERR_OK) {
+            $errors[] = 'Could not upload the photo.';
+            return null;
+        }
+        $tmp = (string) $_FILES[$field]['tmp_name'];
+        $info = @getimagesize($tmp);
+        if ($info === false || !in_array((int) ($info[2] ?? 0), [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_GIF, IMAGETYPE_WEBP], true)) {
+            $errors[] = 'Use a JPG or PNG photo.';
+            return null;
+        }
+        $dir = cms_upload_dir();
+        if ($dir === false) {
+            $errors[] = 'Photo folder is not writable.';
+            return null;
+        }
+        $orig = basename((string) ($_FILES[$field]['name'] ?? 'photo.jpg'));
+        $safe = preg_replace('/[^A-Za-z0-9._-]/', '_', $orig) ?: 'photo.jpg';
+        $uniq = time() . '_' . bin2hex(random_bytes(4)) . '_' . $safe;
+        if (!move_uploaded_file($tmp, $dir . '/' . $uniq)) {
+            $errors[] = 'Could not save the photo.';
+            return null;
+        }
+        return cms_public_upload_url($uniq);
+    }
 }
 
-/* -------------------------
-   Load school row and decode fields
-   ------------------------- */
-$school = safe_db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id' => 1]) ?: [];
+$normT = static function (mixed $item): array {
+    if (!is_array($item)) {
+        return ['name' => '', 'role' => '', 'quote' => '', 'photo' => ''];
+    }
+    return [
+        'name' => trim((string) ($item['name'] ?? '')),
+        'role' => trim((string) ($item['role'] ?? '')),
+        'quote' => trim((string) ($item['quote'] ?? $item['text'] ?? '')),
+        'photo' => trim((string) ($item['photo'] ?? $item['image'] ?? '')),
+    ];
+};
+
+$normF = static function (mixed $item): array {
+    if (!is_array($item)) {
+        return ['q' => '', 'a' => ''];
+    }
+    return [
+        'q' => trim((string) ($item['q'] ?? $item['question'] ?? '')),
+        'a' => trim((string) ($item['a'] ?? $item['answer'] ?? '')),
+    ];
+};
+
+$school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => 1]) ?: [];
 $testimonials = [];
-$faqs = [];
-if (!empty($school['testimonials'])) {
-    $tmp = json_decode((string)$school['testimonials'], true);
-    if (json_last_error() === JSON_ERROR_NONE && is_array($tmp)) $testimonials = $tmp;
+foreach (cms_decode_json_field($school['testimonials'] ?? null) as $t) {
+    $row = $normT($t);
+    if ($row['name'] !== '' || $row['quote'] !== '') {
+        $testimonials[] = $row;
+    }
 }
-if (!empty($school['faqs'])) {
-    $tmp = json_decode((string)$school['faqs'], true);
-    if (json_last_error() === JSON_ERROR_NONE && is_array($tmp)) $faqs = $tmp;
+$faqs = [];
+foreach (cms_decode_json_field($school['faqs'] ?? null) as $f) {
+    $row = $normF($f);
+    if ($row['q'] !== '' || $row['a'] !== '') {
+        $faqs[] = $row;
+    }
 }
 
-/* -------------------------
-   Actions handling
-   ------------------------- */
+$persist = static function (string $col, array $items) use (&$school): bool {
+    $json = json_encode(array_values($items), JSON_UNESCAPED_UNICODE);
+    $defaultName = defined('APP_NAME') ? (string) APP_NAME : 'Preschool';
+    if ($school !== []) {
+        $ok = (bool) safe_db_run(
+            'UPDATE schools SET `' . $col . '` = :v, updated_at = NOW() WHERE id = 1',
+            [':v' => $json]
+        );
+    } else {
+        $ok = (bool) safe_db_run(
+            'INSERT INTO schools (id, name, `' . $col . '`, created_at, updated_at) VALUES (1, :name, :v, NOW(), NOW())',
+            [':name' => $defaultName, ':v' => $json]
+        );
+    }
+    if ($ok) {
+        $school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => 1]) ?: $school;
+    }
+    return $ok;
+};
+
+$unlinkPhoto = static function (string $path): void {
+    if ($path === '') {
+        return;
+    }
+    $fs = cms_fs_path_from_url($path);
+    if (is_file($fs)) {
+        @unlink($fs);
+    }
+};
+
 $errors = [];
 $success = '';
+$editT = (int) ($_GET['edit_t'] ?? -1);
 
-// Add / Edit testimonial
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_testimonial') {
-    $idx = isset($_POST['idx']) && $_POST['idx'] !== '' ? (int)$_POST['idx'] : null;
-    $name = trim((string)($_POST['name'] ?? ''));
-    $role = trim((string)($_POST['role'] ?? ''));
-    $quote = trim((string)($_POST['quote'] ?? ''));
-
-    if ($name === '') $errors[] = 'Testimonial name required.';
-    if ($quote === '') $errors[] = 'Quote required.';
-
-    // Handle photo upload
-    $photo = null;
-    $uploadErrors = [];
-    $maybe = save_uploaded_photo('photo', $uploadErrors);
-    if (!empty($uploadErrors)) $errors = array_merge($errors, $uploadErrors);
-    if ($maybe !== null) $photo = $maybe;
-
-    if (empty($errors)) {
-        $item = ['name' => $name, 'role' => $role, 'quote' => $quote];
-        if ($photo !== null) $item['photo'] = $photo;
-        if ($idx !== null && isset($testimonials[$idx])) {
-            // if replacing photo, remove old file (best effort)
-            if (isset($photo) && !empty($testimonials[$idx]['photo']) && $testimonials[$idx]['photo'] !== $photo) {
-                $old = $testimonials[$idx]['photo'];
-                // derive filesystem path and unlink
-                $appRoot = realpath(__DIR__ . '/..') ?: (__DIR__ . '/..');
-                $relative = (strpos($old, site_url('')) === 0) ? substr($old, strlen(site_url(''))) : ltrim($old, '/');
-                $fs = $_SERVER['DOCUMENT_ROOT'] . '/' . ltrim($relative, '/');
-                if (is_file($fs)) @unlink($fs);
-            }
-            // update
-            $testimonials[$idx] = array_merge($testimonials[$idx], $item);
-        } else {
-            // append
-            $testimonials[] = $item;
-        }
-
-        // save to DB (UPDATE or INSERT)
-        $json = json_encode(array_values($testimonials), JSON_UNESCAPED_UNICODE);
-        if (!empty($school)) {
-            $ok = safe_db_run("UPDATE schools SET testimonials = :t, updated_at = NOW() WHERE id = 1", [':t' => $json]);
-        } else {
-            $ok = safe_db_run("INSERT INTO schools (id, name, testimonials, created_at, updated_at) VALUES (1, :name, :t, NOW(), NOW())", [
-                ':name' => 'Pioneer Play School',
-                ':t' => $json
-            ]);
-        }
-        if ($ok) {
-            $success = 'Testimonial saved.';
-            // reload school/testimonials
-            $school = safe_db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id' => 1]) ?: $school;
-            $testimonials = json_decode((string)$school['testimonials'], true) ?: $testimonials;
-        } else $errors[] = 'DB error saving testimonial.';
-    }
-}
-
-// Delete testimonial
-if (isset($_GET['delete_testimonial'])) {
-    $d = (int)$_GET['delete_testimonial'];
-    if (isset($testimonials[$d])) {
-        $del = $testimonials[$d];
-        array_splice($testimonials, $d, 1);
-        $json = json_encode(array_values($testimonials), JSON_UNESCAPED_UNICODE);
-        if (!empty($school)) {
-            $ok = safe_db_run("UPDATE schools SET testimonials = :t, updated_at = NOW() WHERE id = 1", [':t' => $json]);
-        } else {
-            $ok = safe_db_run("INSERT INTO schools (id, name, testimonials, created_at, updated_at) VALUES (1, :name, :t, NOW(), NOW())", [':name'=>'Pioneer Play School', ':t'=>$json]);
-        }
-        if ($ok) {
-            // remove photo file if present
-            if (!empty($del['photo'])) {
-                $old = $del['photo'];
-                $relative = (strpos($old, site_url('')) === 0) ? substr($old, strlen(site_url(''))) : ltrim($old, '/');
-                $fs = $_SERVER['DOCUMENT_ROOT'] . '/' . ltrim($relative, '/');
-                if (is_file($fs)) @unlink($fs);
-            }
-            $success = 'Testimonial removed.';
-            $school = safe_db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id'=>1]) ?: $school;
-            $testimonials = json_decode((string)$school['testimonials'], true) ?: $testimonials;
-        } else $errors[] = 'DB error deleting testimonial.';
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (function_exists('validate_csrf_token') && !validate_csrf_token((string) ($_POST['csrf'] ?? ''))) {
+        $errors[] = 'Please reload the page and try again.';
     } else {
-        $errors[] = 'Testimonial not found.';
+        $action = (string) ($_POST['action'] ?? '');
+
+        if ($action === 'save_testimonial') {
+            $idx = ($_POST['idx'] ?? '') === '' ? null : (int) $_POST['idx'];
+            $name = trim((string) ($_POST['name'] ?? ''));
+            $role = trim((string) ($_POST['role'] ?? ''));
+            $quote = trim((string) ($_POST['quote'] ?? ''));
+            if ($role === '') {
+                $role = 'Parent';
+            }
+            if ($name === '') {
+                $errors[] = 'Write the parent’s name.';
+            }
+            if ($quote === '') {
+                $errors[] = 'Write what they said.';
+            }
+            $photo = content_tf_photo('photo', $errors);
+            if ($errors === []) {
+                $item = ['name' => $name, 'role' => $role, 'quote' => $quote, 'photo' => ''];
+                if ($idx !== null && isset($testimonials[$idx])) {
+                    $item['photo'] = $testimonials[$idx]['photo'];
+                    if ($photo !== null) {
+                        $unlinkPhoto($item['photo']);
+                        $item['photo'] = $photo;
+                    }
+                    $testimonials[$idx] = $item;
+                } else {
+                    $item['photo'] = $photo ?? '';
+                    $testimonials[] = $item;
+                }
+                if ($persist('testimonials', $testimonials)) {
+                    $success = 'Parent’s words saved.';
+                    $editT = -1;
+                } else {
+                    $errors[] = 'Could not save.';
+                }
+            }
+        }
+
+        if ($action === 'delete_testimonial') {
+            $d = (int) ($_POST['idx'] ?? -1);
+            if (isset($testimonials[$d])) {
+                $unlinkPhoto((string) ($testimonials[$d]['photo'] ?? ''));
+                array_splice($testimonials, $d, 1);
+                $testimonials = array_values($testimonials);
+                if ($persist('testimonials', $testimonials)) {
+                    $success = 'Removed.';
+                } else {
+                    $errors[] = 'Could not remove.';
+                }
+            }
+        }
+
+        if ($action === 'move_testimonial') {
+            $idx = (int) ($_POST['idx'] ?? -1);
+            $swap = (string) ($_POST['dir'] ?? '') === 'up' ? $idx - 1 : $idx + 1;
+            if (isset($testimonials[$idx], $testimonials[$swap])) {
+                $tmp = $testimonials[$idx];
+                $testimonials[$idx] = $testimonials[$swap];
+                $testimonials[$swap] = $tmp;
+                $testimonials = array_values($testimonials);
+                if ($persist('testimonials', $testimonials)) {
+                    $success = 'Order updated.';
+                } else {
+                    $errors[] = 'Could not change the order.';
+                }
+            }
+        }
+
+        if ($action === 'save_faqs') {
+            $qs = $_POST['faq_q'] ?? [];
+            $as = $_POST['faq_a'] ?? [];
+            $new = [];
+            if (is_array($qs)) {
+                foreach ($qs as $i => $q) {
+                    $row = $normF(['q' => $q, 'a' => is_array($as) ? ($as[$i] ?? '') : '']);
+                    if ($row['q'] === '' && $row['a'] === '') {
+                        continue;
+                    }
+                    $new[] = $row;
+                }
+            }
+            if ($persist('faqs', $new)) {
+                $faqs = $new;
+                if ($faqs === []) {
+                    $faqs = [['q' => '', 'a' => '']];
+                }
+                $success = 'Questions saved.';
+            } else {
+                $errors[] = 'Could not save questions.';
+            }
+        }
     }
 }
 
-// Reorder testimonials (POST)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'reorder_testimonials' && !empty($_POST['order']) && is_array($_POST['order'])) {
-    // order contains integer indexes in current order — convert to new array
-    $new = [];
-    foreach ($_POST['order'] as $i) {
-        $i = (int)$i;
-        if (isset($testimonials[$i])) $new[] = $testimonials[$i];
+$school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => 1]) ?: $school;
+if ($success !== '' || ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+    $testimonials = [];
+    foreach (cms_decode_json_field($school['testimonials'] ?? null) as $t) {
+        $row = $normT($t);
+        if ($row['name'] !== '' || $row['quote'] !== '') {
+            $testimonials[] = $row;
+        }
     }
-    // append any missing
-    foreach ($testimonials as $t) if (!in_array($t, $new, true)) $new[] = $t;
-    $json = json_encode(array_values($new), JSON_UNESCAPED_UNICODE);
-    if (!empty($school)) $ok = safe_db_run("UPDATE schools SET testimonials = :t, updated_at = NOW() WHERE id = 1", [':t'=>$json]);
-    else $ok = safe_db_run("INSERT INTO schools (id, name, testimonials, created_at, updated_at) VALUES (1, :name, :t, NOW(), NOW())", [':name'=>'Pioneer Play School', ':t'=>$json]);
-    if ($ok) { $success = 'Order saved.'; $school = safe_db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id'=>1]) ?: $school; $testimonials = json_decode((string)$school['testimonials'], true) ?: $testimonials; }
-    else $errors[] = 'DB error saving order.';
-}
-
-/* -------------------------
-   FAQs: add/edit/delete/reorder (similar approach)
-   ------------------------- */
-// Save FAQ
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_faq') {
-    $idx = isset($_POST['idx']) && $_POST['idx'] !== '' ? (int)$_POST['idx'] : null;
-    $q = trim((string)($_POST['q'] ?? ''));
-    $a = trim((string)($_POST['a'] ?? ''));
-    if ($q === '') $errors[] = 'FAQ question required.';
-    if ($a === '') $errors[] = 'FAQ answer required.';
-    if (empty($errors)) {
-        $item = ['q' => $q, 'a' => $a];
-        if ($idx !== null && isset($faqs[$idx])) $faqs[$idx] = array_merge($faqs[$idx], $item);
-        else $faqs[] = $item;
-        $json = json_encode(array_values($faqs), JSON_UNESCAPED_UNICODE);
-        if (!empty($school)) $ok = safe_db_run("UPDATE schools SET faqs = :f, updated_at = NOW() WHERE id = 1", [':f'=>$json]);
-        else $ok = safe_db_run("INSERT INTO schools (id, name, faqs, created_at, updated_at) VALUES (1, :name, :f, NOW(), NOW())", [':name'=>'Pioneer Play School', ':f'=>$json]);
-        if ($ok) { $success = 'FAQ saved.'; $school = safe_db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id'=>1]) ?: $school; $faqs = json_decode((string)$school['faqs'], true) ?: $faqs; }
-        else $errors[] = 'DB error saving FAQ.';
+    if ((string) ($_POST['action'] ?? '') !== 'save_faqs') {
+        $faqs = [];
+        foreach (cms_decode_json_field($school['faqs'] ?? null) as $f) {
+            $row = $normF($f);
+            if ($row['q'] !== '' || $row['a'] !== '') {
+                $faqs[] = $row;
+            }
+        }
     }
 }
-
-// Delete FAQ (GET)
-if (isset($_GET['delete_faq'])) {
-    $d = (int)$_GET['delete_faq'];
-    if (isset($faqs[$d])) {
-        array_splice($faqs, $d, 1);
-        $json = json_encode(array_values($faqs), JSON_UNESCAPED_UNICODE);
-        if (!empty($school)) $ok = safe_db_run("UPDATE schools SET faqs = :f, updated_at = NOW() WHERE id = 1", [':f'=>$json]);
-        else $ok = safe_db_run("INSERT INTO schools (id, name, faqs, created_at, updated_at) VALUES (1, :name, :f, NOW(), NOW())", [':name'=>'Pioneer Play School', ':f'=>$json]);
-        if ($ok) { $success = 'FAQ removed.'; $school = safe_db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id'=>1]) ?: $school; $faqs = json_decode((string)$school['faqs'], true) ?: $faqs; }
-        else $errors[] = 'DB error deleting FAQ.';
-    } else $errors[] = 'FAQ not found.';
+if ($faqs === []) {
+    $faqs = [['q' => '', 'a' => '']];
 }
 
-// Reorder FAQs
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'reorder_faqs' && !empty($_POST['order']) && is_array($_POST['order'])) {
-    $new = [];
-    foreach ($_POST['order'] as $i) {
-        $i = (int)$i;
-        if (isset($faqs[$i])) $new[] = $faqs[$i];
-    }
-    foreach ($faqs as $f) if (!in_array($f, $new, true)) $new[] = $f;
-    $json = json_encode(array_values($new), JSON_UNESCAPED_UNICODE);
-    if (!empty($school)) $ok = safe_db_run("UPDATE schools SET faqs = :f, updated_at = NOW() WHERE id = 1", [':f'=>$json]);
-    else $ok = safe_db_run("INSERT INTO schools (id, name, faqs, created_at, updated_at) VALUES (1, :name, :f, NOW(), NOW())", [':name'=>'Pioneer Play School', ':f'=>$json]);
-    if ($ok) { $success = 'FAQ order saved.'; $school = safe_db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id'=>1]) ?: $school; $faqs = json_decode((string)$school['faqs'], true) ?: $faqs; }
-    else $errors[] = 'DB error saving FAQ order.';
-}
+$editRow = ($editT >= 0 && isset($testimonials[$editT])) ? $testimonials[$editT] : null;
+$self = function_exists('site_url') ? site_url('/owner/content_testimonialsfaq.php') : 'content_testimonialsfaq.php';
+$publicT = function_exists('site_url') ? site_url('/#testimonials') : '/#testimonials';
 
-/* -------------------------
-   Prepare JSON/text for forms
-   ------------------------- */
-$testimonial_count = count($testimonials);
-$faq_count = count($faqs);
-
-/* -------------------------
-   Render UI
-   ------------------------- */
-$pageTitle = (string)($cfg['page_title'] ?? 'Testimonials & FAQ');
 require_once __DIR__ . '/../header.php';
 ?>
+<style>
+.tf-hero { background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:16px 18px; margin-bottom:14px; }
+.tf-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:16px 18px; margin-bottom:12px; }
+.tf-sec { font-size:.75rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:#94a3b8; margin-bottom:10px; }
+.tf-item { display:flex; gap:10px; align-items:flex-start; border:1px solid #dbe7fb; border-radius:14px; padding:10px; margin-bottom:8px; background:#f8fafc; }
+.tf-item img, .tf-ph { width:48px; height:48px; border-radius:12px; object-fit:cover; background:#e2e8f0; flex-shrink:0; }
+.tf-row { border:1px dashed #dbe7fb; border-radius:14px; padding:12px; margin-bottom:8px; background:#f8fafc; }
+.tf-bar { position:sticky; bottom:0; background:#fff; border-top:1px solid #dbe7fb; padding:10px 0; z-index:2; }
+</style>
 
-<?php if ($success): ?><div class="alert alert-success"><?php echo e($success); ?></div><?php endif; ?>
-  <?php if (!empty($errors)): ?><div class="alert alert-danger"><ul><?php foreach ($errors as $err) echo '<li>' . e($err) . '</li>'; ?></ul></div><?php endif; ?>
-
-  <div class="row g-4">
-    <!-- Testimonials column -->
-    <div class="col-lg-7">
-      <div class="card p-3 mb-3">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <h5 class="mb-0">Testimonials (<?php echo $testimonial_count; ?>)</h5>
-          <button class="btn btn-sm btn-outline-primary" onclick="showTestimonialForm()">Add Testimonial</button>
-        </div>
-
-        <!-- Add/Edit form (hidden toggle) -->
-        <div id="testimonialFormWrap" class="mb-3" style="display:none;">
-          <form method="post" enctype="multipart/form-data">
-            <input type="hidden" name="action" value="save_testimonial">
-            <input type="hidden" name="idx" id="testimonial_idx" value="">
-            <div class="row g-2">
-              <div class="col-md-4"><input name="name" id="testimonial_name" class="form-control" placeholder="Name"></div>
-              <div class="col-md-4"><input name="role" id="testimonial_role" class="form-control" placeholder="Role (e.g., Parent)"></div>
-              <div class="col-md-4"><input type="file" name="photo" class="form-control"></div>
-              <div class="col-12"><textarea name="quote" id="testimonial_quote" class="form-control" rows="3" placeholder="Quote"></textarea></div>
-              <div class="col-12 d-flex gap-2">
-                <button class="btn btn-success">Save</button>
-                <button type="button" class="btn btn-outline-secondary" onclick="hideTestimonialForm()">Cancel</button>
-              </div>
-            </div>
-          </form>
-        </div>
-
-        <!-- Testimonials list (draggable) -->
-        <?php if (!empty($testimonials)): ?>
-          <div id="testimonialsList" class="list-group">
-            <?php foreach ($testimonials as $i => $t): ?>
-              <div class="list-group-item item-card d-flex align-items-center" data-index="<?php echo $i; ?>" draggable="true">
-                <div class="me-3">
-                  <?php if (!empty($t['photo'])): ?><img src="<?php echo e($t['photo']); ?>" class="thumb" alt="photo"><?php else: ?><div class="thumb bg-secondary"></div><?php endif; ?>
-                </div>
-                <div class="flex-grow-1">
-                  <div class="fw-semibold"><?php echo e($t['name'] ?? ''); ?> <?php if (!empty($t['role'])) echo '<span class="small-muted">• ' . e($t['role']) . '</span>'; ?></div>
-                  <div class="small text-muted"><?php echo e(mb_substr($t['quote'] ?? '', 0, 180)); ?></div>
-                </div>
-                <div class="ms-3 d-flex flex-column gap-2">
-                  <button class="btn btn-sm btn-outline-primary" onclick='editTestimonial(<?php echo $i; ?>)'>Edit</button>
-                  <a class="btn btn-sm btn-danger" href="?delete_testimonial=<?php echo $i; ?>" onclick="return confirm('Delete testimonial?')">Delete</a>
-                </div>
-              </div>
-            <?php endforeach; ?>
-          </div>
-
-          <form id="reorderTestimonialsForm" method="post" class="mt-2">
-            <input type="hidden" name="action" value="reorder_testimonials">
-            <!-- dynamic order inputs will be appended by JS -->
-            <button id="saveTestOrderBtn" type="button" class="btn btn-sm btn-success mt-2">Save Order</button>
-          </form>
-        <?php else: ?>
-          <div class="text-muted">No testimonials yet. Add some using the button above.</div>
-        <?php endif; ?>
-      </div>
-    </div>
-
-    <!-- FAQs column -->
-    <div class="col-lg-5">
-      <div class="card p-3 mb-3">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <h5 class="mb-0">FAQs (<?php echo $faq_count; ?>)</h5>
-          <button class="btn btn-sm btn-outline-primary" onclick="showFaqForm()">Add FAQ</button>
-        </div>
-
-        <div id="faqFormWrap" style="display:none;" class="mb-3">
-          <form method="post">
-            <input type="hidden" name="action" value="save_faq">
-            <input type="hidden" name="idx" id="faq_idx" value="">
-            <div class="mb-2"><input name="q" id="faq_q" class="form-control" placeholder="Question"></div>
-            <div class="mb-2"><textarea name="a" id="faq_a" class="form-control" rows="3" placeholder="Answer"></textarea></div>
-            <div class="d-flex gap-2">
-              <button class="btn btn-success">Save FAQ</button>
-              <button type="button" class="btn btn-outline-secondary" onclick="hideFaqForm()">Cancel</button>
-            </div>
-          </form>
-        </div>
-
-        <?php if (!empty($faqs)): ?>
-          <div id="faqsList" class="list-group">
-            <?php foreach ($faqs as $i => $f): ?>
-              <div class="list-group-item item-card d-flex align-items-start" data-index="<?php echo $i; ?>" draggable="true">
-                <div class="flex-grow-1">
-                  <div class="fw-semibold"><?php echo e($f['q'] ?? ''); ?></div>
-                  <div class="small text-muted"><?php echo e(mb_substr($f['a'] ?? '', 0, 220)); ?></div>
-                </div>
-                <div class="ms-3 d-flex flex-column gap-2">
-                  <button class="btn btn-sm btn-outline-primary" onclick='editFaq(<?php echo $i; ?>)'>Edit</button>
-                  <a class="btn btn-sm btn-danger" href="?delete_faq=<?php echo $i; ?>" onclick="return confirm('Delete FAQ?')">Delete</a>
-                </div>
-              </div>
-            <?php endforeach; ?>
-          </div>
-
-          <form id="reorderFaqsForm" method="post" class="mt-2">
-            <input type="hidden" name="action" value="reorder_faqs">
-            <button id="saveFaqOrderBtn" type="button" class="btn btn-sm btn-success mt-2">Save Order</button>
-          </form>
-        <?php else: ?>
-          <div class="text-muted">No FAQs yet. Add one using the button above.</div>
-        <?php endif; ?>
-      </div>
-    </div>
+<div class="tf-hero d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <div>
+    <div class="fw-bold" style="font-size:1.15rem">Parents’ words &amp; FAQs</div>
+    <div class="text-muted">Short parent reviews and answers visitors ask before admission.</div>
   </div>
+  <a class="btn btn-outline-primary" href="<?php echo e($publicT); ?>" target="_blank" rel="noopener">See on website</a>
 </div>
 
+<?php if ($success !== ''): ?><div class="alert alert-success py-2"><?php echo e($success); ?></div><?php endif; ?>
+<?php foreach ($errors as $er): ?><div class="alert alert-danger py-2"><?php echo e($er); ?></div><?php endforeach; ?>
+
+<div class="tf-card">
+  <div class="tf-sec"><?php echo $editRow ? 'Edit parent review' : 'Add a parent review'; ?></div>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+    <input type="hidden" name="action" value="save_testimonial">
+    <input type="hidden" name="idx" value="<?php echo $editRow ? (int) $editT : ''; ?>">
+    <div class="row g-2">
+      <div class="col-md-4">
+        <input name="name" class="form-control" required placeholder="Parent’s name" value="<?php echo e($editRow['name'] ?? ''); ?>">
+      </div>
+      <div class="col-md-4">
+        <input name="role" class="form-control" placeholder="Parent" value="<?php echo e($editRow['role'] ?? 'Parent'); ?>">
+      </div>
+      <div class="col-md-4">
+        <input type="file" name="photo" accept="image/jpeg,image/png,image/gif,image/webp" class="form-control">
+      </div>
+      <div class="col-12">
+        <textarea name="quote" class="form-control" rows="3" required placeholder="What they said about the school"><?php echo e($editRow['quote'] ?? ''); ?></textarea>
+      </div>
+    </div>
+    <div class="mt-2 d-flex gap-2">
+      <button class="btn btn-success" type="submit"><?php echo $editRow ? 'Update' : 'Add review'; ?></button>
+      <?php if ($editRow): ?><a class="btn btn-outline-secondary" href="<?php echo e($self); ?>">Cancel</a><?php endif; ?>
+    </div>
+    <div class="form-text mt-1">Photo is optional. Leave empty to keep the current photo.</div>
+  </form>
+</div>
+
+<div class="tf-card">
+  <div class="tf-sec"><?php echo count($testimonials); ?> review<?php echo count($testimonials) === 1 ? '' : 's'; ?> on the website</div>
+  <?php if ($testimonials === []): ?>
+    <div class="text-muted">No parent reviews yet. Add one above.</div>
+  <?php else: ?>
+    <?php foreach ($testimonials as $i => $t):
+        $photo = $t['photo'] !== '' && function_exists('cms_resolve_image_url') ? cms_resolve_image_url($t['photo']) : '';
+        ?>
+      <div class="tf-item">
+        <?php if ($photo !== ''): ?><img src="<?php echo e($photo); ?>" alt=""><?php else: ?><div class="tf-ph"></div><?php endif; ?>
+        <div class="flex-grow-1">
+          <div class="fw-bold"><?php echo e($t['name']); ?><?php if ($t['role'] !== ''): ?> <span class="small text-muted">· <?php echo e($t['role']); ?></span><?php endif; ?></div>
+          <div class="small"><?php echo e($t['quote']); ?></div>
+        </div>
+        <div class="d-flex flex-wrap gap-1">
+          <?php if ($i > 0): ?>
+            <form method="post"><input type="hidden" name="csrf" value="<?php echo e($csrf); ?>"><input type="hidden" name="action" value="move_testimonial"><input type="hidden" name="dir" value="up"><input type="hidden" name="idx" value="<?php echo $i; ?>"><button class="btn btn-sm btn-outline-secondary" type="submit">↑</button></form>
+          <?php endif; ?>
+          <?php if ($i < count($testimonials) - 1): ?>
+            <form method="post"><input type="hidden" name="csrf" value="<?php echo e($csrf); ?>"><input type="hidden" name="action" value="move_testimonial"><input type="hidden" name="dir" value="down"><input type="hidden" name="idx" value="<?php echo $i; ?>"><button class="btn btn-sm btn-outline-secondary" type="submit">↓</button></form>
+          <?php endif; ?>
+          <a class="btn btn-sm btn-outline-primary" href="<?php echo e($self . '?edit_t=' . $i); ?>">Edit</a>
+          <form method="post" onsubmit="return confirm('Remove this review from the website?');">
+            <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+            <input type="hidden" name="action" value="delete_testimonial">
+            <input type="hidden" name="idx" value="<?php echo $i; ?>">
+            <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
+          </form>
+        </div>
+      </div>
+    <?php endforeach; ?>
+  <?php endif; ?>
+</div>
+
+<form method="post">
+  <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+  <input type="hidden" name="action" value="save_faqs">
+  <div class="tf-card">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="tf-sec mb-0">Questions parents ask</div>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="addFaq">Add question</button>
+    </div>
+    <div class="form-text mb-2">Fees, timings, admission — short answers in simple words.</div>
+    <div id="faqList">
+      <?php foreach ($faqs as $f): ?>
+        <div class="tf-row">
+          <input name="faq_q[]" class="form-control mb-2" placeholder="Question" value="<?php echo e($f['q']); ?>">
+          <textarea name="faq_a[]" class="form-control" rows="2" placeholder="Answer"><?php echo e($f['a']); ?></textarea>
+          <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="removeFaq(this)">Remove</button>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  </div>
+  <div class="tf-bar">
+    <button class="btn btn-success" type="submit">Save questions</button>
+  </div>
+</form>
+
 <script>
-  // Testimonials form toggles & edit population
-  function showTestimonialForm() { document.getElementById('testimonialFormWrap').style.display = ''; window.scrollTo({top:0,behavior:'smooth'}); }
-  function hideTestimonialForm() {
-    document.getElementById('testimonialFormWrap').style.display = 'none';
-    document.getElementById('testimonial_idx').value = '';
-    document.getElementById('testimonial_name').value = '';
-    document.getElementById('testimonial_role').value = '';
-    document.getElementById('testimonial_quote').value = '';
+document.getElementById('addFaq').addEventListener('click', function () {
+  var wrap = document.getElementById('faqList');
+  var div = document.createElement('div');
+  div.className = 'tf-row';
+  div.innerHTML = '<input name="faq_q[]" class="form-control mb-2" placeholder="Question"><textarea name="faq_a[]" class="form-control" rows="2" placeholder="Answer"></textarea><button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="removeFaq(this)">Remove</button>';
+  wrap.appendChild(div);
+  div.querySelector('input').focus();
+});
+function removeFaq(btn) {
+  var item = btn.closest('.tf-row');
+  var wrap = document.getElementById('faqList');
+  if (!item || !wrap) return;
+  if (wrap.children.length <= 1) {
+    item.querySelectorAll('input,textarea').forEach(function (i) { i.value = ''; });
+    return;
   }
-  const testimonials = <?php echo json_encode($testimonials, JSON_UNESCAPED_UNICODE); ?>;
-  function editTestimonial(i) {
-    const t = testimonials[i];
-    if (!t) return;
-    document.getElementById('testimonial_idx').value = i;
-    document.getElementById('testimonial_name').value = t.name || '';
-    document.getElementById('testimonial_role').value = t.role || '';
-    document.getElementById('testimonial_quote').value = t.quote || '';
-    showTestimonialForm();
-  }
-
-  // FAQs form toggles & edit
-  function showFaqForm() { document.getElementById('faqFormWrap').style.display = ''; window.scrollTo({top:0,behavior:'smooth'}); }
-  function hideFaqForm() {
-    document.getElementById('faqFormWrap').style.display = 'none';
-    document.getElementById('faq_idx').value = '';
-    document.getElementById('faq_q').value = '';
-    document.getElementById('faq_a').value = '';
-  }
-  const faqs = <?php echo json_encode($faqs, JSON_UNESCAPED_UNICODE); ?>;
-  function editFaq(i) {
-    const f = faqs[i];
-    if (!f) return;
-    document.getElementById('faq_idx').value = i;
-    document.getElementById('faq_q').value = f.q || '';
-    document.getElementById('faq_a').value = f.a || '';
-    showFaqForm();
-  }
-
-  // Drag & drop reorder for testimonials and faqs
-  function enableDragList(containerId) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    let dragEl = null;
-    container.querySelectorAll('[data-index]').forEach(el => {
-      el.draggable = true;
-      el.addEventListener('dragstart', (e) => { dragEl = el; el.style.opacity='0.5'; e.dataTransfer.effectAllowed='move'; });
-      el.addEventListener('dragend', () => { if (dragEl) dragEl.style.opacity='1'; dragEl=null; });
-      el.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect='move'; });
-      el.addEventListener('drop', (e) => {
-        e.preventDefault(); if (!dragEl || dragEl === el) return;
-        const rect = el.getBoundingClientRect(); const offset = e.clientY - rect.top;
-        if (offset > rect.height/2) el.parentNode.insertBefore(dragEl, el.nextSibling);
-        else el.parentNode.insertBefore(dragEl, el);
-      });
-    });
-  }
-  enableDragList('testimonialsList');
-  enableDragList('faqsList');
-
-  // Save testimonials order
-  document.getElementById('saveTestOrderBtn').addEventListener('click', function() {
-    const items = Array.from(document.querySelectorAll('#testimonialsList [data-index]')).map(n => n.getAttribute('data-index'));
-    const form = document.createElement('form'); form.method='post';
-    form.innerHTML = '<input type="hidden" name="action" value="reorder_testimonials">';
-    items.forEach(i => { const inp = document.createElement('input'); inp.type='hidden'; inp.name='order[]'; inp.value=i; form.appendChild(inp); });
-    document.body.appendChild(form); form.submit();
-  });
-
-  // Save FAQs order
-  document.getElementById('saveFaqOrderBtn').addEventListener('click', function() {
-    const items = Array.from(document.querySelectorAll('#faqsList [data-index]')).map(n => n.getAttribute('data-index'));
-    const form = document.createElement('form'); form.method='post';
-    form.innerHTML = '<input type="hidden" name="action" value="reorder_faqs">';
-    items.forEach(i => { const inp = document.createElement('input'); inp.type='hidden'; inp.name='order[]'; inp.value=i; form.appendChild(inp); });
-    document.body.appendChild(form); form.submit();
-  });
+  item.remove();
+}
 </script>
-
-
 <?php
 require_once __DIR__ . '/../footer.php';

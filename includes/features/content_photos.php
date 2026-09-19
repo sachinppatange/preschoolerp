@@ -1,242 +1,259 @@
 <?php
 /**
- * Shared feature: content_photos
- * Loaded via feature_run() after panel_bootstrap().
+ * Public website gallery photos.
  */
 declare(strict_types=1);
 
 require_once __DIR__ . '/../cms/helpers.php';
 
 $cfg = $GLOBALS['FEATURE_CONFIG'] ?? [];
-$panel = (string)($cfg['panel'] ?? 'owner');
-$pageTitle = (string)($cfg['page_title'] ?? 'Gallery');
+$pageTitle = (string) ($cfg['page_title'] ?? 'Website photos');
+$page_title = $pageTitle;
+$csrf = function_exists('get_csrf_token') ? get_csrf_token() : '';
 
-function is_valid_image(string $tmp): bool {
-    $info = @getimagesize($tmp);
-    if ($info === false) return false;
-    $allowed = [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_GIF, IMAGETYPE_WEBP];
-    return in_array($info[2], $allowed, true);
+if (!function_exists('content_photos_is_image')) {
+    function content_photos_is_image(string $tmp): bool
+    {
+        $info = @getimagesize($tmp);
+        if ($info === false) {
+            return false;
+        }
+        return in_array((int) ($info[2] ?? 0), [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_GIF, IMAGETYPE_WEBP], true);
+    }
 }
 
-function web_path_for_upload(string $filename): string {
-    return cms_public_upload_url($filename);
+if (!function_exists('content_photos_path')) {
+    function content_photos_path(mixed $item): string
+    {
+        if (is_string($item)) {
+            return trim($item);
+        }
+        if (is_array($item)) {
+            return trim((string) ($item['url'] ?? $item['path'] ?? $item['src'] ?? ''));
+        }
+        return '';
+    }
 }
 
-/* -------------------------
-   Load current gallery from schools.gallery
-   ------------------------- */
-$school = safe_db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id' => 1]) ?: [];
+$school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => 1]) ?: [];
 $gallery = [];
-if (!empty($school['gallery'])) {
-    $tmp = json_decode((string)$school['gallery'], true);
-    if (json_last_error() === JSON_ERROR_NONE && is_array($tmp)) $gallery = $tmp;
+foreach (cms_decode_json_field($school['gallery'] ?? null) as $g) {
+    $p = content_photos_path($g);
+    if ($p !== '') {
+        $gallery[] = $p;
+    }
 }
 
-/* -------------------------
-   Process actions: upload, delete, reorder
-   ------------------------- */
+$saveGallery = static function (array $items) use (&$school): bool {
+    $json = json_encode(array_values($items), JSON_UNESCAPED_UNICODE);
+    if ($school !== []) {
+        $ok = (bool) safe_db_run(
+            'UPDATE schools SET gallery = :g, updated_at = NOW() WHERE id = 1',
+            [':g' => $json]
+        );
+    } else {
+        $defaultName = defined('APP_NAME') ? (string) APP_NAME : 'Preschool';
+        $ok = (bool) safe_db_run(
+            'INSERT INTO schools (id, name, gallery, created_at, updated_at) VALUES (1, :name, :g, NOW(), NOW())',
+            [':name' => $defaultName, ':g' => $json]
+        );
+    }
+    if ($ok) {
+        $school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => 1]) ?: $school;
+    }
+    return $ok;
+};
+
 $errors = [];
 $success = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Upload action
-    if (isset($_POST['action']) && $_POST['action'] === 'upload') {
-        if (empty($_FILES['photos'])) {
-            $errors[] = 'No files uploaded.';
-        } else {
-            $dir = cms_upload_dir();
-            if ($dir === false) {
-                $errors[] = 'Upload directory not writable. Create assets/uploads and give webserver write permission.';
+    if (function_exists('validate_csrf_token') && !validate_csrf_token((string) ($_POST['csrf'] ?? ''))) {
+        $errors[] = 'Please reload the page and try again.';
+    } else {
+        $action = (string) ($_POST['action'] ?? '');
+
+        if ($action === 'upload') {
+            $files = $_FILES['photos'] ?? null;
+            if (!is_array($files) || empty($files['name'])) {
+                $errors[] = 'Choose one or more photos first.';
             } else {
-                $added = 0;
-                $files = $_FILES['photos'];
-                for ($i = 0; $i < count($files['name']); $i++) {
-                    if ($files['error'][$i] !== UPLOAD_ERR_OK) continue;
-                    $tmp = $files['tmp_name'][$i];
-                    if (!is_valid_image($tmp)) { $errors[] = $files['name'][$i] . ' is not a valid image.'; continue; }
-                    $orig = basename($files['name'][$i]);
-                    $safe = preg_replace('/[^A-Za-z0-9._-]/', '_', $orig);
-                    $uniq = time() . '_' . bin2hex(random_bytes(4)) . '_' . $safe;
-                    $dest = $dir . '/' . $uniq;
-                    if (@move_uploaded_file($tmp, $dest)) {
-                        $gallery[] = web_path_for_upload($uniq);
-                        $added++;
-                    } else {
-                        $errors[] = 'Failed to save ' . $orig;
+                $dir = cms_upload_dir();
+                if ($dir === false) {
+                    $errors[] = 'Photo folder is not writable. Ask support to fix uploads.';
+                } else {
+                    $names = is_array($files['name']) ? $files['name'] : [$files['name']];
+                    $tmps = is_array($files['tmp_name']) ? $files['tmp_name'] : [$files['tmp_name']];
+                    $errs = is_array($files['error']) ? $files['error'] : [$files['error']];
+                    $added = 0;
+                    $n = count($names);
+                    for ($i = 0; $i < $n; $i++) {
+                        if ((int) ($errs[$i] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                            continue;
+                        }
+                        $tmp = (string) ($tmps[$i] ?? '');
+                        $orig = basename((string) ($names[$i] ?? 'photo.jpg'));
+                        if ($tmp === '' || !content_photos_is_image($tmp)) {
+                            $errors[] = $orig . ' is not a photo.';
+                            continue;
+                        }
+                        $safe = preg_replace('/[^A-Za-z0-9._-]/', '_', $orig) ?: 'photo.jpg';
+                        $uniq = time() . '_' . bin2hex(random_bytes(4)) . '_' . $safe;
+                        if (@move_uploaded_file($tmp, $dir . '/' . $uniq)) {
+                            $gallery[] = cms_public_upload_url($uniq);
+                            $added++;
+                        } else {
+                            $errors[] = 'Could not save ' . $orig . '.';
+                        }
+                    }
+                    if ($added > 0) {
+                        if ($saveGallery($gallery)) {
+                            $success = $added === 1 ? 'Photo added.' : ($added . ' photos added.');
+                        } else {
+                            $errors[] = 'Could not save the gallery.';
+                        }
+                    } elseif ($errors === []) {
+                        $errors[] = 'No photos were added.';
                     }
                 }
+            }
+        }
 
-                if ($added > 0) {
-                    $newGalleryJson = json_encode(array_values($gallery));
-                    // Use UPDATE if row exists, otherwise INSERT with minimal required columns
-                    if (!empty($school)) {
-                        $ok = safe_db_run("UPDATE schools SET gallery = :g, updated_at = NOW() WHERE id = 1", [':g' => $newGalleryJson]);
-                    } else {
-                        $default_name = 'Pioneer Play School';
-                        $ok = safe_db_run("INSERT INTO schools (id, name, gallery, created_at, updated_at) VALUES (1, :name, :g, NOW(), NOW())", [':name' => $default_name, ':g' => $newGalleryJson]);
-                    }
+        if ($action === 'delete') {
+            $img = (string) ($_POST['img'] ?? '');
+            $new = [];
+            foreach ($gallery as $g) {
+                if ($g !== $img) {
+                    $new[] = $g;
+                }
+            }
+            if ($img !== '') {
+                $fs = cms_fs_path_from_url($img);
+                if (is_file($fs)) {
+                    @unlink($fs);
+                }
+            }
+            if ($saveGallery($new)) {
+                $gallery = $new;
+                $success = 'Photo removed.';
+            } else {
+                $errors[] = 'Could not remove the photo.';
+            }
+        }
 
-                    if ($ok) {
-                        $success = "Uploaded $added image(s).";
+        if ($action === 'move') {
+            $img = (string) ($_POST['img'] ?? '');
+            $dirMove = (string) ($_POST['dir'] ?? '');
+            $idx = array_search($img, $gallery, true);
+            if ($idx !== false) {
+                $swap = $dirMove === 'up' ? $idx - 1 : $idx + 1;
+                if (isset($gallery[$swap])) {
+                    $tmp = $gallery[$idx];
+                    $gallery[$idx] = $gallery[$swap];
+                    $gallery[$swap] = $tmp;
+                    $gallery = array_values($gallery);
+                    if ($saveGallery($gallery)) {
+                        $success = 'Order updated.';
                     } else {
-                        $errors[] = 'DB error saving gallery.';
+                        $errors[] = 'Could not change the order.';
                     }
-                } elseif (empty($errors)) {
-                    $errors[] = 'No files were uploaded.';
                 }
             }
         }
     }
+}
 
-    // Delete image
-    if (isset($_POST['action']) && $_POST['action'] === 'delete' && !empty($_POST['img'])) {
-        $img = (string)$_POST['img'];
-        $new = [];
-        foreach ($gallery as $g) {
-            if ($g === $img) continue;
-            $new[] = $g;
-        }
-        // delete file from disk if inside uploads
-        $appRoot = realpath(__DIR__ . '/..') ?: (__DIR__ . '/..');
-        // derive filesystem path
-        $fs = null;
-        if (strpos($img, site_url('')) === 0) {
-            $relative = substr($img, strlen(site_url('')));
-            $fs = $appRoot . '/' . ltrim($relative, '/');
-        } elseif (strpos($img, '/') === 0) {
-            $fs = $_SERVER['DOCUMENT_ROOT'] . $img;
-        }
-        if ($fs && is_file($fs)) @unlink($fs);
-
-        $newGalleryJson = json_encode(array_values($new));
-        if (!empty($school)) {
-            $ok = safe_db_run("UPDATE schools SET gallery = :g, updated_at = NOW() WHERE id = 1", [':g' => $newGalleryJson]);
-        } else {
-            $default_name = 'Pioneer Play School';
-            $ok = safe_db_run("INSERT INTO schools (id, name, gallery, created_at, updated_at) VALUES (1, :name, :g, NOW(), NOW())", [':name' => $default_name, ':g' => $newGalleryJson]);
-        }
-        if ($ok) {
-            $gallery = $new;
-            $success = 'Image removed.';
-        } else {
-            $errors[] = 'DB error removing image.';
-        }
-    }
-
-    // Reorder images - expects order[] values (image paths)
-    if (isset($_POST['action']) && $_POST['action'] === 'reorder' && !empty($_POST['order']) && is_array($_POST['order'])) {
-        $order = array_values(array_filter($_POST['order'], 'is_string'));
-        $newOrder = [];
-        foreach ($order as $o) {
-            if (in_array($o, $gallery, true)) $newOrder[] = $o;
-        }
-        foreach ($gallery as $g) if (!in_array($g, $newOrder, true)) $newOrder[] = $g;
-        $newGalleryJson = json_encode(array_values($newOrder));
-        if (!empty($school)) {
-            $ok = safe_db_run("UPDATE schools SET gallery = :g, updated_at = NOW() WHERE id = 1", [':g' => $newGalleryJson]);
-        } else {
-            $default_name = 'Pioneer Play School';
-            $ok = safe_db_run("INSERT INTO schools (id, name, gallery, created_at, updated_at) VALUES (1, :name, :g, NOW(), NOW())", [':name' => $default_name, ':g' => $newGalleryJson]);
-        }
-        if ($ok) {
-            $gallery = $newOrder;
-            $success = 'Order updated.';
-        } else {
-            $errors[] = 'DB error updating order.';
-        }
+$school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => 1]) ?: $school;
+$gallery = [];
+foreach (cms_decode_json_field($school['gallery'] ?? null) as $g) {
+    $p = content_photos_path($g);
+    if ($p !== '') {
+        $gallery[] = $p;
     }
 }
 
-// Re-fetch gallery from DB (in case changed)
-$school = safe_db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id' => 1]) ?: $school;
-if (!empty($school['gallery'])) {
-    $tmp = json_decode((string)$school['gallery'], true);
-    if (json_last_error() === JSON_ERROR_NONE && is_array($tmp)) $gallery = $tmp;
-}
+$publicGal = function_exists('site_url') ? site_url('/#gallery') : '/#gallery';
+$count = count($gallery);
 
-
-$pageTitle = (string)($cfg['page_title'] ?? 'Gallery');
 require_once __DIR__ . '/../header.php';
 ?>
-<style>.thumb{height:140px;object-fit:cover;width:100%;border-radius:8px;display:block}.card-photo{position:relative}.photo-actions{position:absolute;top:8px;right:8px;display:flex;gap:6px}.drag-handle{cursor:grab}.placeholder{border:2px dashed #e2e8f0;padding:30px;text-align:center;color:#94a3b8;border-radius:8px}</style>
+<style>
+.gp-hero { background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:16px 18px; margin-bottom:14px; }
+.gp-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:16px 18px; margin-bottom:12px; }
+.gp-sec { font-size:.75rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:#94a3b8; margin-bottom:10px; }
+.gp-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; }
+.gp-item { background:#f8fafc; border:1px solid #dbe7fb; border-radius:14px; overflow:hidden; }
+.gp-item img { width:100%; height:140px; object-fit:cover; display:block; background:#e2e8f0; }
+.gp-item .acts { display:flex; gap:6px; padding:8px; }
+.gp-item .acts form { margin:0; flex:1; }
+.gp-item .acts .btn { width:100%; }
+.gp-empty { border:2px dashed #dbe7fb; border-radius:16px; padding:28px 16px; text-align:center; color:#64748b; background:#f8fafc; }
+</style>
 
-<?php if ($success): ?><div class="alert alert-success"><?php echo e($success); ?></div><?php endif; ?>
-  <?php if (!empty($errors)): ?><div class="alert alert-danger"><ul class="mb-0"><?php foreach ($errors as $err) echo '<li>' . e($err) . '</li>'; ?></ul></div><?php endif; ?>
-
-  <div class="card p-3 mb-4">
-    <form method="post" enctype="multipart/form-data" id="uploadForm">
-      <input type="hidden" name="action" value="upload">
-      <div class="mb-3">
-        <label class="form-label">Upload Photos (multiple)</label>
-        <input type="file" name="photos[]" accept="image/*" multiple class="form-control">
-      </div>
-      <div><button class="btn btn-primary">Upload</button></div>
-    </form>
+<div class="gp-hero d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <div>
+    <div class="fw-bold" style="font-size:1.15rem">Website photos</div>
+    <div class="text-muted">Happy school moments for the public gallery. Use photos you have permission to show.</div>
   </div>
+  <a class="btn btn-outline-primary" href="<?php echo e($publicGal); ?>" target="_blank" rel="noopener">See on website</a>
+</div>
 
-  <div class="mb-3">
-    <button id="saveOrderBtn" class="btn btn-sm btn-success me-2">Save Order</button>
-    <button id="refreshBtn" class="btn btn-sm btn-outline-secondary">Refresh</button>
-  </div>
+<?php if ($success !== ''): ?><div class="alert alert-success py-2"><?php echo e($success); ?></div><?php endif; ?>
+<?php foreach ($errors as $er): ?><div class="alert alert-danger py-2"><?php echo e($er); ?></div><?php endforeach; ?>
 
-  <?php if (empty($gallery)): ?>
-    <div class="placeholder">No gallery images yet. Upload images above to create gallery.</div>
+<div class="gp-card">
+  <div class="gp-sec">Add photos</div>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="action" value="upload">
+    <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+    <input type="file" name="photos[]" accept="image/jpeg,image/png,image/gif,image/webp" multiple class="form-control mb-2">
+    <button class="btn btn-success" type="submit">Add photos</button>
+    <div class="form-text mt-2">You can select many photos at once. JPG or PNG.</div>
+  </form>
+</div>
+
+<div class="gp-card">
+  <div class="gp-sec"><?php echo $count === 0 ? 'Gallery' : ($count . ' photo' . ($count === 1 ? '' : 's')); ?></div>
+  <?php if ($gallery === []): ?>
+    <div class="gp-empty">No photos yet. Add a classroom or festival photo above.</div>
   <?php else: ?>
-    <div id="galleryGrid" class="row g-3">
-      <?php foreach ($gallery as $idx => $img): ?>
-        <div class="col-6 col-md-3" data-src="<?php echo e($img); ?>">
-          <div class="card card-photo">
-            <div class="photo-actions">
-              <button class="btn btn-sm btn-light drag-handle" title="Drag to reorder">≡</button>
-              <form method="post" style="display:inline" onsubmit="return confirm('Delete this image?');">
-                <input type="hidden" name="action" value="delete">
+    <div class="form-text mb-2">First photo shows first on the website. Use ← → to change order.</div>
+    <div class="gp-grid">
+      <?php foreach ($gallery as $i => $img):
+          $src = function_exists('cms_resolve_image_url') ? cms_resolve_image_url($img) : $img;
+          ?>
+        <div class="gp-item">
+          <img src="<?php echo e($src); ?>" alt="">
+          <div class="acts">
+            <?php if ($i > 0): ?>
+              <form method="post">
+                <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+                <input type="hidden" name="action" value="move">
+                <input type="hidden" name="dir" value="up">
                 <input type="hidden" name="img" value="<?php echo e($img); ?>">
-                <button class="btn btn-sm btn-danger" type="submit" title="Delete">🗑</button>
+                <button class="btn btn-sm btn-outline-secondary" type="submit" title="Earlier">←</button>
               </form>
-            </div>
-            <img src="<?php echo e(cms_resolve_image_url($img)); ?>" alt="photo" class="thumb">
-            <div class="card-body p-2 small text-muted text-truncate"><?php echo e(basename($img)); ?></div>
+            <?php endif; ?>
+            <?php if ($i < $count - 1): ?>
+              <form method="post">
+                <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+                <input type="hidden" name="action" value="move">
+                <input type="hidden" name="dir" value="down">
+                <input type="hidden" name="img" value="<?php echo e($img); ?>">
+                <button class="btn btn-sm btn-outline-secondary" type="submit" title="Later">→</button>
+              </form>
+            <?php endif; ?>
+            <form method="post" onsubmit="return confirm('Remove this photo from the website?');">
+              <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="img" value="<?php echo e($img); ?>">
+              <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
+            </form>
           </div>
         </div>
       <?php endforeach; ?>
     </div>
   <?php endif; ?>
-
 </div>
-
-<script>
-  const grid = document.getElementById('galleryGrid');
-  let dragEl = null;
-
-  if (grid) {
-    grid.querySelectorAll('[data-src]').forEach(card => {
-      card.draggable = true;
-      card.addEventListener('dragstart', (e) => {
-        dragEl = card; card.style.opacity = '0.5'; e.dataTransfer.effectAllowed = 'move';
-      });
-      card.addEventListener('dragend', () => { if (dragEl) dragEl.style.opacity='1'; dragEl = null; });
-      card.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
-      card.addEventListener('drop', (e) => {
-        e.preventDefault(); if (!dragEl || dragEl === card) return;
-        const rect = card.getBoundingClientRect();
-        const offset = e.clientY - rect.top;
-        if (offset > rect.height / 2) card.parentNode.insertBefore(dragEl, card.nextSibling);
-        else card.parentNode.insertBefore(dragEl, card);
-      });
-    });
-  }
-
-  document.getElementById('saveOrderBtn').addEventListener('click', function () {
-    const orderInputs = Array.from(document.querySelectorAll('[data-src]')).map(n => n.getAttribute('data-src'));
-    const form = document.createElement('form'); form.method = 'post';
-    orderInputs.forEach(v => { const inp = document.createElement('input'); inp.type='hidden'; inp.name='order[]'; inp.value = v; form.appendChild(inp); });
-    const action = document.createElement('input'); action.type='hidden'; action.name='action'; action.value='reorder'; form.appendChild(action);
-    document.body.appendChild(form); form.submit();
-  });
-
-  document.getElementById('refreshBtn').addEventListener('click', function () { location.reload(); });
-</script>
-
-
 <?php
 require_once __DIR__ . '/../footer.php';

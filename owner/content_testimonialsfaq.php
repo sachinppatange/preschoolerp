@@ -11,5 +11,5 @@ require_once __DIR__ . '/../includes/features/feature_run.php';
 
 feature_run('content_testimonialsfaq', [
     'panel' => 'owner',
-    'page_title' => 'Testimonials & FAQ',
+    'page_title' => 'Parents’ words & FAQs',
 ]);

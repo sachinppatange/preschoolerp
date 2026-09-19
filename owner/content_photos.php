@@ -11,5 +11,5 @@ require_once __DIR__ . '/../includes/features/feature_run.php';
 
 feature_run('content_photos', [
     'panel' => 'owner',
-    'page_title' => 'Gallery',
+    'page_title' => 'Website photos',
 ]);

@@ -1,318 +1,261 @@
 <?php
 /**
- * owner/contact_details.php
- *
- * Edit Contact Details & Map for the school (id = 1).
- * Fixed:
- * - Regex character class issue (escaped hyphen) to avoid preg_match_all compilation error.
- * - Robust iframe attribute parsing (guards for no matches).
- * - Uses UPDATE when school row exists; INSERT with required defaults only when missing,
- *   to avoid "Field 'name' doesn't have a default value" errors.
- *
- * Place this file at:
- * /Applications/XAMPP/xamppfiles/htdocs/pioneerplayschool/owner/contact_details.php
+ * owner/contact_details.php — phone, address, hours, map, social (public website).
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('owner');
-$DEBUG = panel_debug();
+require_once __DIR__ . '/../includes/cms/helpers.php';
 
-session_start();
+$pageTitle = 'Phone, map & hours';
+$page_title = $pageTitle;
+$csrf = function_exists('get_csrf_token') ? get_csrf_token() : '';
 
-if (!function_exists('app_base')) {
-    function app_base(): string
-    {
-        return defined('BASE_URL') ? rtrim((string) BASE_URL, '/') : '';
-    }
-}
-
-if (!function_exists('db_get_one')) {
-    function db_get_one(string $sql, array $params = []) {
-        if (is_callable('db_fetch_one')) return call_user_func('db_fetch_one', $sql, $params);
-        $pdo = ensure_pdo();
-        if ($pdo instanceof \PDO) {
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute($params);
-            $row = $stmt->fetch();
-            return $row === false ? null : $row;
-        }
-        if (is_callable('db_query')) return call_user_func('db_query', $sql, $params);
-        return null;
-    }
-}
-
-if (!function_exists('db_run')) {
-    function db_run(string $sql, array $params = []): bool {
-        if (is_callable('db_execute')) return (bool) call_user_func('db_execute', $sql, $params);
-        $pdo = ensure_pdo();
-        if ($pdo instanceof \PDO) {
-            $stmt = $pdo->prepare($sql);
-            return (bool) $stmt->execute($params);
-        }
-        return false;
-    }
-}
-
-/* -------------------------
-   Sanitizer for map embed
-   Allow only <iframe>, <p>, <br>, <strong>, <em>, <a>
-   and strip any script tags or on* attributes.
-   ------------------------- */
 if (!function_exists('sanitize_map_embed')) {
-    function sanitize_map_embed(string $html): string {
-        // Strip script/style
-        $html = preg_replace('#<\s*(script|style).*?>.*?<\s*/\s*\1\s*>#is', '', $html);
-
-        // Remove event handler attributes like onclick, onload...
-        $html = preg_replace('/\son\w+=(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $html);
-
-        // Allow only a small set of tags
-        $allowed = '<iframe><p><br><strong><em><a>';
-        $clean = strip_tags($html, $allowed);
-
-        // For iframe, ensure src uses https or http and doesn't contain javascript:
-        // Replace any iframes with cleaned attributes subset.
-        if (strpos($clean, '<iframe') !== false) {
-            // Parse iframes and rebuild safe ones
-            $clean = preg_replace_callback('#<iframe\b([^>]*)>(.*?)</iframe>#is', function($m) {
-                $attrStr = $m[1] ?? '';
-                // collect src, width, height, style, allowfullscreen, loading, frameborder, referrerpolicy
-                // Note: escaped hyphen in character class to avoid "invalid range" issues.
-                $matches = [];
-                preg_match_all('/([\w:\-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'=<>]+))/i', $attrStr, $matches, PREG_SET_ORDER);
-                $attrs = [];
-                if (is_array($matches) && count($matches) > 0) {
-                    foreach ($matches as $mm) {
-                        $k = strtolower($mm[1] ?? '');
-                        $v = $mm[2] ?? ($mm[3] ?? ($mm[4] ?? ''));
-                        if ($k === 'src') {
-                            // allow only http(s) src
-                            if (preg_match('#^https?://#i', $v)) $attrs['src'] = $v;
-                        } elseif (in_array($k, ['width','height','allowfullscreen','loading','style','frameborder','referrerpolicy'])) {
-                            $attrs[$k] = $v;
-                        }
-                    }
-                }
-                if (empty($attrs['src'])) return ''; // drop unsafe iframe
-                $outAttrs = '';
-                foreach ($attrs as $k=>$v) {
-                    $outAttrs .= ' ' . e($k) . '="' . e($v) . '"';
-                }
-                return '<iframe' . $outAttrs . '></iframe>';
-            }, $clean);
+    function sanitize_map_embed(string $html): string
+    {
+        $html = preg_replace('#<\s*(script|style).*?>.*?<\s*/\s*\1\s*>#is', '', $html) ?? $html;
+        $html = preg_replace('/\son\w+=(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $html) ?? $html;
+        $clean = strip_tags($html, '<iframe><p><br><strong><em><a>');
+        if (!str_contains(strtolower($clean), '<iframe')) {
+            return trim($clean);
         }
-
-        return $clean;
+        return preg_replace_callback('#<iframe\b([^>]*)>(.*?)</iframe>#is', static function ($m) {
+            $attrStr = $m[1] ?? '';
+            preg_match_all('/([\w:\-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'=<>]+))/i', $attrStr, $matches, PREG_SET_ORDER);
+            $attrs = [];
+            foreach ($matches as $mm) {
+                $k = strtolower((string) ($mm[1] ?? ''));
+                $v = (string) ($mm[2] ?? ($mm[3] ?? ($mm[4] ?? '')));
+                if ($k === 'src' && preg_match('#^https?://#i', $v) && !str_contains(strtolower($v), 'javascript:')) {
+                    $attrs['src'] = $v;
+                } elseif (in_array($k, ['width', 'height', 'allowfullscreen', 'loading', 'style', 'frameborder', 'referrerpolicy'], true)) {
+                    $attrs[$k] = $v;
+                }
+            }
+            if (empty($attrs['src'])) {
+                return '';
+            }
+            $out = '';
+            foreach ($attrs as $k => $v) {
+                $out .= ' ' . htmlspecialchars($k, ENT_QUOTES, 'UTF-8') . '="' . htmlspecialchars($v, ENT_QUOTES, 'UTF-8') . '"';
+            }
+            return '<iframe' . $out . '></iframe>';
+        }, $clean) ?? '';
     }
 }
 
-/* -------------------------
-   Load current school values (id = 1)
-   ------------------------- */
-$school = db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id' => 1]) ?: [];
+$plainText = static function (string $raw): string {
+    $t = html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $t = preg_replace('/<\s*br\s*\/?\s*>/i', "\n", $t) ?? $t;
+    $t = preg_replace('/<\/\s*(p|div|h[1-6]|li)\s*>/i', "\n", $t) ?? $t;
+    $t = strip_tags($t);
+    $t = preg_replace('/^\s*Address\s*:\s*/im', '', $t) ?? $t;
+    $t = str_replace(["\r\n", "\r"], "\n", $t);
+    $t = preg_replace("/[ \t]+/", ' ', $t) ?? $t;
+    $t = preg_replace("/\n{3,}/", "\n\n", $t) ?? $t;
+    return trim($t);
+};
 
-/* -------------------------
-   Handle form submit
-   ------------------------- */
+$mapSrc = static function (string $html): string {
+    $html = trim($html);
+    if ($html === '') {
+        return '';
+    }
+    if (preg_match('#^https?://#i', $html) && !str_contains($html, '<')) {
+        return $html;
+    }
+    if (preg_match('/\bsrc\s*=\s*["\']([^"\']+)["\']/i', $html, $m)) {
+        return trim($m[1]);
+    }
+    return '';
+};
+
+$mapToEmbed = static function (string $raw) use ($mapSrc): string {
+    $raw = trim($raw);
+    if ($raw === '') {
+        return '';
+    }
+    $src = $mapSrc($raw);
+    if ($src !== '' && preg_match('#^https?://#i', $src)) {
+        return sanitize_map_embed('<iframe src="' . htmlspecialchars($src, ENT_QUOTES, 'UTF-8') . '" width="600" height="450" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>');
+    }
+    return sanitize_map_embed($raw);
+};
+
+$digits10 = static function (string $raw): string {
+    $d = preg_replace('/\D+/', '', $raw) ?? '';
+    return strlen($d) >= 10 ? substr($d, -10) : $d;
+};
+
+$school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => 1]) ?: [];
 $errors = [];
 $success = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_contact') {
-    $address = trim((string)($_POST['address'] ?? ''));
-    $map_embed_raw = trim((string)($_POST['map_embed'] ?? ''));
-    $contact_phone = trim((string)($_POST['contact_phone'] ?? ''));
-    $contact_whatsapp = trim((string)($_POST['contact_whatsapp'] ?? ''));
-    $contact_email = trim((string)($_POST['contact_email'] ?? ''));
-    $opening_hours = trim((string)($_POST['opening_hours'] ?? ''));
-
-    // Social links: prefer valid JSON textarea if provided
-    $social_json_input = trim((string)($_POST['social_json'] ?? ''));
-    $social_obj = [];
-    if ($social_json_input !== '') {
-        $decoded = json_decode($social_json_input, true);
-        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
-            $social_obj = $decoded;
-        } else {
-            $errors[] = 'Social links JSON is invalid. Please correct or use individual fields below.';
-        }
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'save_contact') {
+    if (function_exists('validate_csrf_token') && !validate_csrf_token((string) ($_POST['csrf'] ?? ''))) {
+        $errors[] = 'Please reload the page and try again.';
     } else {
-        // Build from individual fields
-        $social_obj = [];
-        foreach (['facebook','instagram','youtube','twitter','linkedin'] as $k) {
-            $val = trim((string)($_POST[$k] ?? ''));
-            if ($val !== '') $social_obj[$k] = $val;
+        $address = $plainText((string) ($_POST['address'] ?? ''));
+        $mapEmbed = $mapToEmbed((string) ($_POST['map_embed'] ?? ''));
+        $phone = trim((string) ($_POST['contact_phone'] ?? ''));
+        $whatsapp = trim((string) ($_POST['contact_whatsapp'] ?? ''));
+        $email = trim((string) ($_POST['contact_email'] ?? ''));
+        $hours = trim((string) ($_POST['opening_hours'] ?? ''));
+
+        if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $errors[] = 'Enter a valid email, or leave it blank.';
         }
-    }
-
-    // Basic validation
-    if ($contact_email !== '' && !filter_var($contact_email, FILTER_VALIDATE_EMAIL)) {
-        $errors[] = 'Contact email is not a valid email address.';
-    }
-    if ($contact_phone !== '' && !preg_match('/^[\d+\-\s()]{6,}$/', $contact_phone)) {
-        $errors[] = 'Contact phone looks invalid.';
-    }
-    if ($contact_whatsapp !== '' && !preg_match('/^[\d+\-\s()]{6,}$/', $contact_whatsapp)) {
-        // allow empty or similar phone format
-        $errors[] = 'WhatsApp number looks invalid.';
-    }
-
-    if (empty($errors)) {
-        // Save sanitized map embed to DB (we store sanitized version)
-        $map_sanitized = sanitize_map_embed($map_embed_raw);
-
-        // If school row exists -> UPDATE, else INSERT with required defaults
-        if (!empty($school)) {
-            $sql = "UPDATE schools SET address = :address, map_embed = :map, contact_phone = :phone,
-                    contact_whatsapp = :whatsapp, contact_email = :email, opening_hours = :hours, social_links = :social, updated_at = NOW()
-                    WHERE id = 1";
-            $params = [
-                ':address' => $address,
-                ':map' => $map_sanitized,
-                ':phone' => $contact_phone,
-                ':whatsapp' => $contact_whatsapp,
-                ':email' => $contact_email,
-                ':hours' => $opening_hours,
-                ':social' => json_encode($social_obj),
-            ];
-            $ok = db_run($sql, $params);
-        } else {
-            // Provide minimal required columns to avoid SQL strict errors (e.g., name may be NOT NULL)
-            $default_name = 'Pioneer Play School';
-            $sql = "INSERT INTO schools (id, name, address, map_embed, contact_phone, contact_whatsapp, contact_email, opening_hours, social_links, created_at, updated_at)
-                    VALUES (1, :name, :address, :map, :phone, :whatsapp, :email, :hours, :social, NOW(), NOW())";
-            $params = [
-                ':name' => $default_name,
-                ':address' => $address,
-                ':map' => $map_sanitized,
-                ':phone' => $contact_phone,
-                ':whatsapp' => $contact_whatsapp,
-                ':email' => $contact_email,
-                ':hours' => $opening_hours,
-                ':social' => json_encode($social_obj),
-            ];
-            $ok = db_run($sql, $params);
+        $phoneDigits = $digits10($phone);
+        if ($phone !== '' && strlen($phoneDigits) < 10) {
+            $errors[] = 'Phone should be a 10-digit number.';
+        }
+        $waDigits = $digits10($whatsapp);
+        if ($whatsapp !== '' && strlen($waDigits) < 10 && !preg_match('#^https?://#i', $whatsapp)) {
+            $errors[] = 'WhatsApp should be a 10-digit number.';
         }
 
-        if ($ok) {
-            $success = 'Contact details saved successfully.';
-            // reload
-            $school = db_get_one("SELECT * FROM schools WHERE id = :id LIMIT 1", [':id' => 1]) ?: $school;
-        } else {
-            $errors[] = 'Database error while saving contact details.';
+        $social = cms_decode_json_field($school['social_links'] ?? null);
+        foreach (['facebook', 'instagram', 'youtube', 'google_map'] as $k) {
+            $v = trim((string) ($_POST[$k] ?? ''));
+            if ($v === '') {
+                unset($social[$k]);
+            } else {
+                $social[$k] = $v;
+            }
+        }
+        if ($waDigits !== '' && strlen($waDigits) >= 10) {
+            $social['whatsapp'] = 'https://wa.me/91' . $waDigits;
+            $whatsapp = $waDigits;
+        } elseif ($whatsapp === '') {
+            unset($social['whatsapp']);
+        }
+
+        if ($errors === []) {
+            $params = [
+                ':address' => $address,
+                ':map' => $mapEmbed,
+                ':phone' => $phoneDigits !== '' ? $phoneDigits : $phone,
+                ':whatsapp' => $whatsapp,
+                ':email' => $email,
+                ':hours' => $hours,
+                ':social' => json_encode($social, JSON_UNESCAPED_UNICODE),
+            ];
+            $ok = false;
+            if ($school !== []) {
+                $ok = (bool) safe_db_run(
+                    'UPDATE schools SET address = :address, map_embed = :map, contact_phone = :phone,
+                     contact_whatsapp = :whatsapp, contact_email = :email, opening_hours = :hours, social_links = :social, updated_at = NOW()
+                     WHERE id = 1',
+                    $params
+                );
+            } else {
+                $defaultName = defined('APP_NAME') ? (string) APP_NAME : 'Preschool';
+                $params[':name'] = $defaultName;
+                $ok = (bool) safe_db_run(
+                    'INSERT INTO schools (id, name, address, map_embed, contact_phone, contact_whatsapp, contact_email, opening_hours, social_links, created_at, updated_at)
+                     VALUES (1, :name, :address, :map, :phone, :whatsapp, :email, :hours, :social, NOW(), NOW())',
+                    $params
+                );
+            }
+            if ($ok) {
+                $success = 'Saved. Parents will see this on the website.';
+                $school = safe_db_get_one('SELECT * FROM schools WHERE id = :id LIMIT 1', [':id' => 1]) ?: $school;
+            } else {
+                $errors[] = 'Could not save. Try again.';
+            }
         }
     }
 }
 
-/* Prepare values for form display */
-$address_val = $school['address'] ?? '';
-$map_embed_val = $school['map_embed'] ?? '';
-$contact_phone_val = $school['contact_phone'] ?? '';
-$contact_whatsapp_val = $school['contact_whatsapp'] ?? '';
-$contact_email_val = $school['contact_email'] ?? '';
-$opening_hours_val = $school['opening_hours'] ?? '';
-$social_links_val = $school['social_links'] ?? '';
-$social_arr = [];
-if (!empty($social_links_val)) {
-    $tmp = json_decode((string)$social_links_val, true);
-    if (is_array($tmp)) $social_arr = $tmp;
+$addressVal = $plainText((string) ($school['address'] ?? ''));
+$mapVal = (string) ($school['map_embed'] ?? '');
+$mapInput = $mapSrc($mapVal);
+$phoneVal = (string) ($school['contact_phone'] ?? '');
+$waVal = (string) ($school['contact_whatsapp'] ?? '');
+$emailVal = (string) ($school['contact_email'] ?? '');
+$hoursVal = (string) ($school['opening_hours'] ?? '');
+$social = cms_decode_json_field($school['social_links'] ?? null);
+if ($waVal === '' && !empty($social['whatsapp'])) {
+    $waVal = $digits10((string) $social['whatsapp']);
 }
+$publicLoc = function_exists('site_url') ? site_url('/#location') : '/#location';
+
+require_once __DIR__ . '/../includes/header.php';
 ?>
+<style>
+.cd-hero { background:#fff; border:1px solid #dbe7fb; border-radius:18px; padding:16px 18px; margin-bottom:14px; }
+.cd-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:16px 18px; margin-bottom:12px; }
+.cd-sec { font-size:.75rem; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:#94a3b8; margin-bottom:10px; }
+.cd-map { border-radius:14px; overflow:hidden; background:#e2e8f0; }
+.cd-map iframe { width:100%; height:220px; border:0; display:block; }
+.cd-bar { position:sticky; bottom:0; background:#fff; border-top:1px solid #dbe7fb; padding:10px 0; z-index:2; }
+</style>
 
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Owner — Contact Details</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
-<div class="container py-4">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2>Contact Details & Map</h2>
-    <div>
-      <a class="btn btn-outline-secondary" href="<?php echo e(site_url('/owner/dashboard.php')); ?>">Dashboard</a>
-      <a class="btn btn-outline-danger" href="<?php echo e(site_url('/owner/logout.php')); ?>">Logout</a>
-    </div>
+<div class="cd-hero d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <div>
+    <div class="fw-bold" style="font-size:1.15rem">Phone, map &amp; hours</div>
+    <div class="text-muted">How parents reach the school from the public website.</div>
   </div>
+  <a class="btn btn-outline-primary" href="<?php echo e($publicLoc); ?>" target="_blank" rel="noopener">See on website</a>
+</div>
 
-  <?php if ($success): ?>
-    <div class="alert alert-success"><?php echo e($success); ?></div>
-  <?php endif; ?>
+<?php if ($success !== ''): ?><div class="alert alert-success py-2"><?php echo e($success); ?></div><?php endif; ?>
+<?php foreach ($errors as $er): ?><div class="alert alert-danger py-2"><?php echo e($er); ?></div><?php endforeach; ?>
 
-  <?php if (!empty($errors)): ?>
-    <div class="alert alert-danger"><ul class="mb-0"><?php foreach ($errors as $err) echo '<li>' . e($err) . '</li>'; ?></ul></div>
-  <?php endif; ?>
+<form method="post">
+  <input type="hidden" name="action" value="save_contact">
+  <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
 
-  <form method="post" class="card p-3">
-    <input type="hidden" name="action" value="save_contact">
-
-    <div class="mb-3">
-      <label class="form-label">Address</label>
-      <textarea name="address" class="form-control" rows="2"><?php echo e($address_val); ?></textarea>
-    </div>
-
-    <div class="mb-3">
-      <label class="form-label">Map Embed (iframe HTML)</label>
-      <textarea name="map_embed" class="form-control" rows="4" placeholder="Paste Google Maps iframe embed code"><?php echo e($map_embed_val); ?></textarea>
-      <div class="form-text">We sanitize the embed for safety; preview appears below after saving.</div>
-    </div>
-
-    <div class="row g-2 mb-3">
+  <div class="cd-card">
+    <div class="cd-sec">Call &amp; visit</div>
+    <label class="form-label">School address</label>
+    <textarea name="address" class="form-control mb-3" rows="3" placeholder="Building, road, city, pin"><?php echo e($addressVal); ?></textarea>
+    <div class="row g-2">
       <div class="col-md-4">
-        <label class="form-label">Contact Phone</label>
-        <input name="contact_phone" class="form-control" value="<?php echo e($contact_phone_val); ?>">
+        <label class="form-label">Phone</label>
+        <input name="contact_phone" class="form-control" inputmode="tel" value="<?php echo e($phoneVal); ?>" placeholder="10-digit number">
       </div>
       <div class="col-md-4">
         <label class="form-label">WhatsApp</label>
-        <input name="contact_whatsapp" class="form-control" value="<?php echo e($contact_whatsapp_val); ?>">
+        <input name="contact_whatsapp" class="form-control" inputmode="tel" value="<?php echo e($waVal); ?>" placeholder="Same or another 10-digit number">
       </div>
       <div class="col-md-4">
-        <label class="form-label">Contact Email</label>
-        <input name="contact_email" class="form-control" value="<?php echo e($contact_email_val); ?>">
+        <label class="form-label">Email</label>
+        <input name="contact_email" type="email" class="form-control" value="<?php echo e($emailVal); ?>" placeholder="office@school.in">
       </div>
     </div>
+    <label class="form-label mt-3">When the office is open</label>
+    <input name="opening_hours" class="form-control" value="<?php echo e($hoursVal); ?>" placeholder="Mon–Sat 9:00 am – 1:00 pm">
+  </div>
 
-    <div class="mb-3">
-      <label class="form-label">Opening Hours</label>
-      <input name="opening_hours" class="form-control" value="<?php echo e($opening_hours_val); ?>">
-    </div>
+  <div class="cd-card">
+    <div class="cd-sec">Map</div>
+    <label class="form-label">Google Maps link</label>
+    <input name="map_embed" class="form-control" value="<?php echo e($mapInput); ?>" placeholder="Paste Share → Embed map link, or a maps.google.com URL">
+    <div class="form-text mb-2">On Google Maps: Share → Embed a map → copy the link inside the box. The map shows on the website after Save.</div>
+    <?php if (trim($mapVal) !== ''): ?>
+      <div class="cd-map"><?php echo sanitize_map_embed($mapVal); ?></div>
+    <?php endif; ?>
+  </div>
 
-    <hr>
+  <div class="cd-card">
+    <div class="cd-sec">Social pages</div>
+    <div class="form-text mb-2">Leave blank if you do not use that page. Full links, like https://instagram.com/yourschool</div>
+    <label class="form-label">Instagram</label>
+    <input name="instagram" class="form-control mb-2" value="<?php echo e((string) ($social['instagram'] ?? '')); ?>" placeholder="https://instagram.com/…">
+    <label class="form-label">Facebook</label>
+    <input name="facebook" class="form-control mb-2" value="<?php echo e((string) ($social['facebook'] ?? '')); ?>" placeholder="https://facebook.com/…">
+    <label class="form-label">YouTube</label>
+    <input name="youtube" class="form-control mb-2" value="<?php echo e((string) ($social['youtube'] ?? '')); ?>" placeholder="https://youtube.com/…">
+    <label class="form-label">Open in Google Maps (button)</label>
+    <input name="google_map" class="form-control" value="<?php echo e((string) ($social['google_map'] ?? '')); ?>" placeholder="https://maps.google.com/…">
+  </div>
 
-    <h5>Social Links</h5>
-    <p class="small text-muted">You can paste a JSON object here or fill the individual fields below. JSON takes precedence.</p>
-    <div class="mb-3">
-      <label class="form-label">Social Links (JSON)</label>
-      <textarea name="social_json" class="form-control" rows="4"><?php echo e($social_links_val); ?></textarea>
-    </div>
-
-    <div class="row g-2 mb-3">
-      <div class="col-md-4"><label class="form-label">Facebook</label><input name="facebook" class="form-control" value="<?php echo e($social_arr['facebook'] ?? ''); ?>"></div>
-      <div class="col-md-4"><label class="form-label">Instagram</label><input name="instagram" class="form-control" value="<?php echo e($social_arr['instagram'] ?? ''); ?>"></div>
-      <div class="col-md-4"><label class="form-label">YouTube</label><input name="youtube" class="form-control" value="<?php echo e($social_arr['youtube'] ?? ''); ?>"></div>
-    </div>
-
-    <div class="mb-3">
-      <button class="btn btn-primary">Save Contact Details</button>
-      <a class="btn btn-secondary" href="<?php echo e(site_url('/owner/dashboard.php')); ?>">Back</a>
-    </div>
-  </form>
-
-  <!-- Map preview (sanitized) -->
-  <?php if (!empty($map_embed_val)): ?>
-    <div class="card mt-4 p-3">
-      <h5 class="mb-3">Map Preview</h5>
-      <div class="ratio ratio-16x9">
-        <?php
-          // Render sanitized HTML (it is already sanitized on save)
-          echo $map_embed_val;
-        ?>
-      </div>
-    </div>
-  <?php endif; ?>
-
-</div>
-</body>
-</html>
+  <div class="cd-bar">
+    <button class="btn btn-success" type="submit">Save</button>
+  </div>
+</form>
+<?php
+require_once __DIR__ . '/../includes/footer.php';
