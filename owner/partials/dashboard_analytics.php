@@ -122,7 +122,7 @@ declare(strict_types=1);
   <section class="dc-section">
     <div class="dc-section-head">
       <h2 class="dc-section-title">Year Comparison</h2>
-      <a href="<?php echo e($ownerBase); ?>/academic_year_hub.php?tab=compare" class="dc-section-link">Full compare</a>
+      <a href="<?php echo e($ownerBase); ?>/year_end_report.php?ay=<?php echo urlencode($ay); ?>" class="dc-section-link">Year-end report</a>
     </div>
     <p class="dc-section-sub"><?php echo e(ay_display_short($ay)); ?> vs <?php echo $prevAy ? e(ay_display_short($prevAy)) : 'Last A.Y.'; ?></p>
     <div class="dc-grid dc-grid-6">

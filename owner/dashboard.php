@@ -355,7 +355,7 @@ require_once __DIR__ . '/../includes/header.php';
         [$ownerBase . '/pending_fees.php', 'bi-clock-history', 'Pending Fees'],
         [$ownerBase . '/daily_collection.php', 'bi-cash-stack', 'Daily Collection'],
         [$ownerBase . '/enquiry_list.php', 'bi-chat-left-text', 'Enquiries'],
-        [$ownerBase . '/academic_year_hub.php', 'bi-calendar2-range', 'Year Rollover'],
+        [$ownerBase . '/academic_year_hub.php', 'bi-calendar2-range', 'New school year'],
         [$ownerBase . '/year_end_report.php', 'bi-file-earmark-pdf', 'Year-end PDF'],
         ['../reception/admission.php', 'bi-person-plus', 'New Admission'],
         ['../accounts/fees_collection.php', 'bi-cash-coin', 'Collect Fees'],
