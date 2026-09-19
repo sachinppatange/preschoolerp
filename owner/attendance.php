@@ -1,499 +1,478 @@
 <?php
 /**
- * owner/attendance.php
- *
- * Attendance management (Owner).
- *
- * Table: attendance
- * Fields:
- *   id (PK)
- *   school_id
- *   student_id
- *   class_id
- *   date            (YYYY-MM-DD)
- *   status          ('present'|'absent'|'leave' or similar)
- *   recorded_by     (users.id)
- *   notes
- *   created_at
- *
- * Features:
- *  - Owner-only page (requires $_SESSION['owner_auth_user'])
- *  - List with filters (search, date, class, student, status), pagination
- *  - Add / Edit (modal) with server-side validation
- *  - View modal fragment (HTML)
- *  - Quick status change links
- *  - Delete and Export CSV
- *
- * Place at: /pioneerplayschool01/owner/attendance.php
+ * owner/attendance.php — who came on this date (owner check).
  */
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/panel/bootstrap.php';
 panel_bootstrap('owner');
 $DEBUG = panel_debug();
 
-/* Ensure table exists */
-if (!table_exists('attendance')) {
-    require_once __DIR__ . '/../includes/header.php';
-echo '<div class="container py-4"><div class="alert alert-danger">The <strong>attendance</strong> table does not exist. कृपया डेटाबेस तपासा.</div></div>';
-    require_once __DIR__ . '/../includes/footer.php';
-    exit;
-}
+$ownerId = (int) (auth_user_id() ?? 0);
+$schoolId = function_exists('auth_school_id') ? (int) auth_school_id() : 1;
+$csrf = function_exists('get_csrf_token') ? get_csrf_token() : '';
+$today = date('Y-m-d');
+$tableOk = table_exists('attendance');
 
-/* -------------------------
-   Prepare data lists for filters/forms
-   ------------------------- */
-$classList = table_exists('classes') ? safe_db_get_all("SELECT id, name FROM classes ORDER BY name ASC") : [];
-$studentList = table_exists('students') ? safe_db_get_all("SELECT id, first_name, last_name, class_id FROM students ORDER BY first_name, last_name ASC") : [];
-$staffList = table_exists('users') ? safe_db_get_all("SELECT id, name FROM users ORDER BY name ASC") : [];
-
-/* Allowed status values (UI help) */
-$statusOptions = ['present','absent','leave'];
-
-/* Messages and errors */
-$messages = []; $errors = [];
-
-/* -------------------------
-   Actions
-   ------------------------- */
-$action = $_REQUEST['action'] ?? 'list';
-
-/* ADD */
-if ($action === 'add' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $school_id   = isset($_POST['school_id']) && $_POST['school_id'] !== '' ? (int)$_POST['school_id'] : 1;
-    $student_id  = isset($_POST['student_id']) && $_POST['student_id'] !== '' ? (int)$_POST['student_id'] : null;
-    $class_id    = isset($_POST['class_id']) && $_POST['class_id'] !== '' ? (int)$_POST['class_id'] : null;
-    $date        = trim((string)($_POST['date'] ?? date('Y-m-d')));
-    $status      = in_array($_POST['status'] ?? 'present', $statusOptions, true) ? $_POST['status'] : 'present';
-    $recorded_by = isset($_POST['recorded_by']) && $_POST['recorded_by'] !== '' ? (int)$_POST['recorded_by'] : null;
-    $notes       = trim((string)($_POST['notes'] ?? ''));
-
-    if (!$student_id) $errors[] = 'Student is required.';
-    if ($date === '') $errors[] = 'Date is required.';
-
-    if (empty($errors)) {
-        $ok = safe_db_run("INSERT INTO attendance (school_id, student_id, class_id, date, status, recorded_by, notes, created_at)
-                           VALUES (:school_id, :student_id, :class_id, :date, :status, :recorded_by, :notes, NOW())", [
-            ':school_id'=>$school_id,
-            ':student_id'=>$student_id,
-            ':class_id'=>$class_id,
-            ':date'=>$date,
-            ':status'=>$status,
-            ':recorded_by'=>$recorded_by,
-            ':notes'=>$notes
-        ]);
-        if ($ok) { $messages[] = 'Attendance recorded.'; header('Location: ?'); exit; }
-        $errors[] = 'Failed to insert record.';
+$uiStatuses = ['present', 'absent', 'leave'];
+$normStatus = static function (string $raw): string {
+    $s = strtolower(trim($raw));
+    if (in_array($s, ['present', 'late'], true)) {
+        return 'present';
     }
-}
-
-/* EDIT */
-if ($action === 'edit' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $id          = !empty($_POST['id']) ? (int)$_POST['id'] : 0;
-    $student_id  = isset($_POST['student_id']) && $_POST['student_id'] !== '' ? (int)$_POST['student_id'] : null;
-    $class_id    = isset($_POST['class_id']) && $_POST['class_id'] !== '' ? (int)$_POST['class_id'] : null;
-    $date        = trim((string)($_POST['date'] ?? ''));
-    $status      = in_array($_POST['status'] ?? 'present', $statusOptions, true) ? $_POST['status'] : 'present';
-    $recorded_by = isset($_POST['recorded_by']) && $_POST['recorded_by'] !== '' ? (int)$_POST['recorded_by'] : null;
-    $notes       = trim((string)($_POST['notes'] ?? ''));
-
-    if ($id <= 0) $errors[] = 'Invalid id.';
-    if (!$student_id) $errors[] = 'Student is required.';
-    if ($date === '') $errors[] = 'Date is required.';
-
-    if (empty($errors)) {
-        $ok = safe_db_run("UPDATE attendance SET student_id = :student_id, class_id = :class_id, date = :date, status = :status, recorded_by = :recorded_by, notes = :notes WHERE id = :id", [
-            ':student_id'=>$student_id,
-            ':class_id'=>$class_id,
-            ':date'=>$date,
-            ':status'=>$status,
-            ':recorded_by'=>$recorded_by,
-            ':notes'=>$notes,
-            ':id'=>$id
-        ]);
-        if ($ok) { $messages[] = 'Attendance updated.'; header('Location: ?'); exit; }
-        $errors[] = 'Failed to update record.';
+    if ($s === 'absent') {
+        return 'absent';
     }
-}
-
-/* VIEW fragment (HTML) */
-if ($action === 'view' && !empty($_GET['id'])) {
-    $id = (int)$_GET['id'];
-    if ($id <= 0) { echo '<div class="text-danger p-3">Invalid id</div>'; exit; }
-    $row = safe_db_get_one("SELECT a.*, COALESCE(CONCAT(s.first_name,' ',COALESCE(s.last_name,'')),'') AS student_name, COALESCE(c.name,'') AS class_name, COALESCE(u.name,'') AS recorder_name
-                            FROM attendance a
-                            LEFT JOIN students s ON s.id = a.student_id
-                            LEFT JOIN classes c ON c.id = a.class_id
-                            LEFT JOIN users u ON u.id = a.recorded_by
-                            WHERE a.id = :id LIMIT 1", [':id'=>$id]);
-    if (!$row) { echo '<div class="text-muted p-3">Record not found</div>'; exit; }
-
-    echo '<dl class="row p-3">';
-    echo '<dt class="col-sm-3">ID</dt><dd class="col-sm-9">'.(int)$row['id'].'</dd>';
-    echo '<dt class="col-sm-3">Date</dt><dd class="col-sm-9">'.e($row['date']).'</dd>';
-    echo '<dt class="col-sm-3">Student</dt><dd class="col-sm-9">'.e($row['student_name'] ?: ('#'.$row['student_id'])).'</dd>';
-    echo '<dt class="col-sm-3">Class</dt><dd class="col-sm-9">'.e($row['class_name'] ?: ('#'.$row['class_id'])).'</dd>';
-    echo '<dt class="col-sm-3">Status</dt><dd class="col-sm-9">'.e(ucfirst((string)$row['status'])).'</dd>';
-    echo '<dt class="col-sm-3">Recorded by</dt><dd class="col-sm-9">'.($row['recorder_name'] ? e($row['recorder_name']) : '—').'</dd>';
-    echo '<dt class="col-sm-3">Notes</dt><dd class="col-sm-9"><pre style="white-space:pre-wrap;">'.e((string)$row['notes']).'</pre></dd>';
-    echo '<dt class="col-sm-3">Created</dt><dd class="col-sm-9">'.e((string)$row['created_at']).'</dd>';
-    echo '</dl>';
-    exit;
-}
-
-/* GET (for edit) returns JSON */
-if ($action === 'get' && !empty($_GET['id'])) {
-    $id = (int)$_GET['id'];
-    header('Content-Type: application/json; charset=utf-8');
-    if ($id <= 0) { echo json_encode(['error'=>'Invalid id']); exit; }
-    $row = safe_db_get_one("SELECT id, school_id, student_id, class_id, DATE_FORMAT(date,'%Y-%m-%d') AS date, status, recorded_by, notes FROM attendance WHERE id = :id LIMIT 1", [':id'=>$id]);
-    if (!$row) { echo json_encode(['error'=>'Not found']); exit; }
-    echo json_encode(['ok'=>true,'data'=>$row]); exit;
-}
-
-/* Quick status change */
-if ($action === 'status' && !empty($_GET['id']) && !empty($_GET['to'])) {
-    $id = (int)$_GET['id'];
-    $to = in_array($_GET['to'], $statusOptions, true) ? $_GET['to'] : null;
-    if ($id <= 0 || $to === null) { $errors[] = 'Invalid status change.'; }
-    else {
-        $ok = safe_db_run("UPDATE attendance SET status = :s WHERE id = :id", [':s'=>$to, ':id'=>$id]);
-        if ($ok) { $messages[] = 'Status updated.'; header('Location: ?'); exit; } else $errors[] = 'Status update failed.';
+    if (in_array($s, ['leave', 'excused'], true)) {
+        return 'leave';
     }
-}
+    return 'present';
+};
 
-/* DELETE */
-/* BACKUP: Phase-A — delete requires POST + CSRF (was unsafe GET) */
-if (function_exists('secure_delete_blocked_get') && secure_delete_blocked_get($action)) {
-    if (isset($errors) && is_array($errors)) { $errors[] = 'Delete requires confirmation (POST).'; }
-    elseif (isset($messages) && is_array($messages)) { $messages[] = 'Delete requires confirmation (POST).'; }
-}
-$deleteId = function_exists('secure_delete_id') ? secure_delete_id() : 0;
-if ($deleteId > 0) {
-    $id = $deleteId;
-    if ($id > 0) {
-        $ok = safe_db_run("DELETE FROM attendance WHERE id = :id", [':id'=>$id]);
-        if ($ok) $messages[] = 'Record deleted.'; else $errors[] = 'Delete failed.';
-    } else $errors[] = 'Invalid id.';
-}
-
-/* EXPORT CSV */
-if ($action === 'export') {
-    $where = []; $params = [];
-    if (!empty($_GET['q'])) { $where[] = "(CONCAT(s.first_name,' ',COALESCE(s.last_name,'')) LIKE :q OR a.notes LIKE :q)"; $params[':q'] = '%'.trim($_GET['q']).'%'; }
-    if (!empty($_GET['date'])) { $where[] = "a.date = :date"; $params[':date'] = $_GET['date']; }
-    if (!empty($_GET['class_id'])) { $where[] = "a.class_id = :class_id"; $params[':class_id'] = (int)$_GET['class_id']; }
-    if (!empty($_GET['student_id'])) { $where[] = "a.student_id = :student_id"; $params[':student_id'] = (int)$_GET['student_id']; }
-    if (!empty($_GET['status']) && in_array($_GET['status'],$statusOptions,true)) { $where[] = "a.status = :status"; $params[':status'] = $_GET['status']; }
-    $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
-
-    $rows = safe_db_get_all("SELECT a.*, COALESCE(CONCAT(s.first_name,' ',COALESCE(s.last_name,'')),'') AS student_name, COALESCE(c.name,'') AS class_name, COALESCE(u.name,'') AS recorder_name
-                             FROM attendance a
-                             LEFT JOIN students s ON s.id = a.student_id
-                             LEFT JOIN classes c ON c.id = a.class_id
-                             LEFT JOIN users u ON u.id = a.recorded_by
-                             $whereSql
-                             ORDER BY a.date DESC, a.id DESC", $params);
-
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=attendance_'.date('Ymd_His').'.csv');
-    $out = fopen('php://output','w');
-    fputcsv($out, ['ID','Date','Student','Class','Status','Recorded By','Notes','Created At']);
-    foreach ($rows as $r) {
-        fputcsv($out, [
-            $r['id'] ?? '',
-            $r['date'] ?? '',
-            $r['student_name'] ?: ($r['student_id'] ?? ''),
-            $r['class_name'] ?: ($r['class_id'] ?? ''),
-            $r['status'] ?? '',
-            $r['recorder_name'] ?: ($r['recorded_by'] ?? ''),
-            preg_replace("/\r\n|\r|\n/"," ", $r['notes'] ?? ''),
-            $r['created_at'] ?? ''
-        ]);
+$classRank = static function (array $c): int {
+    $n = strtolower((string) ($c['name'] ?? ''));
+    if (str_starts_with($n, 'play')) {
+        return 1;
     }
-    fclose($out); exit;
+    if (str_starts_with($n, 'nurs')) {
+        return 2;
+    }
+    if (str_starts_with($n, 'l')) {
+        return 3;
+    }
+    if (str_starts_with($n, 'u')) {
+        return 4;
+    }
+    return 9;
+};
+
+$classes = [];
+if (table_exists('classes')) {
+    $classes = safe_db_get_all('SELECT id, name FROM classes ORDER BY name ASC') ?: [];
+    usort($classes, static function (array $a, array $b) use ($classRank): int {
+        $d = $classRank($a) <=> $classRank($b);
+        return $d !== 0 ? $d : strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+    });
 }
 
-/* -------------------------
-   List: Filters & Pagination
-   ------------------------- */
-$page = max(1, (int)($_GET['page'] ?? 1));
-$perPage = 25; $offset = ($page - 1) * $perPage;
-
-$where = []; $params = [];
-$qraw = trim((string)($_GET['q'] ?? ''));
-if ($qraw !== '') { $where[] = "(CONCAT(s.first_name,' ',COALESCE(s.last_name,'')) LIKE :q OR a.notes LIKE :q)"; $params[':q'] = '%'.$qraw.'%'; }
-$filterDate = trim((string)($_GET['date'] ?? ''));
-if ($filterDate !== '') { $where[] = "a.date = :date"; $params[':date'] = $filterDate; }
-if (!empty($_GET['class_id'])) { $where[] = "a.class_id = :class_id"; $params[':class_id'] = (int)$_GET['class_id']; }
-if (!empty($_GET['student_id'])) { $where[] = "a.student_id = :student_id"; $params[':student_id'] = (int)$_GET['student_id']; }
-$statusFilter = trim((string)($_GET['status'] ?? ''));
-if ($statusFilter !== '' && in_array($statusFilter, $statusOptions, true)) { $where[] = "a.status = :status"; $params[':status'] = $statusFilter; }
-
-$whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
-
-try {
-    $cRow = safe_db_get_one("SELECT COUNT(*) AS c FROM attendance a LEFT JOIN students s ON s.id = a.student_id " . ($whereSql ? $whereSql : ''), $params);
-    $total = intval($cRow['c'] ?? 0);
-} catch (Throwable $e) {
-    $total = 0;
-    $errors[] = 'Count query failed: ' . ($DEBUG ? $e->getMessage() : 'Internal error');
+$selectedClassId = (int) ($_POST['class_id'] ?? $_GET['class_id'] ?? 0);
+$classIds = array_map(static fn($c) => (int) ($c['id'] ?? 0), $classes);
+if ($selectedClassId > 0 && !in_array($selectedClassId, $classIds, true)) {
+    $selectedClassId = 0;
 }
 
-$rows = [];
-try {
-    $sql = "SELECT a.*, COALESCE(CONCAT(s.first_name,' ',COALESCE(s.last_name,'')),'') AS student_name, COALESCE(c.name,'') AS class_name, COALESCE(u.name,'') AS recorder_name
-            FROM attendance a
-            LEFT JOIN students s ON s.id = a.student_id
-            LEFT JOIN classes c ON c.id = a.class_id
-            LEFT JOIN users u ON u.id = a.recorded_by
-            $whereSql
-            ORDER BY a.date DESC, a.id DESC
-            LIMIT :limit OFFSET :offset";
-    $pdo = pdo_connect();
-    if ($pdo instanceof PDO) {
-        $stmt = $pdo->prepare($sql);
-        foreach ($params as $k=>$v) $stmt->bindValue($k,$v);
-        $stmt->bindValue(':limit', (int)$perPage, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', (int)$offset, PDO::PARAM_INT);
-        $stmt->execute();
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+$selectedDate = trim((string) ($_POST['date'] ?? $_GET['date'] ?? $today));
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $selectedDate)) {
+    $selectedDate = $today;
+}
+
+$messages = [];
+$errors = [];
+
+$ayStu = function_exists('ay_sql_student') ? ay_sql_student('s') : '1=1';
+$statusSql = "LOWER(COALESCE(s.status,'active')) IN ('active','pending')";
+$schoolSql = '';
+$baseParams = [];
+if (function_exists('column_exists') && column_exists('students', 'school_id') && $schoolId > 0) {
+    $schoolSql = ' AND s.school_id = :sid';
+    $baseParams[':sid'] = $schoolId;
+}
+
+$loadStudents = static function (int $classId) use ($ayStu, $statusSql, $schoolSql, $baseParams): array {
+    if (!table_exists('students')) {
+        return [];
+    }
+    $where = "WHERE {$statusSql} AND {$ayStu}{$schoolSql}";
+    $params = function_exists('ay_params_student') ? ay_params_student($baseParams) : $baseParams;
+    if ($classId > 0) {
+        $where .= ' AND s.class_id = :cid';
+        $params[':cid'] = $classId;
+    }
+    return safe_db_get_all(
+        "SELECT s.id, s.first_name, s.middle_name, s.last_name, s.photo_path, s.class_id, s.school_id
+         FROM students s
+         {$where}
+         ORDER BY s.first_name ASC, s.last_name ASC",
+        $params
+    ) ?: [];
+};
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['action'] ?? '') === 'save') {
+    if (!function_exists('validate_csrf_token') || !validate_csrf_token((string) ($_POST['csrf'] ?? ''))) {
+        $errors[] = 'Please reload the page and try again.';
+    } elseif (!$tableOk) {
+        $errors[] = 'Attendance is not set up yet.';
+    } elseif ($selectedClassId <= 0) {
+        $errors[] = 'Open one class to save corrections.';
     } else {
-        $rows = safe_db_get_all($sql, array_merge($params, [':limit'=>$perPage, ':offset'=>$offset]));
+        $submitted = isset($_POST['status']) && is_array($_POST['status']) ? $_POST['status'] : [];
+        $allowed = array_map(static fn($s) => (int) $s['id'], $loadStudents($selectedClassId));
+        $pdo = function_exists('pdo_connect') ? pdo_connect() : null;
+        if (!($pdo instanceof PDO)) {
+            $errors[] = 'Could not save. Try again.';
+        } else {
+            try {
+                $pdo->beginTransaction();
+                $selStmt = $pdo->prepare('SELECT id FROM attendance WHERE class_id = :class_id AND student_id = :student_id AND `date` = :date LIMIT 1');
+                $updStmt = $pdo->prepare('UPDATE attendance SET status = :status, recorded_by = :recorded_by WHERE id = :id');
+                $insStmt = $pdo->prepare('INSERT INTO attendance (school_id, student_id, class_id, `date`, status, recorded_by, notes, created_at) VALUES (:school_id, :student_id, :class_id, :date, :status, :recorded_by, :notes, NOW())');
+                foreach ($allowed as $studentId) {
+                    if ($studentId <= 0) {
+                        continue;
+                    }
+                    $status = $normStatus((string) ($submitted[(string) $studentId] ?? 'present'));
+                    if (!in_array($status, $uiStatuses, true)) {
+                        $status = 'present';
+                    }
+                    $selStmt->execute([':class_id' => $selectedClassId, ':student_id' => $studentId, ':date' => $selectedDate]);
+                    $found = $selStmt->fetch(PDO::FETCH_ASSOC);
+                    if ($found && !empty($found['id'])) {
+                        $updStmt->execute([':status' => $status, ':recorded_by' => $ownerId, ':id' => $found['id']]);
+                    } else {
+                        $srow = safe_db_get_one('SELECT school_id FROM students WHERE id = :id LIMIT 1', [':id' => $studentId]);
+                        $insStmt->execute([
+                            ':school_id' => $srow['school_id'] ?? ($schoolId > 0 ? $schoolId : null),
+                            ':student_id' => $studentId,
+                            ':class_id' => $selectedClassId,
+                            ':date' => $selectedDate,
+                            ':status' => $status,
+                            ':recorded_by' => $ownerId,
+                            ':notes' => '',
+                        ]);
+                    }
+                }
+                $pdo->commit();
+                header('Location: ?class_id=' . $selectedClassId . '&date=' . rawurlencode($selectedDate) . '&saved=1');
+                exit;
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                $errors[] = $DEBUG ? ('Could not save: ' . $e->getMessage()) : 'Could not save. Try again.';
+            }
+        }
     }
-} catch (Throwable $e) {
-    $errors[] = 'List fetch failed: ' . ($DEBUG ? $e->getMessage() : 'Internal error');
 }
 
-$totalPages = (int)ceil(max(0, $total) / $perPage);
-
-/* Helper to build QS */
-function build_qs(array $over = []): string {
-    $qs = $_GET;
-    foreach ($over as $k=>$v) { if ($v === null) unset($qs[$k]); else $qs[$k] = $v; }
-    return http_build_query($qs);
+if ((string) ($_GET['action'] ?? '') === 'export' && $tableOk) {
+    $students = $loadStudents($selectedClassId);
+    $attRows = safe_db_get_all(
+        'SELECT student_id, class_id, status FROM attendance WHERE `date` = :d',
+        [':d' => $selectedDate]
+    ) ?: [];
+    $byStu = [];
+    foreach ($attRows as $r) {
+        $byStu[(int) ($r['student_id'] ?? 0)] = $normStatus((string) ($r['status'] ?? ''));
+    }
+    $classNames = [];
+    foreach ($classes as $c) {
+        $classNames[(int) $c['id']] = (string) ($c['name'] ?? '');
+    }
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename=attendance_' . $selectedDate . '.csv');
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Date', 'Class', 'Child', 'Status']);
+    foreach ($students as $s) {
+        $sid = (int) ($s['id'] ?? 0);
+        $nm = function_exists('student_full_name') ? student_full_name($s) : trim((string) ($s['first_name'] ?? '') . ' ' . (string) ($s['last_name'] ?? ''));
+        $cid = (int) ($s['class_id'] ?? 0);
+        $st = $byStu[$sid] ?? 'not marked';
+        fputcsv($out, [$selectedDate, $classNames[$cid] ?? '', $nm, $st]);
+    }
+    fclose($out);
+    exit;
 }
 
-/* -------------------------
-   Render page
-   ------------------------- */
-$pageTitle = 'Attendance';
+if (!empty($_GET['saved'])) {
+    $messages[] = 'Attendance updated for this class.';
+}
+
+$allStudents = $loadStudents(0);
+$attRows = [];
+if ($tableOk) {
+    $attRows = safe_db_get_all(
+        'SELECT student_id, class_id, status FROM attendance WHERE `date` = :d',
+        [':d' => $selectedDate]
+    ) ?: [];
+}
+$byStu = [];
+foreach ($attRows as $r) {
+    $byStu[(int) ($r['student_id'] ?? 0)] = $normStatus((string) ($r['status'] ?? ''));
+}
+
+$counts = ['present' => 0, 'absent' => 0, 'leave' => 0, 'none' => 0];
+$byClass = [];
+foreach ($classes as $c) {
+    $cid = (int) ($c['id'] ?? 0);
+    $byClass[$cid] = [
+        'name' => (string) ($c['name'] ?? 'Class'),
+        'students' => [],
+        'present' => 0,
+        'absent' => 0,
+        'leave' => 0,
+        'none' => 0,
+    ];
+}
+foreach ($allStudents as $s) {
+    $sid = (int) ($s['id'] ?? 0);
+    $cid = (int) ($s['class_id'] ?? 0);
+    $st = $byStu[$sid] ?? '';
+    $key = $st !== '' ? $st : 'none';
+    $counts[$key] = ($counts[$key] ?? 0) + 1;
+    if (!isset($byClass[$cid])) {
+        $byClass[$cid] = [
+            'name' => 'Class',
+            'students' => [],
+            'present' => 0,
+            'absent' => 0,
+            'leave' => 0,
+            'none' => 0,
+        ];
+    }
+    $byClass[$cid]['students'][] = $s;
+    $byClass[$cid][$key]++;
+}
+
+$recentDates = [];
+if ($tableOk) {
+    $recentDates = safe_db_get_all(
+        'SELECT `date` AS d, COUNT(*) AS c
+         FROM attendance
+         GROUP BY `date`
+         ORDER BY `date` DESC
+         LIMIT 14'
+    ) ?: [];
+}
+
+$viewStudents = $selectedClassId > 0
+    ? ($byClass[$selectedClassId]['students'] ?? [])
+    : [];
+
+$selectedName = $selectedClassId > 0 ? (string) ($byClass[$selectedClassId]['name'] ?? '') : 'All classes';
+$dateLabel = $selectedDate === $today ? 'Today' : date('D, d M Y', strtotime($selectedDate) ?: time());
+$prevDate = date('Y-m-d', strtotime($selectedDate . ' -1 day') ?: time());
+$nextDate = date('Y-m-d', strtotime($selectedDate . ' +1 day') ?: time());
+$qs = static function (int $classId, string $date): string {
+    $q = '?date=' . rawurlencode($date);
+    if ($classId > 0) {
+        $q .= '&class_id=' . $classId;
+    }
+    return $q;
+};
+$totalChildren = count($allStudents);
+$marked = $counts['present'] + $counts['absent'] + $counts['leave'];
+
+$page_title = 'Who came today';
+$pageTitle = $page_title;
 require_once __DIR__ . '/../includes/header.php';
 ?>
+<style>
+.att-chip { display:inline-flex; border:1px solid #dbe7fb; background:#fff; border-radius:999px; padding:.35rem .85rem; text-decoration:none; color:#1e3a5f; font-weight:600; font-size:.9rem; margin:0 .4rem .5rem 0; }
+.att-chip.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
+.att-stat { background:#fff; border:1px solid #dbe7fb; border-radius:14px; padding:12px 14px; min-width:110px; flex:1; }
+.att-stat .n { font-size:1.5rem; font-weight:800; line-height:1.1; }
+.att-card { background:#fff; border:1px solid #dbe7fb; border-radius:16px; padding:14px 16px; margin-bottom:12px; }
+.att-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid #eef3fb; flex-wrap:wrap; }
+.att-row:last-child { border-bottom:0; }
+.att-photo { width:40px; height:40px; border-radius:50%; object-fit:cover; background:#e2e8f0; flex-shrink:0; }
+.att-name { font-weight:700; color:#1e3a5f; min-width:120px; flex:1; }
+.att-btns { display:flex; gap:6px; flex-wrap:wrap; }
+.att-btns label { margin:0; }
+.att-btns input { position:absolute; opacity:0; pointer-events:none; }
+.att-btns span { display:inline-block; border-radius:999px; padding:.35rem .7rem; font-size:.82rem; font-weight:700; border:1px solid #cbd5e1; color:#475569; cursor:pointer; user-select:none; }
+.att-btns input:checked + span.p { background:#16a34a; border-color:#16a34a; color:#fff; }
+.att-btns input:checked + span.a { background:#dc2626; border-color:#dc2626; color:#fff; }
+.att-btns input:checked + span.l { background:#d97706; border-color:#d97706; color:#fff; }
+.att-badge { display:inline-block; border-radius:999px; padding:.2rem .55rem; font-size:.75rem; font-weight:700; }
+.att-badge.p { background:#dcfce7; color:#166534; }
+.att-badge.a { background:#fee2e2; color:#991b1b; }
+.att-badge.l { background:#ffedd5; color:#9a3412; }
+.att-badge.n { background:#f1f5f9; color:#64748b; }
+.att-datechip { display:inline-block; border:1px solid #e2e8f0; border-radius:10px; padding:.25rem .6rem; font-size:.82rem; text-decoration:none; color:#334155; margin:0 .35rem .35rem 0; background:#f8fafc; }
+.att-datechip.active { border-color:#1d4ed8; color:#1d4ed8; background:#eff6ff; font-weight:700; }
+.att-sticky { position:sticky; bottom:12px; background:#1e3a5f; color:#fff; border-radius:14px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; z-index:5; }
+@media print {
+  .att-sticky, .btn, form#attForm .d-flex.gap-2, a.att-chip, a.att-datechip, .no-print { display:none !important; }
+}
+</style>
 
-<div class="d-flex justify-content-end gap-2 mb-3">
-<button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addModal">Add Record</button>
-      <a class="btn btn-outline-secondary" href="?">Refresh</a>
-      <a class="btn btn-sm btn-success" href="?action=export&<?php echo build_qs(); ?>">Export CSV</a>
-    </div>
+<?php foreach ($messages as $m): ?><div class="alert alert-success py-2"><?php echo e($m); ?></div><?php endforeach; ?>
+<?php foreach ($errors as $er): ?><div class="alert alert-danger py-2"><?php echo e($er); ?></div><?php endforeach; ?>
 
-  <?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo e($m); ?></div><?php endforeach; ?>
-  <?php foreach ($errors as $err): ?><div class="alert alert-danger"><?php echo e($err); ?></div><?php endforeach; ?>
+<?php if (!$tableOk): ?>
+  <div class="alert alert-warning mb-0">Attendance is not set up yet.</div>
+<?php else: ?>
 
-  <!-- Filters -->
-  <div class="card mb-3 p-3">
-    <form method="get" class="row g-2 align-items-end">
-      <div class="col-md-3"><label class="form-label">Search</label><input name="q" class="form-control" value="<?php echo e($qraw ?? ''); ?>" placeholder="Student name or notes"></div>
-      <div class="col-md-2"><label class="form-label">Date</label><input type="date" name="date" class="form-control" value="<?php echo e($filterDate ?? ''); ?>"></div>
-      <div class="col-md-2"><label class="form-label">Class</label>
-        <select name="class_id" class="form-select"><option value="">Any</option><?php foreach ($classList as $c): ?><option value="<?php echo (int)$c['id']; ?>" <?php if(($_GET['class_id'] ?? '')===(string)$c['id']) echo 'selected'; ?>><?php echo e($c['name']); ?></option><?php endforeach; ?></select>
-      </div>
-      <div class="col-md-2"><label class="form-label">Student</label>
-        <select name="student_id" class="form-select"><option value="">Any</option><?php foreach ($studentList as $s): ?><option value="<?php echo (int)$s['id']; ?>" <?php if(($_GET['student_id'] ?? '')===(string)$s['id']) echo 'selected'; ?>><?php echo e($s['first_name'] . ' ' . ($s['last_name'] ?? '')); ?></option><?php endforeach; ?></select>
-      </div>
-      <div class="col-md-2"><label class="form-label">Status</label>
-        <select name="status" class="form-select"><option value="">Any</option><?php foreach ($statusOptions as $st): ?><option value="<?php echo e($st); ?>" <?php if(($statusFilter ?? '')===$st) echo 'selected'; ?>><?php echo e(ucfirst($st)); ?></option><?php endforeach; ?></select>
-      </div>
-      <div class="col-md-1 text-end"><button class="btn btn-primary">Filter</button></div>
+  <p class="text-muted mb-2">Check <strong>who came to school</strong> on a date. Teachers mark the class; you can open a class and correct it.</p>
+
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3 no-print">
+    <a class="btn btn-sm btn-outline-secondary" href="<?php echo e($qs($selectedClassId, $prevDate)); ?>">←</a>
+    <form method="get" class="d-flex gap-2 align-items-center">
+      <?php if ($selectedClassId > 0): ?>
+        <input type="hidden" name="class_id" value="<?php echo (int) $selectedClassId; ?>">
+      <?php endif; ?>
+      <input type="date" name="date" class="form-control form-control-sm" value="<?php echo e($selectedDate); ?>" onchange="this.form.submit()" style="max-width:160px">
     </form>
+    <a class="btn btn-sm btn-outline-secondary" href="<?php echo e($qs($selectedClassId, $nextDate)); ?>">→</a>
+    <?php if ($selectedDate !== $today): ?>
+      <a class="btn btn-sm btn-outline-primary" href="<?php echo e($qs($selectedClassId, $today)); ?>">Today</a>
+    <?php endif; ?>
+    <span class="text-muted small"><?php echo e($dateLabel); ?></span>
+    <a class="btn btn-sm btn-outline-secondary ms-auto" href="<?php echo e($qs($selectedClassId, $selectedDate)); ?>&amp;action=export">CSV</a>
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="window.print()">Print</button>
   </div>
 
-  <!-- Table -->
-  <div class="card">
-    <div class="table-responsive">
-      <table class="table table-striped mb-0">
-        <thead>
-          <tr>
-            <th style="width:60px">ID</th>
-            <th style="width:120px">Date</th>
-            <th>Student</th>
-            <th style="width:220px">Class / Status</th>
-            <th>Recorded By / Notes</th>
-            <th style="width:200px">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php if (!empty($rows)): foreach ($rows as $r): ?>
-            <tr>
-              <td><?php echo (int)$r['id']; ?></td>
-              <td><?php echo e($r['date'] ?? ''); ?></td>
-              <td><div class="fw-semibold"><?php echo e($r['student_name'] ?: ('#' . ($r['student_id'] ?? ''))); ?></div></td>
-              <td>
-                <div class="small text-muted"><?php echo e($r['class_name'] ?: ('#' . ($r['class_id'] ?? ''))); ?></div>
-                <div class="mt-1"><span class="badge <?php echo ($r['status']==='present'?'bg-success':($r['status']==='absent'?'bg-danger':'bg-secondary')); ?>"><?php echo e(ucfirst($r['status'] ?? '')); ?></span></div>
-                <div class="mt-2">
-                  <?php foreach ($statusOptions as $st): ?>
-                    <a class="btn btn-sm btn-outline-secondary" href="?action=status&id=<?php echo (int)$r['id']; ?>&to=<?php echo e($st); ?>"><?php echo e(ucfirst($st)); ?></a>
-                  <?php endforeach; ?>
-                </div>
-              </td>
-              <td>
-                <div class="small text-muted"><?php echo e($r['recorder_name'] ?? '—'); ?></div>
-                <div class="small"><?php echo e(mb_strimwidth($r['notes'] ?? '', 0, 120, '...')); ?></div>
-              </td>
-              <td>
-                <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#viewModal" data-id="<?php echo (int)$r['id']; ?>">View</button>
-                <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#editModal" data-id="<?php echo (int)$r['id']; ?>">Edit</button>
-                <?php echo render_secure_delete_button((int)$r['id'], 'Delete', 'Delete record?'); ?>
-              </td>
-            </tr>
-          <?php endforeach; else: ?>
-            <tr><td colspan="6" class="text-center text-muted">No attendance records found.</td></tr>
-          <?php endif; ?>
-        </tbody>
-      </table>
+  <?php if ($recentDates !== []): ?>
+    <div class="mb-3 no-print">
+      <?php foreach ($recentDates as $od):
+          $d = substr((string) ($od['d'] ?? ''), 0, 10);
+          if ($d === '') {
+              continue;
+          }
+          $lab = $d === $today ? 'Today' : date('d M', strtotime($d) ?: time());
+          ?>
+        <a class="att-datechip<?php echo $d === $selectedDate ? ' active' : ''; ?>" href="<?php echo e($qs($selectedClassId, $d)); ?>"><?php echo e($lab); ?></a>
+      <?php endforeach; ?>
     </div>
+  <?php endif; ?>
 
-    <div class="p-3 d-flex justify-content-between align-items-center">
-      <div>Showing <?php echo $total ? ($offset+1) : 0; ?> - <?php echo min($total, $offset + count($rows)); ?> of <?php echo $total; ?></div>
-      <nav>
-        <ul class="pagination mb-0">
-          <?php for ($p = 1; $p <= max(1,$totalPages); $p++): ?>
-            <li class="page-item <?php if ($p === $page) echo 'active'; ?>"><a class="page-link" href="?<?php echo build_qs(['page'=>$p]); ?>"><?php echo $p; ?></a></li>
-          <?php endfor; ?>
-        </ul>
-      </nav>
-    </div>
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    <div class="att-stat"><div class="n text-success"><?php echo (int) $counts['present']; ?></div><div class="small text-muted">Present</div></div>
+    <div class="att-stat"><div class="n text-danger"><?php echo (int) $counts['absent']; ?></div><div class="small text-muted">Absent</div></div>
+    <div class="att-stat"><div class="n" style="color:#d97706"><?php echo (int) $counts['leave']; ?></div><div class="small text-muted">Leave</div></div>
+    <div class="att-stat"><div class="n text-secondary"><?php echo (int) $counts['none']; ?></div><div class="small text-muted">Not marked</div></div>
   </div>
-</div>
+  <div class="small text-muted mb-3"><?php echo (int) $marked; ?> of <?php echo (int) $totalChildren; ?> children marked on <?php echo e($dateLabel); ?>.</div>
 
-<!-- Add Modal -->
-<div class="modal fade" id="addModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <form method="post" action="?action=add">
-        <div class="modal-header"><h5 class="modal-title">Add Attendance</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-          <div class="row g-2">
-            <div class="col-md-4"><label class="form-label">Date</label><input type="date" name="date" class="form-control" value="<?php echo e(date('Y-m-d')); ?>" required></div>
-            <div class="col-md-4"><label class="form-label">Class</label>
-              <select name="class_id" id="add_class_id" class="form-select"><option value="">Select class (optional)</option><?php foreach ($classList as $c): ?><option value="<?php echo (int)$c['id']; ?>"><?php echo e($c['name']); ?></option><?php endforeach; ?></select>
-            </div>
-            <div class="col-md-4"><label class="form-label">Student</label>
-              <select name="student_id" class="form-select" required><option value="">Select student</option><?php foreach ($studentList as $s): ?><option value="<?php echo (int)$s['id']; ?>" data-class="<?php echo (int)$s['class_id']; ?>"><?php echo e($s['first_name'] . ' ' . ($s['last_name'] ?? '')); ?></option><?php endforeach; ?></select>
-            </div>
+  <div class="mb-3 no-print">
+    <a class="att-chip<?php echo $selectedClassId === 0 ? ' active' : ''; ?>" href="<?php echo e($qs(0, $selectedDate)); ?>">All classes</a>
+    <?php foreach ($classes as $c):
+        $cid = (int) $c['id'];
+        $n = (int) ($byClass[$cid]['none'] ?? 0);
+        $tot = count($byClass[$cid]['students'] ?? []);
+        $lab = (string) ($c['name'] ?? 'Class');
+        if ($tot > 0) {
+            $lab .= ' · ' . ($tot - $n) . '/' . $tot;
+        }
+        ?>
+      <a class="att-chip<?php echo $cid === $selectedClassId ? ' active' : ''; ?>" href="<?php echo e($qs($cid, $selectedDate)); ?>"><?php echo e($lab); ?></a>
+    <?php endforeach; ?>
+  </div>
 
-            <div class="col-md-4"><label class="form-label">Status</label>
-              <select name="status" class="form-select"><?php foreach ($statusOptions as $st): ?><option value="<?php echo e($st); ?>"><?php echo e(ucfirst($st)); ?></option><?php endforeach; ?></select>
-            </div>
-
-            <div class="col-md-4"><label class="form-label">Recorded by</label>
-              <select name="recorded_by" class="form-select"><option value="">--</option><?php foreach ($staffList as $u): ?><option value="<?php echo (int)$u['id']; ?>"><?php echo e($u['name']); ?></option><?php endforeach; ?></select>
-            </div>
-
-            <div class="col-12"><label class="form-label">Notes</label><textarea name="notes" rows="3" class="form-control"></textarea></div>
+  <?php if ($selectedClassId === 0): ?>
+    <?php if ($classes === []): ?>
+      <div class="text-muted">No classes yet.</div>
+    <?php else: ?>
+      <?php foreach ($classes as $c):
+          $cid = (int) $c['id'];
+          $block = $byClass[$cid] ?? null;
+          if (!$block) {
+              continue;
+          }
+          $kids = $block['students'];
+          ?>
+        <div class="att-card">
+          <div class="d-flex justify-content-between flex-wrap gap-2 mb-2">
+            <div class="fw-bold"><?php echo e((string) $block['name']); ?> · <?php echo count($kids); ?></div>
+            <div class="small text-muted"><?php echo (int) $block['present']; ?> present · <?php echo (int) $block['absent']; ?> absent · <?php echo (int) $block['leave']; ?> leave<?php echo $block['none'] ? ' · ' . (int) $block['none'] . ' not marked' : ''; ?></div>
           </div>
+          <?php if ($kids === []): ?>
+            <div class="text-muted small">No children in this class this year.</div>
+          <?php else: ?>
+            <?php foreach ($kids as $s):
+                $sid = (int) $s['id'];
+                $nm = function_exists('student_full_name') ? student_full_name($s) : trim((string) ($s['first_name'] ?? '') . ' ' . (string) ($s['last_name'] ?? ''));
+                $st = $byStu[$sid] ?? '';
+                $cls = $st === 'present' ? 'p' : ($st === 'absent' ? 'a' : ($st === 'leave' ? 'l' : 'n'));
+                $lab = $st === 'present' ? 'Present' : ($st === 'absent' ? 'Absent' : ($st === 'leave' ? 'Leave' : 'Not marked'));
+                ?>
+              <div class="att-row">
+                <div class="att-name"><?php echo e($nm !== '' ? $nm : ('Child #' . $sid)); ?></div>
+                <span class="att-badge <?php echo e($cls); ?>"><?php echo e($lab); ?></span>
+              </div>
+            <?php endforeach; ?>
+            <div class="mt-2 no-print"><a class="btn btn-sm btn-outline-primary" href="<?php echo e($qs($cid, $selectedDate)); ?>">Correct this class</a></div>
+          <?php endif; ?>
         </div>
-        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-success" type="submit">Add</button></div>
+      <?php endforeach; ?>
+    <?php endif; ?>
+  <?php else: ?>
+    <?php if ($viewStudents === []): ?>
+      <div class="text-muted">No children in this class for this year.</div>
+    <?php else: ?>
+      <form method="post" id="attForm">
+        <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+        <input type="hidden" name="action" value="save">
+        <input type="hidden" name="class_id" value="<?php echo (int) $selectedClassId; ?>">
+        <input type="hidden" name="date" value="<?php echo e($selectedDate); ?>">
+        <div class="d-flex flex-wrap gap-2 mb-2 no-print">
+          <button type="button" class="btn btn-sm btn-success" id="allPresent">All present</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" id="allAbsent">All absent</button>
+        </div>
+        <div class="att-card">
+          <div class="fw-bold mb-2"><?php echo e($selectedName); ?> · <?php echo e($dateLabel); ?></div>
+          <?php foreach ($viewStudents as $s):
+              $sid = (int) $s['id'];
+              $nm = function_exists('student_full_name') ? student_full_name($s) : trim((string) ($s['first_name'] ?? '') . ' ' . (string) ($s['last_name'] ?? ''));
+              $photo = function_exists('student_photo_url') ? student_photo_url((string) ($s['photo_path'] ?? '')) : '';
+              $st = $byStu[$sid] ?? 'present';
+              if (!in_array($st, $uiStatuses, true)) {
+                  $st = 'present';
+              }
+              ?>
+            <div class="att-row">
+              <?php if ($photo !== ''): ?>
+                <img class="att-photo" src="<?php echo e($photo); ?>" alt="">
+              <?php else: ?>
+                <div class="att-photo"></div>
+              <?php endif; ?>
+              <div class="att-name"><?php echo e($nm !== '' ? $nm : ('Child #' . $sid)); ?></div>
+              <div class="att-btns">
+                <label><input class="att-status" type="radio" name="status[<?php echo $sid; ?>]" value="present" <?php echo $st === 'present' ? 'checked' : ''; ?>><span class="p">Present</span></label>
+                <label><input class="att-status" type="radio" name="status[<?php echo $sid; ?>]" value="absent" <?php echo $st === 'absent' ? 'checked' : ''; ?>><span class="a">Absent</span></label>
+                <label><input class="att-status" type="radio" name="status[<?php echo $sid; ?>]" value="leave" <?php echo $st === 'leave' ? 'checked' : ''; ?>><span class="l">Leave</span></label>
+              </div>
+            </div>
+          <?php endforeach; ?>
+        </div>
+        <div class="att-sticky no-print">
+          <div class="small" id="attCount">Correct if needed, then save.</div>
+          <button type="submit" class="btn btn-light">Save this class</button>
+        </div>
       </form>
-    </div>
-  </div>
-</div>
+    <?php endif; ?>
+  <?php endif; ?>
 
-<!-- Edit Modal -->
-<div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <form method="post" action="?action=edit" id="editForm">
-        <input type="hidden" name="id" id="edit_id">
-        <div class="modal-header"><h5 class="modal-title">Edit Attendance</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body" id="editBody"><div class="text-center text-muted">Loading…</div></div>
-        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" type="submit">Save</button></div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<!-- View Modal -->
-<div class="modal fade" id="viewModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Attendance Details</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body" id="viewModalBody"><div class="text-center text-muted">Loading…</div></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
-    </div>
-  </div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-document.addEventListener('DOMContentLoaded', function(){
-  // Filter students by selected class (Add modal)
-  var addClass = document.getElementById('add_class_id');
-  if (addClass) addClass.addEventListener('change', function(){
-    var cls = this.value;
-    var sel = document.querySelector('select[name="student_id"]');
-    if (!sel) return;
-    Array.from(sel.options).forEach(function(opt){
-      if (!opt.dataset.class) return;
-      opt.style.display = (cls === '' || opt.dataset.class === cls) ? '' : 'none';
+(function () {
+  function recount() {
+    var p = 0, a = 0, l = 0;
+    document.querySelectorAll('.att-status:checked').forEach(function (el) {
+      if (el.value === 'present') p++;
+      else if (el.value === 'absent') a++;
+      else l++;
     });
+    var el = document.getElementById('attCount');
+    if (el) el.textContent = p + ' present · ' + a + ' absent' + (l ? (' · ' + l + ' leave') : '');
+  }
+  function setAll(val) {
+    document.querySelectorAll('.att-row').forEach(function (row) {
+      var inp = row.querySelector('.att-status[value="' + val + '"]');
+      if (inp) inp.checked = true;
+    });
+    recount();
+  }
+  var ap = document.getElementById('allPresent');
+  var aa = document.getElementById('allAbsent');
+  if (ap) ap.addEventListener('click', function () { setAll('present'); });
+  if (aa) aa.addEventListener('click', function () { setAll('absent'); });
+  document.querySelectorAll('.att-status').forEach(function (el) {
+    el.addEventListener('change', recount);
   });
-
-  // View: load fragment
-  var viewModal = document.getElementById('viewModal');
-  if (viewModal) {
-    viewModal.addEventListener('show.bs.modal', function (event) {
-      var id = event.relatedTarget.getAttribute('data-id'), body = document.getElementById('viewModalBody');
-      body.innerHTML = '<div class="text-center text-muted">Loading…</div>';
-      fetch('?action=view&id=' + encodeURIComponent(id), {credentials:'same-origin'})
-        .then(function(r){ return r.ok ? r.text() : Promise.reject(); })
-        .then(function(html){ body.innerHTML = html; })
-        .catch(function(){ body.innerHTML = '<div class="text-danger p-3">Failed to load details.</div>'; });
-    });
-  }
-
-  // Edit: fetch json and build form
-  var editModal = document.getElementById('editModal');
-  if (editModal) {
-    editModal.addEventListener('show.bs.modal', function (event) {
-      var id = event.relatedTarget.getAttribute('data-id'), body = document.getElementById('editBody');
-      body.innerHTML = '<div class="text-center text-muted">Loading…</div>';
-      fetch('?action=get&id=' + encodeURIComponent(id), {credentials:'same-origin'})
-        .then(function(r){ return r.ok ? r.json() : Promise.reject(); })
-        .then(function(json){
-          if (!json || !json.ok || !json.data) { body.innerHTML = '<div class="text-danger p-3">Failed to load.</div>'; return; }
-          var d = json.data; document.getElementById('edit_id').value = d.id || '';
-          var html = '';
-          html += '<div class="row g-2">';
-          html += '<div class="col-md-4"><label class="form-label">Date</label><input type="date" id="edit_date" name="date" class="form-control" value="'+(d.date||'')+'"></div>';
-          html += '<div class="col-md-4"><label class="form-label">Class</label><select id="edit_class" name="class_id" class="form-select"><option value="">--</option>';
-          <?php foreach ($classList as $c): ?> html += '<option value="<?php echo (int)$c['id']; ?>"><?php echo e(addslashes($c['name'])); ?></option>'; <?php endforeach; ?>
-          html += '</select></div>';
-          html += '<div class="col-md-4"><label class="form-label">Student</label><select id="edit_student" name="student_id" class="form-select"><option value="">--</option>';
-          <?php foreach ($studentList as $s): ?> html += '<option value="<?php echo (int)$s['id']; ?>" data-class="<?php echo (int)$s['class_id']; ?>"><?php echo e(addslashes($s['first_name'] . ' ' . ($s['last_name'] ?? ''))); ?></option>'; <?php endforeach; ?>
-          html += '</select></div>';
-          html += '<div class="col-md-4"><label class="form-label">Status</label><select id="edit_status" name="status" class="form-select"><?php foreach ($statusOptions as $st): ?> html += \'<option value="<?php echo e($st); ?>"><?php echo e(ucfirst($st)); ?></option>\'; <?php endforeach; ?></select></div>';
-          html += '<div class="col-md-4"><label class="form-label">Recorded by</label><select id="edit_rec" name="recorded_by" class="form-select"><option value="">--</option>';
-          <?php foreach ($staffList as $u): ?> html += '<option value="<?php echo (int)$u['id']; ?>"><?php echo e(addslashes($u['name'])); ?></option>'; <?php endforeach; ?>
-          html += '</select></div>';
-          html += '<div class="col-12"><label class="form-label">Notes</label><textarea id="edit_notes" name="notes" rows="3" class="form-control"></textarea></div>';
-          html += '</div>';
-          body.innerHTML = html;
-          document.getElementById('edit_class').value = d.class_id || '';
-          document.getElementById('edit_student').value = d.student_id || '';
-          document.getElementById('edit_status').value = d.status || '';
-          document.getElementById('edit_rec').value = d.recorded_by || '';
-          document.getElementById('edit_notes').value = d.notes || '';
-          document.getElementById('edit_date').value = d.date || '';
-        })
-        .catch(function(){ body.innerHTML = '<div class="text-danger p-3">Failed to load.</div>'; });
-    });
-  }
-});
+  recount();
+})();
 </script>
 
-<?php
-require_once __DIR__ . '/../includes/footer.php';
-?>
+<?php endif; ?>
+
+<?php require_once __DIR__ . '/../includes/footer.php'; ?>
