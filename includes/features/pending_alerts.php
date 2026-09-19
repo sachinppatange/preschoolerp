@@ -17,6 +17,7 @@ $ayStu = function_exists('ay_sql_student') ? ay_sql_student('s') : '1=1';
 $ayP = static function (array $extra = []): array {
     return function_exists('ay_params_student') ? ay_params_student($extra) : $extra;
 };
+$ayLabel = function_exists('ay_display_long') ? ay_display_long() : (function_exists('ay_selected') ? ay_selected() : '');
 
 $stuName = static function (array $s): string {
     $n = trim(preg_replace('/\s+/', ' ', trim(($s['first_name'] ?? '') . ' ' . ($s['middle_name'] ?? '') . ' ' . ($s['last_name'] ?? ''))));
@@ -42,12 +43,22 @@ $groups = [
 ];
 
 if (function_exists('table_exists') && table_exists('enquiries')) {
+    $enqWhere = ["LOWER(COALESCE(status,'new')) IN ('new','pending')"];
+    $enqParams = [];
+    if (function_exists('column_exists') && column_exists('enquiries', 'academic_year') && function_exists('ay_selected')) {
+        $enqWhere[] = 'academic_year = :panel_ay';
+        $enqParams[':panel_ay'] = ay_selected();
+    } elseif (function_exists('ay_apply_date_filter')) {
+        ay_apply_date_filter($enqWhere, $enqParams, 'created_at');
+    }
+    $enqSql = 'WHERE ' . implode(' AND ', $enqWhere);
     $rows = safe_db_get_all(
         "SELECT id, name, phone, status, created_at
          FROM enquiries
-         WHERE LOWER(COALESCE(status,'new')) IN ('new','pending')
+         {$enqSql}
          ORDER BY created_at DESC
-         LIMIT 80"
+         LIMIT 80",
+        $enqParams
     ) ?: [];
     foreach ($rows as $r) {
         $groups['enquiry']['items'][] = [
@@ -155,7 +166,7 @@ require_once __DIR__ . '/../header.php';
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
   <div>
     <h1 class="h4 mb-1">Alerts</h1>
-    <p class="text-muted mb-0">Work still open this academic year. Fix the form and it leaves this list. Notes for yourself are on <a href="<?php echo e($todoUrl); ?>">To-do</a>.</p>
+    <p class="text-muted mb-0">Only <strong><?php echo e($ayLabel); ?></strong>. Fix the form and it leaves this list. Notes for yourself are on <a href="<?php echo e($todoUrl); ?>">To-do</a>.</p>
   </div>
   <a class="btn btn-success" href="<?php echo e($admUrl); ?>">New admission</a>
 </div>
