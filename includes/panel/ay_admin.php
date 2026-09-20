@@ -24,25 +24,29 @@ function ay_decode_json(mixed $val): array
 
 function ay_school_settings(): array
 {
-    static $cache = null;
-    if ($cache !== null) {
-        return $cache;
+    if (array_key_exists('_ay_school_settings', $GLOBALS) && is_array($GLOBALS['_ay_school_settings'])) {
+        return $GLOBALS['_ay_school_settings'];
     }
     if (!function_exists('table_exists') || !table_exists('schools')) {
-        return $cache = [];
+        return $GLOBALS['_ay_school_settings'] = [];
     }
     try {
         $row = safe_db_get_one('SELECT settings FROM schools WHERE id = :id LIMIT 1', [':id' => AY_SCHOOL_ID]);
-        $cache = ay_decode_json($row['settings'] ?? null);
+        $GLOBALS['_ay_school_settings'] = ay_decode_json($row['settings'] ?? null);
     } catch (Throwable $e) {
-        $cache = [];
+        $GLOBALS['_ay_school_settings'] = [];
     }
 
-    return $cache;
+    return $GLOBALS['_ay_school_settings'];
+}
+
+function ay_settings_cache_clear(): void
+{
+    unset($GLOBALS['_ay_school_settings'], $GLOBALS['_ay_start_month']);
 }
 
 /**
- * @return array{locked_years: list<string>, role_defaults: array<string,string>, promotion_map: array<string,int|null>, graduate_class_ids: list<int>, rollover_log: list<array<string,mixed>>}
+ * @return array{locked_years: list<string>, role_defaults: array<string,string>, promotion_map: array<string,int|null>, graduate_class_ids: list<int>, rollover_log: list<array<string,mixed>>, start_month: int}
  */
 function ay_admin_defaults(): array
 {
@@ -57,6 +61,7 @@ function ay_admin_defaults(): array
         'promotion_map' => [],
         'graduate_class_ids' => [],
         'rollover_log' => [],
+        'start_month' => 6,
     ];
 }
 
@@ -80,6 +85,8 @@ function ay_admin_config(): array
     if (!is_array($cfg['rollover_log'])) {
         $cfg['rollover_log'] = [];
     }
+    $sm = (int) ($cfg['start_month'] ?? 6);
+    $cfg['start_month'] = ($sm >= 1 && $sm <= 12) ? $sm : 6;
 
     return $cfg;
 }
@@ -98,10 +105,20 @@ function ay_admin_save(array $partial): bool
         return false;
     }
 
-    return (bool) safe_db_run('UPDATE schools SET settings = :s, updated_at = NOW() WHERE id = :id', [
+    $ok = (bool) safe_db_run('UPDATE schools SET settings = :s, updated_at = NOW() WHERE id = :id', [
         ':s' => $json,
         ':id' => AY_SCHOOL_ID,
     ]);
+    if ($ok) {
+        ay_settings_cache_clear();
+        $GLOBALS['_ay_school_settings'] = $school;
+        if (isset($merged['start_month'])) {
+            $sm = (int) $merged['start_month'];
+            $GLOBALS['_ay_start_month'] = ($sm >= 1 && $sm <= 12) ? $sm : 6;
+        }
+    }
+
+    return $ok;
 }
 
 function ay_next_label(string $ay): ?string

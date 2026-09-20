@@ -31,7 +31,7 @@ $hasAyCol = ay_students_have_column();
 $feesAyJoin = $hasAyCol ? ' INNER JOIN students ay_s ON ay_s.id = fr.student_id AND ay_s.academic_year = :panel_ay ' : '';
 $prevFeesAyJoin = ($hasAyCol && $prevAy) ? ' INNER JOIN students ay_s ON ay_s.id = fr.student_id AND ay_s.academic_year = :prev_ay ' : '';
 $lastUpdated = date('d-m-Y h:i A');
-$monthLabels = ['Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May'];
+$monthLabels = function_exists('ay_month_short_labels') ? ay_month_short_labels() : ['Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May'];
 
 function dash_pct_change(float $cur, float $prev): array
 {
@@ -51,7 +51,7 @@ function dash_url(string $view): string
     return '?view=' . urlencode($view);
 }
 
-/** Map YYYY-MM rows to 12-month A.Y. index (Jun=0 … May=11). */
+/** Map YYYY-MM rows to 12-month A.Y. index (start month = 0). */
 function dash_align_ay_months(array $rows, string $amountKey = 'amt'): array
 {
     $data = array_fill(0, 12, 0.0);
@@ -61,7 +61,7 @@ function dash_align_ay_months(array $rows, string $amountKey = 'amt'): array
             continue;
         }
         $mo = (int) $m[2];
-        $idx = $mo >= 6 ? $mo - 6 : $mo + 6;
+        $idx = function_exists('ay_calendar_month_index') ? ay_calendar_month_index($mo) : ($mo >= 6 ? $mo - 6 : $mo + 6);
         if ($idx >= 0 && $idx < 12) {
             $data[$idx] = round((float) ($r[$amountKey] ?? 0), 2);
         }
@@ -73,7 +73,7 @@ function dash_align_ay_months(array $rows, string $amountKey = 'amt'): array
 function dash_spark_slice(array $data): array
 {
     $curMonth = (int) date('n');
-    $idx = $curMonth >= 6 ? $curMonth - 6 : $curMonth + 6;
+    $idx = function_exists('ay_calendar_month_index') ? ay_calendar_month_index($curMonth) : ($curMonth >= 6 ? $curMonth - 6 : $curMonth + 6);
 
     return array_slice($data, 0, min($idx + 1, 12));
 }

@@ -1,32 +1,92 @@
 <?php
 /**
- * Academic Year (June → June) — global panel filter.
- * Selected year is stored in session and applied across dashboard & lists.
+ * Academic Year — global panel filter.
+ * Start month is set by the owner (default June). Selected year is stored in session.
  */
 declare(strict_types=1);
 
 const AY_SESSION_KEY = 'panel_academic_year';
 
 /**
- * Current academic year label (June–June). e.g. 2025-26
+ * 1 = January … 12 = December. Default June.
+ */
+function ay_start_month(): int
+{
+    if (isset($GLOBALS['_ay_start_month']) && is_int($GLOBALS['_ay_start_month'])) {
+        return $GLOBALS['_ay_start_month'];
+    }
+    $m = 6;
+    if (function_exists('ay_admin_config')) {
+        $m = (int) (ay_admin_config()['start_month'] ?? 6);
+    }
+    if ($m < 1 || $m > 12) {
+        $m = 6;
+    }
+    $GLOBALS['_ay_start_month'] = $m;
+
+    return $m;
+}
+
+function ay_month_name(int $month): string
+{
+    $names = [1 => 'January', 2 => 'February', 3 => 'March', 4 => 'April', 5 => 'May', 6 => 'June', 7 => 'July', 8 => 'August', 9 => 'September', 10 => 'October', 11 => 'November', 12 => 'December'];
+
+    return $names[$month] ?? 'June';
+}
+
+function ay_month_short(int $month): string
+{
+    return substr(ay_month_name($month), 0, 3);
+}
+
+/** Last month of the school year (the month before start). */
+function ay_end_month(): int
+{
+    $sm = ay_start_month();
+
+    return $sm === 1 ? 12 : $sm - 1;
+}
+
+/** Jun, Jul, … in school-year order. */
+function ay_month_short_labels(): array
+{
+    $sm = ay_start_month();
+    $out = [];
+    for ($i = 0; $i < 12; $i++) {
+        $out[] = ay_month_short((($sm - 1 + $i) % 12) + 1);
+    }
+
+    return $out;
+}
+
+function ay_calendar_month_index(int $month): int
+{
+    if ($month < 1 || $month > 12) {
+        $month = 1;
+    }
+
+    return ($month - ay_start_month() + 12) % 12;
+}
+
+function ay_period_phrase(): string
+{
+    return ay_month_name(ay_start_month()) . ' to ' . ay_month_name(ay_end_month());
+}
+
+/**
+ * Current academic year label. e.g. 2025-26
  */
 function ay_current(): string
 {
     $y = (int) date('Y');
     $m = (int) date('n');
-    if ($m >= 6) {
-        $start = $y;
-        $end = $y + 1;
-    } else {
-        $start = $y - 1;
-        $end = $y;
-    }
+    $start = $m >= ay_start_month() ? $y : $y - 1;
 
-    return sprintf('%04d-%02d', $start, $end % 100);
+    return sprintf('%04d-%02d', $start, ($start + 1) % 100);
 }
 
 /**
- * Parse label to June–June date range.
+ * Parse label to date range using the school's start month.
  *
  * @return array{start: string, end: string, label: string}|null
  */
@@ -39,13 +99,15 @@ function ay_to_range(?string $ay): ?array
         return null;
     }
     $startYear = (int) $m[1];
-    $next = $m[2];
-    $endYear = strlen($next) === 2 ? ($startYear + 1) : (int) $next;
+    $sm = ay_start_month();
+    $em = ay_end_month();
+    $endYear = $sm === 1 ? $startYear : $startYear + 1;
+    $endDay = (int) date('t', strtotime(sprintf('%04d-%02d-01', $endYear, $em)));
 
     return [
-        'start' => sprintf('%04d-06-01', $startYear),
-        'end' => sprintf('%04d-05-31', $endYear),
-        'label' => sprintf('%04d-%02d', $startYear, $endYear % 100),
+        'start' => sprintf('%04d-%02d-01', $startYear, $sm),
+        'end' => sprintf('%04d-%02d-%02d', $endYear, $em, $endDay),
+        'label' => sprintf('%04d-%02d', $startYear, ($startYear + 1) % 100),
     ];
 }
 
@@ -135,9 +197,14 @@ function ay_range(): array
         return $range;
     }
 
-    return ay_to_range(ay_current()) ?? [
-        'start' => date('Y') . '-06-01',
-        'end' => ((int) date('Y') + 1) . '-05-31',
+    $fallback = ay_to_range(ay_current());
+    if ($fallback !== null) {
+        return $fallback;
+    }
+
+    return [
+        'start' => date('Y') . '-01-01',
+        'end' => date('Y') . '-12-31',
         'label' => ay_current(),
     ];
 }
@@ -282,7 +349,7 @@ function ay_display_long(?string $ay = null): string
     $startLabel = date('M Y', strtotime($range['start']));
     $endLabel = date('M Y', strtotime($range['end']));
 
-    return 'Academic Year ' . $ay . ' (Jun ' . substr($range['start'], 0, 4) . ' – May ' . substr($range['end'], 0, 4) . ')';
+    return 'Academic Year ' . $ay . ' (' . $startLabel . ' – ' . $endLabel . ')';
 }
 
 /**

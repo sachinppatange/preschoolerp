@@ -76,7 +76,7 @@ require_once __DIR__ . '/../header.php';
     <p class="text-muted mb-0">
       Children and fees for <strong><?php echo e($ayLabel); ?></strong>
       <?php if (is_array($range)): ?>
-        <span>(June <?php echo e(substr((string) $range['start'], 0, 4)); ?> – May <?php echo e(substr((string) $range['end'], 0, 4)); ?>)</span>
+        <span>(<?php echo e(date('M Y', strtotime((string) $range['start']))); ?> – <?php echo e(date('M Y', strtotime((string) $range['end']))); ?>)</span>
       <?php endif; ?>
       . Print this if you need a copy for the file.
     </p>

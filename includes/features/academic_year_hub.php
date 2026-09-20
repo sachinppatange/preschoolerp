@@ -40,6 +40,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $action = (string) ($_POST['action'] ?? '');
 
+        if ($action === 'save_start_month') {
+            $sm = (int) ($_POST['start_month'] ?? 6);
+            if ($sm < 1 || $sm > 12) {
+                $errors[] = 'Pick a month.';
+            } elseif (ay_admin_save(['start_month' => $sm])) {
+                $cfgAy = ay_admin_config();
+                $range = ay_to_range(ay_current());
+                $span = $range
+                    ? (date('M Y', strtotime($range['start'])) . ' – ' . date('M Y', strtotime($range['end'])))
+                    : ay_period_phrase();
+                $messages[] = 'Saved. School year starts in ' . ay_month_name($sm) . '. This year (' . ay_current() . ') is ' . $span . '.';
+            } else {
+                $errors[] = 'Could not save. Try again.';
+            }
+        }
+
         if ($action === 'save_settings') {
             $locked = [];
             foreach (ay_list() as $y) {
@@ -142,10 +158,38 @@ $nextLabel = static function (int $cid) use ($promoMap, $classNameById): string 
 };
 ?>
 
-<p class="text-muted mb-4">School year is <strong>June to May</strong>. Use this page only when the year is over and children move up. New children still join from Admission — not from here.</p>
+<p class="text-muted mb-4">School year is <strong><?php echo e(ay_period_phrase()); ?></strong>. Change the start month below if your school is different. Use the rest of this page only when the year is over and children move up.</p>
 
 <?php foreach ($messages as $m): ?><div class="alert alert-success"><?php echo e($m); ?></div><?php endforeach; ?>
 <?php foreach ($errors as $er): ?><div class="alert alert-danger"><?php echo e($er); ?></div><?php endforeach; ?>
+
+<div class="card metric-card mb-4">
+  <div class="card-body">
+    <h2 class="h5 fw-bold mb-1">When does the school year start?</h2>
+    <p class="small text-muted mb-3">Most preschools start in June. Pick another month only if your school does. This also sets the year shown at the top of the app (example: 2026-27).</p>
+    <form method="post" class="row g-2 align-items-end">
+      <input type="hidden" name="csrf" value="<?php echo e($csrf); ?>">
+      <input type="hidden" name="action" value="save_start_month">
+      <div class="col-sm-6 col-md-4">
+        <label class="form-label" for="ayStartMonth">Starts in</label>
+        <select name="start_month" id="ayStartMonth" class="form-select">
+          <?php for ($mi = 1; $mi <= 12; $mi++): ?>
+            <option value="<?php echo $mi; ?>"<?php echo (int) ($cfgAy['start_month'] ?? 6) === $mi ? ' selected' : ''; ?>><?php echo e(ay_month_name($mi)); ?></option>
+          <?php endfor; ?>
+        </select>
+      </div>
+      <div class="col-sm-6 col-md-3">
+        <button type="submit" class="btn btn-primary">Save month</button>
+      </div>
+    </form>
+    <?php
+      $nowRange = ay_to_range(ay_current());
+      if ($nowRange):
+    ?>
+      <p class="small text-muted mt-3 mb-0">Today that means <strong><?php echo e(ay_display_long(ay_current())); ?></strong>.</p>
+    <?php endif; ?>
+  </div>
+</div>
 
 <div class="card metric-card mb-4">
   <div class="card-body">

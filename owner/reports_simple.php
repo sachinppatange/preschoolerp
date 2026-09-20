@@ -110,7 +110,7 @@ require_once __DIR__ . '/../includes/header.php';
       </a>
       <a class="list-group-item list-group-item-action py-3" href="<?php echo e($ownerBase); ?>/year_end_report.php">
         <div class="fw-semibold">This school year</div>
-        <div class="small text-muted">June–May children and fees (print if needed)</div>
+        <div class="small text-muted"><?php echo e(function_exists('ay_period_phrase') ? ay_period_phrase() : 'School year'); ?> children and fees (print if needed)</div>
       </a>
       <a class="list-group-item list-group-item-action py-3" href="<?php echo e($ownerBase); ?>/month_reports.php">
         <div class="fw-semibold">Month reports to parents</div>

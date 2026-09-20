@@ -355,7 +355,7 @@ function parent_link_student(\PDO $pdo, int $parentId, int $studentId, string $r
     }
 }
 
-/** Academic year used to decide parent portal login (June–May, based on today). */
+/** Academic year used to decide parent portal login (based on today). */
 function parent_login_academic_year(): string
 {
     if (function_exists('ay_current')) {
